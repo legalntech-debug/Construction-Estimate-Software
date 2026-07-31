@@ -24,6 +24,7 @@
     "razorpay": "^2.9.8",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-to-print": "^3.3.0",
     "recharts": "^3.9.2",
     "tesseract.js": "^7.0.0"
   },

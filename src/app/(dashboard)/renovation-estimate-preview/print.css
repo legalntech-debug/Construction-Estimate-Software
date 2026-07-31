@@ -1,0 +1,110 @@
+/* --- 1. Global Page Settings --- */
+@page {
+  size: A4 portrait;
+  margin: 20mm;
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages);
+    font-size: 10pt;
+    color: #333;
+  }
+}
+
+/* --- 2. Screen & General Styles --- */
+.no-print {
+  display: block !important;
+}
+
+/* --- 2. Print Styles (Optimized & Clean) --- */
+@media print {
+  /* HIDE Sidebar, Navigation, Header, Footers and Buttons */
+  nav, aside, header, footer, button, .no-print, 
+  div[class*="sidebar"], 
+  div[class*="dashboard"], 
+  div[class*="navigation"] {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    visibility: hidden !important;
+  }
+
+  /* Reset layout and background to clean white, remove side scroll */
+  html, body, #__next, main {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    width: 100% !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Make sure print-area takes full clean width without shadow */
+  .print-page, .print-area {
+    display: block !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Tables styling for compact 1-page layout */
+  /* Table aur rows ki padding ko compact karein taaki sign part niche na bhage */
+  table {
+    width: 100% !important;
+    font-size: 8.5px !important;
+    border-collapse: collapse !important;
+  }
+
+  th, td {
+    padding: 2px 4px !important; /* Padding kam ki taaki height bache */
+  }
+
+  th, td {
+    padding: 3px 5px !important;
+    border: 1px solid #000 !important;
+  }
+
+  /* DRAFT Watermark Force Print */
+  .draft-watermark {
+    display: block !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(-45deg) !important;
+    color: rgba(220, 38, 38, 0.08) !important;
+    z-index: 9999 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* --- 3. Draft Watermark Styling (Default Screen State) --- */
+.draft-watermark {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) rotate(-45deg) !important;
+  font-size: 6rem !important;
+  font-weight: 900 !important;
+  color: rgba(220, 38, 38, 0.08) !important;
+  pointer-events: none !important;
+  white-space: nowrap !important;
+  z-index: 9999 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5rem !important;
+}
+
+@media print {
+  /* Isse table ka header agle pages par repeat nahi hoga */
+  thead {
+    display: table-row-group !important;
+  }
+}

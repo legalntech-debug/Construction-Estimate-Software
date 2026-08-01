@@ -290,7 +290,7 @@ const { error: profileError } = await supabase.from('profiles').insert([
       className="mt-1.5 h-4 w-4 shrink-0"
     />
     <label htmlFor="terms" className="text-[11px] text-slate-800 font-medium leading-relaxed cursor-pointer">
-      I agree to the <b>DRC Consultant Terms of Service</b>. I acknowledge that all software outputs are for estimation purposes only and require professional verification.
+      I agree to the <b>DRC Consultant Terms of Service & Strict No-Refund Policy</b>. I verify all details before payment and acknowledge that all software estimates are <b>strictly non-refundable</b>, meant for preliminary use only, carry <b>zero financial or professional liability</b>, and require independent professional verification.
     </label>
   </div>
 </div>

@@ -7,6 +7,7 @@ import UserStatusTracker from "../components/UserStatusTracker";
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ full_name: string; mobile: string; user_code: string } | null>(null);
 
   useEffect(() => {
     const checkUser = async () => {
@@ -14,40 +15,47 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (user) {
         setUserId(user.id);
         
-        // [START NEW FEATURE] - Admin Role Check
-        // Yahan hum check kar rahe hain ki user admin hai ya nahi
-        const { data: roleData } = await supabase
-          .from('profiles') // Ya aapki role wali table
-          .select('role')
+        // Profiles table se role, full_name, mobile, aur user_code fetch kar rahe hain
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('role, full_name, mobile, user_code')
           .eq('id', user.id)
           .single();
           
-        if (roleData?.role === 'admin') {
-          setIsAdmin(true);
+        if (profileData) {
+          if (profileData.role === 'admin') {
+            setIsAdmin(true);
+          }
+          setUserProfile(profileData);
         }
-        // [END NEW FEATURE]
       }
     };
     checkUser();
   }, []); 
 
-  const handleSupportClick = () => {
-    const SUPPORT_NUMBER = "+917987561396";
-    const message = encodeURIComponent(
-      "Hello LNT Support,\n\nI am facing an issue with my portal account. Please assist."
-    );
-    window.open(`https://wa.me/${SUPPORT_NUMBER}?text=${message}`, '_blank');
-  };
+  // handleSupportClick function aapka aisa hi rahega
+const handleSupportClick = () => {
+  const SUPPORT_NUMBER = "917987561396"; // Admin ka number jis par message aayega
+  
+  const name = userProfile?.full_name?.trim() || "User";
+  const mobile = userProfile?.mobile?.trim() || "N/A";
+  const userCode = userProfile?.user_code?.trim() || userId?.slice(0, 8) || "N/A";
+
+  const message = encodeURIComponent(
+    `Hello LNT Support,\n\nI am facing an issue with my portal account.\n\n*Name:* ${name}\n*Registered Mobile:* ${mobile}\n*User Code:* ${userCode}\n\nPlease assist.`
+  );
+  
+  // Yeh Click-to-Chat API ka hi URL hai
+  window.open(`https://wa.me/${SUPPORT_NUMBER}?text=${message}`, '_blank');
+};
 
   return (
     <div className="flex h-screen relative">
       {/* Tracker activate ho jayega jaise hi userId milegi */}
-      {/* Admin ke liye hum sabhi cases track kar sakte hain ya logic badal sakte hain */}
       {userId && !isAdmin && <UserStatusTracker userId={userId} />}
 
       <Sidebar />
       <main className="flex-1 overflow-y-auto bg-slate-100 p-6">
-        {/* Admin context pass karna ho toh yahan kar sakte hain */}
         {children}
       </main>
       

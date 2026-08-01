@@ -354,29 +354,41 @@ const { error: profileError } = await supabase.from('profiles').insert([
 
         </div>
 
-        {/* RIGHT PANEL */}
-        <div className="hidden lg:flex flex-1 flex-col justify-center p-6">
-          <h2 className="text-yellow-400 font-black text-base mb-5 text-center tracking-widest">
-            SYSTEM STATUS
+        {/* RIGHT PANEL - OFFER & LAUNCHING DETAILS */}
+        <div className="hidden lg:flex flex-1 flex-col justify-center p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl backdrop-blur-sm">
+          <h2 className="text-yellow-400 font-black text-base mb-4 text-center tracking-widest uppercase">
+            ⚡ Special Launching Offer ⚡
           </h2>
 
-          <div className="space-y-4 leading-7 font-medium">
-            {[
-              "Auth Engine Active",
-              "OTP System Ready",
-              "Supabase Connected",
-              "Profile DB Online",
-            ].map((item, i) => (
-              <div key={i} className="flex justify-between items-center">
-                <span>✔ {item}</span>
-                <div className="w-20 h-1.5 bg-slate-700 rounded overflow-hidden">
-                  <div
-                    className="h-full bg-green-400 rounded"
-                    style={{ width: `${60 + i * 10}%` }}
-                  />
-                </div>
+          <div className="space-y-4 text-sm font-semibold">
+            {/* OFFER ITEM 1 */}
+            <div className="bg-white/10 p-3 rounded-lg border border-yellow-400/30 flex flex-col gap-1">
+              <div className="flex justify-between items-center text-yellow-300 font-black">
+                <span>🚀 ESTIMATE ENGINE OFFER</span>
+                <span className="bg-yellow-400 text-slate-950 px-2 py-0.5 rounded text-xs font-black">₹21 ONLY</span>
               </div>
-            ))}
+              <p className="text-xs text-slate-200 font-normal">Get instant construction & technical estimates at an unbeatable launching price of just ₹21!</p>
+            </div>
+
+            {/* OFFER ITEM 2 */}
+            <div className="bg-white/10 p-3 rounded-lg border border-yellow-400/30 flex flex-col gap-1">
+              <div className="flex justify-between items-center text-green-400 font-black">
+                <span>📄 FREE DRAFTING SERVICES</span>
+                <span className="bg-green-500 text-slate-950 px-2 py-0.5 rounded text-xs font-black">FREE</span>
+              </div>
+              <p className="text-xs text-slate-200 font-normal">Complimentary document drafting included with your selected plans during the launch period.</p>
+            </div>
+
+            {/* UPCOMING SERVICES */}
+            <div className="pt-2 border-t border-white/10">
+              <p className="text-[11px] font-black text-yellow-300 uppercase tracking-widest mb-2">Upcoming Services Pipeline:</p>
+              <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 font-medium">
+                <div className="bg-black/20 p-2 rounded border border-white/5">📍 Location Plan</div>
+                <div className="bg-black/20 p-2 rounded border border-white/5">📊 Work Plan</div>
+                <div className="bg-black/20 p-2 rounded border border-white/5">🏗️ Extension Est.</div>
+                <div className="bg-black/20 p-2 rounded border border-white/5">🔨 Renovation Est.</div>
+              </div>
+            </div>
           </div>
         </div>
 

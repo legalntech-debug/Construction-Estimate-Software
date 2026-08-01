@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-export default function ClientRegistration() {
+function ClientRegistrationContent() {
   const searchParams = useSearchParams();
   const [clientCategory, setClientCategory] = useState('');
   const [clientName, setClientName] = useState('');
@@ -428,5 +428,13 @@ const handleSaveClient = async () => {
 
       </div>
     </div>
+  );
+}
+
+export default function ClientRegistration() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center text-blue-900 font-semibold">Loading...</div>}>
+      <ClientRegistrationContent />
+    </Suspense>
   );
 }

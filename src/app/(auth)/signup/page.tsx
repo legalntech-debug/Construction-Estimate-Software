@@ -71,8 +71,11 @@ export default function SignupPage() {
   const handleChange = (e: any) => {
     const { name, value } = e.target;
     
-    if (name === 'userType') {
-      // FIX: Agar user INDIVIDUAL chunta hai, toh PREMIUM PLAN block ho jaye aur BASIC automatic select ho jaye
+    if (name === 'mobile') {
+      // Allow only numbers and restrict to a maximum of 10 digits
+      const numericValue = value.replace(/\D/g, '').slice(0, 10);
+      setForm({ ...form, mobile: numericValue });
+    } else if (name === 'userType') {
       if (value === 'INDIVIDUAL') {
         setForm({ ...form, userType: value, planType: 'BASIC ENGINE PLAN' });
       } else {
@@ -90,9 +93,16 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
 
+    // STRICT MOBILE VALIDATION: Check if the mobile number is exactly 10 digits
+    if (!/^\d{10}$/.test(form.mobile)) {
+      setError("Please enter a valid 10-digit mobile number!");
+      setLoading(false);
+      return;
+    }
+
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 1. Supabase mein OTP save karein
+    // 1. Save OTP in Supabase
     const { error: otpError } = await supabase.from('otps').insert([{ email: form.email, otp_code: generatedOtp }]);
     
     if (otpError) {
@@ -101,33 +111,33 @@ export default function SignupPage() {
       return;
     }
 
-    // 2. EmailJS se email bhejein
+    // 2. Send email via EmailJS
     emailjs.send(
-      'service_g8hpevj',         // Service ID
-      'template_4sqme4r',        // Template ID
+      'service_g8hpevj',        // Service ID
+      'template_4sqme4r',       // Template ID
       {
-        to_email: form.email,    // User ka email
-        otp_code: generatedOtp,  // OTP jo bhejna hai
+        to_email: form.email,    // User email
+        otp_code: generatedOtp,  // OTP to send
       }, 
       'grxZ-VWExc0FNxr5n'        // Public Key
     )
     .then(() => {
-      alert("OTP aapki email par bhej diya gaya hai!");
+      alert("OTP has been sent to your email!");
       setStep(2);
       setLoading(false);
     })
     .catch((err) => {
-      setError("Email nahi ja paya!");
+      setError("Failed to send email!");
       setLoading(false);
     });
   };
-
+  
   const verifyOtp = async (e: any) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
-    // 1. Database se check
+    // 1. Verify from Database
     const { data, error: dbError } = await supabase
       .from('otps')
       .select('otp_code')
@@ -137,7 +147,7 @@ export default function SignupPage() {
       .single();
 
     if (dbError || data.otp_code !== form.otp) {
-      setError('Galat OTP! Phir se try karein.');
+      setError('Invalid OTP! Please try again.');
       setLoading(false);
       return;
     }
@@ -163,25 +173,23 @@ export default function SignupPage() {
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
 
-    // Find this part inside verifyOtp function in your code
-// 3. Profiles Table mein Data Insert
-const { error: profileError } = await supabase.from('profiles').insert([
-  {
-    id: user.id,
-    full_name: form.fullName,
-    mobile: form.mobile,
-    email: form.email.toLowerCase(),
-    user_type: form.userType,
-    plan_type: form.planType,
-    firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
-    city: form.city,
-    state: form.state,
-    user_code: generatedUserId,
-    // ADD THESE TWO LINES:
-    terms_accepted: true,
-    terms_accepted_at: new Date().toISOString(),
-  },
-]);
+    // 3. Insert Data into Profiles Table
+    const { error: profileError } = await supabase.from('profiles').insert([
+      {
+        id: user.id,
+        full_name: form.fullName,
+        mobile: form.mobile,
+        email: form.email.toLowerCase(),
+        user_type: form.userType,
+        plan_type: form.planType,
+        firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
+        city: form.city,
+        state: form.state,
+        user_code: generatedUserId,
+        terms_accepted: true,
+        terms_accepted_at: new Date().toISOString(),
+      },
+    ]);
 
     if (profileError) {
       setError(profileError.message);

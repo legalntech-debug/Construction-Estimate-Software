@@ -23,25 +23,27 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Securely fetch user from Supabase Auth server
   const { data: { user } } = await supabase.auth.getUser();
-
   const path = request.nextUrl.pathname;
 
-  // 1. Protect Admin Dashboard (Requires login + admin role)
+  // 1. Agar koi root URL (/) par aaye, toh seedha /verify-estimate par bhej dein
+  if (path === '/') {
+    return NextResponse.redirect(new URL('/verify-estimate', request.url));
+  }
+
+  // 2. Protect Admin Dashboard (Requires login + admin role)
   if (path.startsWith('/admin-dashboard')) {
     if (!user) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
     
-    // Check role from database
     const { data: role } = await supabase.rpc('get_user_role', { target_user_id: user.id });
     if (role?.toLowerCase() !== 'admin') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   }
 
-  // 2. Protect General User Dashboard (Requires login)
+  // 3. Protect General User Dashboard (Requires login)
   if (path.startsWith('/dashboard') && !user) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
@@ -50,5 +52,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/admin-dashboard/:path*'],
+  matcher: [
+    '/',
+    '/dashboard/:path*',
+    '/admin-dashboard/:path*',
+  ],
 };

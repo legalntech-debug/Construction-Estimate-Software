@@ -1511,15 +1511,11 @@ return (
               <>
                 <div className="flex flex-row items-center justify-between gap-4 p-2">
                   <div className="flex flex-col items-center">
-                    <QRCodeSVG 
-                      value={
-                        process.env.NODE_ENV === 'development' 
-                          ? `http://192.168.1.5:3000/verify-estimate?ref=${estimate?.ref_no}` 
-                          : `https://lnt-ai.com/verify-estimate?ref=${estimate?.ref_no}`
-                      } 
-                      size={60} 
-                      level="H" 
-                    />
+<QRCodeSVG 
+  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software-5wi1i5qjz-divisha.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
+  size={60} 
+  level="H" 
+/>
                     <p className="text-[8px] mt-1 text-gray-500 font-bold text-center">SCAN TO VERIFY</p>
                   </div>
                   <div className="text-[10px] text-blue-900 border border-blue-200 bg-blue-50 p-2 rounded text-left w-full shadow-sm">

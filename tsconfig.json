@@ -1,11 +1,9 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "baseUrl": ".",
-    "ignoreDeprecations": "6.0", // <-- Yeh line add kar di hai depreciation warning rokne ke liye
     "paths": {
       "@/*": [
-        "src/*"
+        "./src/*"
       ]
     },
     "lib": [

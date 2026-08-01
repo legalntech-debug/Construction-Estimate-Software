@@ -1657,14 +1657,10 @@ return (
             {/* QR Code Left Mein */}
             <div className="flex flex-col items-center">
               <QRCodeSVG 
-                value={
-                  process.env.NODE_ENV === 'development' 
-                    ? `http://192.168.1.5:3000/verify-estimate?ref=${estimate?.ref_no}` 
-                    : `https://lnt-ai.com/verify-estimate?ref=${estimate?.ref_no}`
-                } 
-                size={60} 
-                level="H" 
-              />
+  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software-5wi1i5qjz-divisha.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
+  size={60} 
+  level="H" 
+/>
               <p className="text-[8px] mt-1 text-gray-500 font-bold text-center">SCAN TO VERIFY</p>
             </div>
 

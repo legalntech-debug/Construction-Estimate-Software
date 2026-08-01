@@ -174,54 +174,64 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* RIGHT PANEL - SPECIAL OFFERS & UPCOMING SERVICES */}
-        <div className="hidden lg:flex flex-1 flex-col justify-center p-8 border-l border-white/10 bg-yellow-500/5 backdrop-blur-sm">
+       {/* RIGHT PANEL - SPECIAL OFFERS & UPCOMING SERVICES (SCROLLING ENABLED) */}
+        <div className="flex-1 flex flex-col px-12 pb-12 border-l border-white/10 bg-yellow-500/5 backdrop-blur-sm">
+          <div className="mb-6 pt-4">
+            <div className="inline-flex items-center gap-2 px-4 py-2 border border-yellow-400/30 rounded-lg text-yellow-300 text-xs font-bold uppercase tracking-widest bg-slate-950/50 backdrop-blur-md w-full justify-center">
+              <span>⚡</span> SPECIAL LAUNCHING OFFER <span>⚡</span>
+            </div>
+          </div>
+
           <h2 className="text-yellow-400 font-black text-sm mb-6 tracking-widest text-center uppercase animate-pulse">
-            ⚡ Special Launching Offer ⚡
+            OFFERS & PIPELINE
           </h2>
 
-          <div className="flex flex-col gap-4">
-            {/* OFFER CARD 1 */}
-            <div className="bg-white/10 p-4 rounded-xl border border-yellow-400/30 shadow-lg flex flex-col gap-1.5">
-              <div className="flex justify-between items-center text-yellow-300 font-black text-sm">
-                <span>🚀 ESTIMATE ENGINE OFFER</span>
-                <span className="bg-yellow-400 text-slate-950 px-2.5 py-0.5 rounded text-xs font-black shadow">₹21 ONLY</span>
+          <div className="relative flex-1 h-[420px] overflow-hidden rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="absolute w-[calc(100%-2rem)] animate-[scrollUp_20s_linear_infinite] space-y-4">
+              
+              {/* OFFER CARD 1 */}
+              <div className="bg-white/10 p-4 rounded-xl border border-yellow-400/30 shadow-lg flex flex-col gap-1.5">
+                <div className="flex justify-between items-center text-yellow-300 font-black text-sm">
+                  <span>🚀 ESTIMATE ENGINE OFFER</span>
+                  <span className="bg-yellow-400 text-slate-950 px-2.5 py-0.5 rounded text-xs font-black shadow">₹21 ONLY</span>
+                </div>
+                <p className="text-xs text-slate-200 font-normal leading-relaxed">
+                  Get instant construction & technical estimates at an unbeatable launching price of just ₹21!
+                </p>
               </div>
-              <p className="text-xs text-slate-200 font-normal leading-relaxed">
-                Get instant construction & technical estimates at an unbeatable launching price of just ₹21!
-              </p>
-            </div>
 
-            {/* OFFER CARD 2 */}
-            <div className="bg-white/10 p-4 rounded-xl border border-green-400/30 shadow-lg flex flex-col gap-1.5">
-              <div className="flex justify-between items-center text-green-400 font-black text-sm">
-                <span>📄 FREE DRAFTING SERVICES</span>
-                <span className="bg-green-500 text-slate-950 px-2.5 py-0.5 rounded text-xs font-black shadow">FREE</span>
+              {/* OFFER CARD 2 */}
+              <div className="bg-white/10 p-4 rounded-xl border border-green-400/30 shadow-lg flex flex-col gap-1.5">
+                <div className="flex justify-between items-center text-green-400 font-black text-sm">
+                  <span>📄 FREE DRAFTING SERVICES</span>
+                  <span className="bg-green-500 text-slate-950 px-2.5 py-0.5 rounded text-xs font-black shadow">FREE</span>
+                </div>
+                <p className="text-xs text-slate-200 font-normal leading-relaxed">
+                  Complimentary document drafting included with your selected plans during the launch period.
+                </p>
               </div>
-              <p className="text-xs text-slate-200 font-normal leading-relaxed">
-                Complimentary document drafting included with your selected plans during the launch period.
-              </p>
-            </div>
 
-            {/* UPCOMING SERVICES PIPELINE */}
-            <div className="mt-2 p-4 rounded-xl border border-white/10 bg-black/20">
-              <p className="text-[11px] font-black text-yellow-300 uppercase tracking-widest mb-3 text-center">
-                Upcoming Services Pipeline:
-              </p>
-              <div className="grid grid-cols-2 gap-2 text-xs text-slate-200 font-semibold">
-                <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
-                  <span>📍</span> Location Plan
-                </div>
-                <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
-                  <span>📊</span> Work Plan
-                </div>
-                <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
-                  <span>🏗️</span> Extension Est.
-                </div>
-                <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
-                  <span>🔨</span> Renovation Est.
+              {/* UPCOMING SERVICES PIPELINE */}
+              <div className="p-4 rounded-xl border border-white/10 bg-black/20 space-y-3">
+                <p className="text-[11px] font-black text-yellow-300 uppercase tracking-widest text-center">
+                  Upcoming Services Pipeline:
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-xs text-slate-200 font-semibold">
+                  <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
+                    <span>📍</span> Location Plan
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
+                    <span>📊</span> Work Plan
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
+                    <span>🏗️</span> Extension Est.
+                  </div>
+                  <div className="bg-white/5 p-2.5 rounded-lg border border-white/10 flex items-center gap-2">
+                    <span>🔨</span> Renovation Est.
+                  </div>
                 </div>
               </div>
+
             </div>
           </div>
         </div>

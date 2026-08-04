@@ -481,7 +481,7 @@ if (shouldGenerateNewRef && !estimate?.id) {
   // Yahan activeRefNo pass hoga taaki naya U005 na bane, purana wala hi rahe
   p_ref_no: activeRefNo,
   
-  p_status: 'finalized',
+  p_status: 'Pending',
   p_payment_status: paymentData?.p_payment_status || estimate?.payment_status || 'paid',
   p_order_id: paymentData?.p_order_id || estimate?.order_id || null,
   p_payment_id: paymentData?.p_payment_id || estimate?.payment_id || estimate?.razorpay_payment_id || null,

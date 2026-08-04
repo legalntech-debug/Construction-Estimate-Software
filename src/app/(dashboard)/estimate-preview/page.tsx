@@ -1215,25 +1215,36 @@ const cobaRate = Number(masterItem.terrace_coba_rate || 0);
     beam_depth_meter: 0
   };
 
-// --- PART 2: Core Items ---
+// --- PART 2: Core Items & Calculations ---
+
+// Safe Base Floor Detection Logic
+const hasGroundFloor = selectedFloors?.includes("GROUND FLOOR");
+const baseFloorKey = hasGroundFloor ? "GROUND FLOOR" : (selectedFloors?.[0] || "GROUND FLOOR");
+const baseFloorData = estimate.floor_details?.[baseFloorKey] || {};
+
+const bLen = Number(baseFloorData.length || 0) / 3.28;
+const bWid = Number(baseFloorData.width || 0) / 3.28;
+const bArea = bLen * bWid;
+
 const coreItems = [
   { 
     description: masterItem.preliminary_desc || "Preliminary Work", 
-    l: formatQty(Number(estimate.floor_details?.["GROUND FLOOR"]?.length || 0) / 3.28), 
-    w: formatQty(Number(estimate.floor_details?.["GROUND FLOOR"]?.width || 0) / 3.28), 
+    l: formatQty(bLen), 
+    w: formatQty(bWid), 
     ht: "-", 
     nos: 1, 
-    qty: formatQty((Number(estimate.floor_details?.["GROUND FLOOR"]?.length || 0) / 3.28) * (Number(estimate.floor_details?.["GROUND FLOOR"]?.width || 0) / 3.28)), 
-    unit: getUnit(masterItem.preliminary_unit), // Yahan table ka unit column use ho raha hai
+    qty: formatQty(bArea), 
+    unit: getUnit(masterItem.preliminary_unit), 
     rate: masterItem.preliminary_rate 
   },
-  { description: masterItem.earthwork_desc, l: selectedPlotMaster?.footing_length_meter || 0, w: selectedPlotMaster?.footing_width_meter || 0, ht: selectedPlotMaster?.footing_height_meter || 0, nos: selectedPlotMaster?.no_of_column || 0, qty: Number(earthworkQty || 0).toFixed(2), unit: "CUM", rate: masterItem.earthwork_rate },
-  { description: masterItem.pcc_foundation_desc, l: selectedPlotMaster?.footing_length_meter || 0, w: selectedPlotMaster?.footing_width_meter || 0, ht: "0.2", nos: selectedPlotMaster?.no_of_column || 0, qty: Number(pccQty || 0).toFixed(2), unit: "CUM", rate: masterItem.pcc_foundation_rate },
-  { description: masterItem.anti_termite_desc, l: (estimate.floor_details["GROUND FLOOR"]?.length / 3.28).toFixed(2), w: (estimate.floor_details["GROUND FLOOR"]?.width / 3.28).toFixed(2), ht: "-", nos: 1, qty: ((estimate.floor_details["GROUND FLOOR"]?.length / 3.28) * (estimate.floor_details["GROUND FLOOR"]?.width / 3.28)).toFixed(2), unit: getUnit(masterItem.anti_termite_unit), rate: masterItem.anti_termite_rate },
+  // Agar Ground Floor nahi hai, toh earthwork aur foundation items ki quantity 0 ho jayegi
+  { description: masterItem.earthwork_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: selectedPlotMaster?.footing_height_meter || 0, nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(earthworkQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.earthwork_rate },
+  { description: masterItem.pcc_foundation_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: "0.2", nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(pccQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.pcc_foundation_rate },
+  { description: masterItem.anti_termite_desc, l: bLen.toFixed(2), w: bWid.toFixed(2), ht: "-", nos: 1, qty: bArea.toFixed(2), unit: getUnit(masterItem.anti_termite_unit), rate: masterItem.anti_termite_rate },
   
-  { description: masterItem.rcc_foundation_desc, l: selectedPlotMaster?.footing_length_meter || 0, w: selectedPlotMaster?.footing_width_meter || 0, ht: selectedPlotMaster?.footing_thickness_meter || 0, nos: selectedPlotMaster?.no_of_column || 0, qty: Number(rccFootingQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_foundation_rate },
+  { description: masterItem.rcc_foundation_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: selectedPlotMaster?.footing_thickness_meter || 0, nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(rccFootingQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.rcc_foundation_rate },
   { description: masterItem.rcc_column_desc, l: selectedPlotMaster?.column_width_meter || 0, w: selectedPlotMaster?.column_length_meter || 0, ht: selectedPlotMaster?.column_height || 0, nos: totalColumnNos, qty: (Number(selectedPlotMaster?.column_width_meter || 0) * Number(selectedPlotMaster?.column_length_meter || 0) * Number(selectedPlotMaster?.column_height || 0) * totalColumnNos).toFixed(2), unit: "CUM", rate: masterItem.rcc_column_rate },
-  { description: masterItem.plinth_beam_desc, l: plinthLength.toFixed(2), w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: Number(plinthBeamQty || 0).toFixed(2), unit: "CUM", rate: masterItem.plinth_beam_rate },
+  { description: masterItem.plinth_beam_desc, l: hasGroundFloor ? plinthLength.toFixed(2) : "0.00", w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: hasGroundFloor ? Number(plinthBeamQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.plinth_beam_rate },
   { description: masterItem.roof_beam_desc, l: totalRoofBeamLength.toFixed(2), w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: Number(roofBeamQty || 0).toFixed(2), unit: "CUM", rate: masterItem.roof_beam_rate },
   { description: masterItem.rcc_slab_desc, l: "-", w: "-", ht: "-", nos: "-", qty: Number(slabQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_slab_rate },
   
@@ -1249,28 +1260,27 @@ const coreItems = [
   { description: masterItem.terrace_coba_desc || "Terrace Coba", l: "-", w: "-", ht: "-", nos: 1, qty: cobaQty.toFixed(2), unit: "SQM", rate: cobaRate.toFixed(0) },
 ];
 
-// 2. Core Total & Weights
-const coreTotal = coreItems.reduce((sum, row) => sum + (Number(row.qty || 0) * Number(row.rate || 0)), 0);
+// 2. Core Total & Weights with NaN Safety Checks
+const coreTotal = coreItems.reduce((sum, row) => {
+  const q = Number(row.qty || 0);
+  const r = Number(row.rate || 0);
+  return sum + (isNaN(q * r) ? 0 : q * r);
+}, 0);
 
-// SAFE CALCULATION: Agar NaN aaye toh 0 le lo
 const rawBaseValue = Number(estimate.total_value || estimate.construction_cost || 0);
 const remainingBudget = Math.max(0, isNaN(rawBaseValue - coreTotal) ? 0 : rawBaseValue - coreTotal);
 
 // =========================================================================
-// INTEGRATED CALCULATIONS BLOCK (COPY-PASTE READY)
+// INTEGRATED CALCULATIONS BLOCK
 // =========================================================================
 
 const slabRates = Object.keys(slabConfig).map(Number).sort((a, b) => a - b);
 const activeSlab = slabRates.find(s => rate <= s) || 5000;
 const w = slabConfig[activeSlab];
 
-// 1. Check: Kya sirf Ground Floor (+ optional Tower) select hua hai?
 const isGroundFloorOnly = selectedFloors.every(f => f === "GROUND FLOOR" || f === "TOWER");
-
-// 2. Check: Kya Lift ko hide karna hai? (Rate >= 2700 aur sirf Ground Floor)
 const isLiftHidden = rate >= 2700 && isGroundFloorOnly;
 
-// 3. Dynamic Weight Redistribution Engine (Updated 30/10/20/40 Split)
 const baseLiftWeight = w.lift || 0;
 const liftWeightToDistribute = isLiftHidden ? baseLiftWeight : 0;
 
@@ -1279,7 +1289,7 @@ const finalKitchenWeight = (w.kitchen || 0) + (liftWeightToDistribute * 0.25);
 const finalBoreWeight = (w.bore || 0) + (liftWeightToDistribute * 0.15);
 const finalWaterWeight = (w.water || 0) + (liftWeightToDistribute * 0.20);
 const finalFurnishWeight = (w.furnish || 0) + (liftWeightToDistribute * 0.40);
-// Proxy Config Object
+
 const finalW = {
   ...w,
   kitchen: finalKitchenWeight,
@@ -1288,6 +1298,7 @@ const finalW = {
   furnish: finalFurnishWeight,
   lift: finalLiftWeight
 };
+
 const sumWeights = 
   (finalW.door || 0) + (finalW.paint || 0) + (finalW.ms || 0) + 
   (finalW.plumb || 0) + (finalW.elec || 0) + (finalW.floor || 0) + 
@@ -1306,21 +1317,13 @@ const estimateRows = [
   { description: masterItem.flooring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.floor || 0) * 100).toFixed(1) + "%" },
   { description: masterItem.false_ceiling_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.ceiling || 0) * 100).toFixed(1) + "%" },
   
-  // Kitchen (25% Split)
   { description: masterItem.modular_kitchen_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.kitchen || 0) * 100).toFixed(1) + "%" },
-  
-  // Water Tank (20% Split)
   { description: masterItem.water_tank_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.water || 0) * 100).toFixed(1) + "%" },
-  
-  // Furniture (40% Split)
   { description: masterItem.full_home_furnishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.furnish || 0) * 100).toFixed(1) + "%" },
   { description: masterItem.modern_elevation_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.elev || 0) * 100).toFixed(1) + "%" },
-  
-  // Boring (15% Split)
   { description: masterItem.deep_boring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: 1, unit: "LS", rate: ((finalW.bore || 0) * 100).toFixed(1) + "%" },
   { description: masterItem.final_finishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.final || 0) * 100).toFixed(1) + "%" },
   
-  // Lift Row
   ...(!isLiftHidden 
     ? [{ description: masterItem.lift_installation_desc, l: "-", w: "-", ht: "-", nos: "-", qty: 1, unit: "LS", rate: ((finalW.lift || 0) * 100).toFixed(1) + "%" }] 
     : []
@@ -1329,10 +1332,14 @@ const estimateRows = [
   { description: masterItem.consultant_fee_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.cons || 0) * 100).toFixed(1) + "%" },
 ];
 
-// Calculate Grand Total
-const grandTotal = estimateRows.reduce((sum, row) => sum + (Number(row?.qty || 0) * Number(row?.rate || 0)), 0);
+const grandTotal = estimateRows.reduce((sum, row) => {
+  const rRate = parseFloat((row.rate || "0").toString().replace('%', '')) || 0;
+  const q = Number(row?.qty || 0);
+  const r = Number(row?.rate || 0);
+  const amt = row.unit === "LS" ? (remainingBudget * (rRate / 100)) : (q * r);
+  return sum + (isNaN(amt) ? 0 : amt);
+}, 0);
 
-// Format for Indian Currency Display
 const formattedTotal = Math.round(grandTotal).toLocaleString('en-IN');
 
 

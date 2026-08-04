@@ -527,7 +527,7 @@ const handleSaveAndFinalize = async (paymentData?: any) => {
       p_total_builtup_area: Number(estimate?.total_builtup_area || 0),
       p_total_construction_cost: Number(estimate?.total_value || 0),
       p_ref_no: activeRefNo,
-      p_status: 'finalized',
+      p_status: 'pending',
       p_payment_status: paymentData?.p_payment_status || 'paid',
       p_order_id: paymentData?.p_order_id || null,
       p_payment_id: paymentData?.p_payment_id || null,
@@ -737,35 +737,33 @@ const handlePrint = () => {
   const formatQty = (val: number) => Number(val || 0).toFixed(2);
   const getUnit = (unit: string | null | undefined) => (unit && unit.trim() !== "" ? unit : "LS");
   
-  // =====================================================
-// GROUND FLOOR -> PLOT MASTER MATCH
-// =====================================================
-
-async function getGroundFloorPlotMaster(estimate: any) {
-  // Senior-Dev Safety Fix: Direct extraction from the passed estimate context
+ async function getGroundFloorPlotMaster(estimate: any) {
   const activeDetails = estimate?.floor_details || {};
+  const selectedFloors = estimate?.selected_floors || [];
+
+  // 🎯 SMART FIX: Agar Ground floor selected nahi hai, toh pehle selected floors me se koi active floor lein
+  const isGroundFloorSelected = selectedFloors.includes("GROUND FLOOR");
+  const fallbackFloorKey = selectedFloors.filter((f: string) => f !== "TOWER")[0] || Object.keys(activeDetails)[0] || "GROUND FLOOR";
+  
+  const targetFloorKey = isGroundFloorSelected ? "GROUND FLOOR" : fallbackFloorKey;
 
   const availableDetailsKeys = Object.keys(activeDetails || {});
   
-  // 🔍 Substring matching engine: Agar key me kahin bhi "GROUND" likha hai toh handle karein
   const matchedDetailsKey = availableDetailsKeys.find(
-    (k) => k.trim().toUpperCase().includes("GROUND")
-  ) || "GROUND FLOOR";
+    (k) => k.trim().toUpperCase().includes(targetFloorKey.toUpperCase())
+  ) || targetFloorKey;
 
   const ground = activeDetails[matchedDetailsKey] || {};
 
-  // ⚡ Senior-Dev Deep Structure Extraction Engine
   let rawWidth: any = 0;
   let rawLength: any = 0;
 
   if (typeof ground === 'object' && ground !== null) {
-    // 🎯 Target the nested "proposed" layer or fallback to main object
     const targetLayer = ground.proposed || ground;
     
     rawWidth = targetLayer.width ?? targetLayer.width_feet ?? targetLayer.length_x ?? targetLayer.val ?? 0;
     rawLength = targetLayer.length ?? targetLayer.length_feet ?? targetLayer.width_y ?? targetLayer.val ?? 0;
     
-    // Fallback: Agar single direct fields nahi hain, toh value array parsing check karein
     if (typeof rawWidth === 'object') rawWidth = rawWidth.value ?? rawWidth.val ?? 0;
     if (typeof rawLength === 'object') rawLength = rawLength.value ?? rawLength.val ?? 0;
   } else if (typeof ground === 'string' || typeof ground === 'number') {
@@ -778,14 +776,8 @@ async function getGroundFloorPlotMaster(estimate: any) {
     }
   }
 
-  // Numbers normalization formatting layer
   const inputWidth = parseFloat(String(rawWidth).replace(/[^0-9.]/g, '')) || 0;
   const inputLength = parseFloat(String(rawLength).replace(/[^0-9.]/g, '')) || 0;
-  const lastFloorName = estimate.selected_floors?.filter((f: string) => f !== "TOWER").slice(-1)[0] || "GROUND FLOOR";
-
-  //----------------------------------------------------
-  // STEP-1 : Exact Search
-  //----------------------------------------------------
 
   let width = inputWidth;
   let length = inputLength;
@@ -793,6 +785,15 @@ async function getGroundFloorPlotMaster(estimate: any) {
   if (!Number.isInteger(width)) width = Math.ceil(width);
   if (!Number.isInteger(length)) length = Math.ceil(length);
 
+  // Safety fallback agar dimensions 0 mil rahe hain
+  if (width <= 0 || length <= 0) {
+    width = 20; // Default standard width fallback
+    length = 50; // Default standard length fallback
+  }
+
+  //----------------------------------------------------
+  // STEP-1 : Exact Search
+  //----------------------------------------------------
   let { data } = await supabase
     .from("plot_master")
     .select("*")
@@ -807,7 +808,6 @@ async function getGroundFloorPlotMaster(estimate: any) {
   //----------------------------------------------------
   // STEP-2 : Width fix, Length increase
   //----------------------------------------------------
-
   for (let l = length + 1; l <= 250; l++) {
     const { data } = await supabase
       .from("plot_master")
@@ -824,7 +824,6 @@ async function getGroundFloorPlotMaster(estimate: any) {
   //----------------------------------------------------
   // STEP-3 : Width increase then length search
   //----------------------------------------------------
-
   for (let w = width + 1; w <= 250; w++) {
     for (let l = length; l <= 250; l++) {
       const { data } = await supabase
@@ -835,14 +834,12 @@ async function getGroundFloorPlotMaster(estimate: any) {
         .limit(1);
 
       if (data && data.length > 0) {
-        
         return data[0];
       }
     }
   }
   return null;
 }
-
   // ===========================
   // RCC LINTEL CALCULATION
   // ===========================
@@ -1156,18 +1153,27 @@ const earthworkQty =
     return (floorOrder[a] || 100) - (floorOrder[b] || 100);
   });
 
-  // --- Helper variables for conditions ---
-const rate = ratePerSqft; // Jo aapne top par define kiya tha
+  // =========================================================================
+// COBA & PARAPET CONDITION ENGINE (Strict Ground/Tower Coba Hide Rule)
+// =========================================================================
+
+const rate = ratePerSqft; 
 const selectedFloors = estimate.selected_floors || [];
 
-// Check: Kya sirf GROUND aur TOWER hi hain?
+// Check: Kya sirf GROUND aur TOWER hi hain? (Yaani koi bhi upper floor nahi hai)
 const isOnlyGroundAndTower = selectedFloors.every(f => f === "GROUND FLOOR" || f === "TOWER");
 
-// Check: Kya rate 1550 aur 1900 ke beech mein hai?
+// Check: Kya First Floor ya usse upar ka koi aur floor selected hai?
+const hasUpperFloors = selectedFloors.some(f => f !== "GROUND FLOOR" && f !== "TOWER");
+
+// Check: Kya rate 1450 se zyada hai?
+const isRateAbove1450 = rate > 1450;
+
+// Check: Kya rate 1550 aur 1900 ke beech mein hai? (Parapet hide condition)
 const isRateInRange = rate > 1550 && rate < 1900;
 
 // --- CALCULATIONS ---
-const shouldHide = isRateInRange && isOnlyGroundAndTower;
+const shouldHideParapet = isRateInRange && isOnlyGroundAndTower;
 
 // ===========================
 // 28. PARAPET WALL CALCULATION
@@ -1182,69 +1188,146 @@ const lfW = Number(estimate.floor_details?.[lastFloorName]?.width || 0) / 3.28;
 const maxL = Math.max(gfL, lfL);
 const maxW = Math.max(gfW, lfW);
 
-
-
 // Parapet
-const parapetQtyRM = shouldHide ? 0 : (2 * (maxL + maxW));
+const parapetQtyRM = shouldHideParapet ? 0 : (2 * (maxL + maxW));
 const parapetRate = Number(masterItem.parapet_wall_rate || 0);
 
-// Coba
+// ===========================
+// TERRACE COBA CALCULATION (Strict Rule Applied)
+// ===========================
 let cobaQty = 0;
-if (!shouldHide) {
-  const gfArea = Number(estimate.floor_details?.["GROUND FLOOR"]?.area || 0);
-  const lfArea = Number(estimate.floor_details?.[lastFloorName]?.area || 0);
-  cobaQty = Math.max(gfArea, lfArea) / 10.76;
+
+// Coba tabhi aayega jab:
+// 1. Rate 1450 se zyada ho
+// 2. Sirf Ground/Tower na ho, balki upper floors (First floor etc.) bhi present hon
+// 3. Aur agar range wala hiding rule nahi lag raha ho
+const shouldShowCoba = isRateAbove1450 && hasUpperFloors && !shouldHideParapet;
+
+if (shouldShowCoba) {
+  const getFloorArea = (floorKey) => {
+    const fObj = estimate.floor_details?.[floorKey];
+    if (!fObj) return 0;
+    const rawArea = fObj.area ?? fObj.builtup_area ?? fObj.sqft ?? fObj.total_area ?? 0;
+    const parsed = parseFloat(String(rawArea).replace(/[^0-9.]/g, ''));
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const gfArea = getFloorArea("GROUND FLOOR");
+  const lfArea = getFloorArea(lastFloorName);
+  let maxArea = Math.max(gfArea, lfArea);
+
+  if (maxArea <= 0 && maxL > 0 && maxW > 0) {
+    maxArea = maxL * maxW * 10.76; 
+  }
+
+  if (maxArea > 0) {
+    cobaQty = maxArea / 10.76;
+  }
 }
+
 const cobaRate = Number(masterItem.terrace_coba_rate || 0);
 
   // =========================================================================
-  // DETAILED ESTIMATE CALCULATIONS ENGINE (OLD CODE STRUCTURAL RE-INTEGRATION)
-  // =========================================================================
+// DETAILED ESTIMATE CALCULATIONS ENGINE (GROUND FLOOR CHECK & ZERO FIX)
+// =========================================================================
 
-  // 1. Safe Proxy Fallbacks (Agar 'spm' pehle se declared hai, toh local scope ke liye safeSpm banayein)
-  const safeSpm = selectedPlotMaster || {
-    footing_length_meter: 0,
-    footing_width_meter: 0,
-    footing_height_meter: 0,
-    footing_thickness_meter: 0,
-    column_width_meter: 0,
-    column_length_meter: 0,
-    column_height: 0,
-    no_of_column: 0,
-    beam_width_meter: 0,
-    beam_depth_meter: 0
-  };
+// 1. Safe Proxy Fallbacks
+const safeSpm = selectedPlotMaster || {
+  footing_length_meter: 0,
+  footing_width_meter: 0,
+  footing_height_meter: 0,
+  footing_thickness_meter: 0,
+  column_width_meter: 0,
+  column_length_meter: 0,
+  column_height: 0,
+  no_of_column: 0,
+  beam_width_meter: 0,
+  beam_depth_meter: 0
+};
 
-// --- PART 2: Core Items & Calculations ---
+// Check if Ground Floor is selected in selectedFloors array
+const isGroundFloorSelected = selectedFloors ? selectedFloors.includes("GROUND FLOOR") : true;
 
-// Safe Base Floor Detection Logic
-const hasGroundFloor = selectedFloors?.includes("GROUND FLOOR");
-const baseFloorKey = hasGroundFloor ? "GROUND FLOOR" : (selectedFloors?.[0] || "GROUND FLOOR");
-const baseFloorData = estimate.floor_details?.[baseFloorKey] || {};
+// Helper function to safely get floor dimension in meters
+const getSafeFloorDim = (floorName, dimType) => {
+  const val = estimate.floor_details?.[floorName]?.[dimType];
+  const num = Number(val);
+  return isNaN(num) || num <= 0 ? 0 : num / 3.28;
+};
 
-const bLen = Number(baseFloorData.length || 0) / 3.28;
-const bWid = Number(baseFloorData.width || 0) / 3.28;
-const bArea = bLen * bWid;
+// Raw safe dimensions for calculations
+const groundLenMtr = getSafeFloorDim("GROUND FLOOR", "length");
+const groundWidMtr = getSafeFloorDim("GROUND FLOOR", "width");
 
+// --- PART 2: Core Items ---
 const coreItems = [
   { 
     description: masterItem.preliminary_desc || "Preliminary Work", 
-    l: formatQty(bLen), 
-    w: formatQty(bWid), 
+    l: formatQty(groundLenMtr), 
+    w: formatQty(groundWidMtr), 
     ht: "-", 
     nos: 1, 
-    qty: formatQty(bArea), 
+    qty: formatQty(groundLenMtr * groundWidMtr), 
     unit: getUnit(masterItem.preliminary_unit), 
     rate: masterItem.preliminary_rate 
   },
-  // Agar Ground Floor nahi hai, toh earthwork aur foundation items ki quantity 0 ho jayegi
-  { description: masterItem.earthwork_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: selectedPlotMaster?.footing_height_meter || 0, nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(earthworkQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.earthwork_rate },
-  { description: masterItem.pcc_foundation_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: "0.2", nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(pccQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.pcc_foundation_rate },
-  { description: masterItem.anti_termite_desc, l: bLen.toFixed(2), w: bWid.toFixed(2), ht: "-", nos: 1, qty: bArea.toFixed(2), unit: getUnit(masterItem.anti_termite_unit), rate: masterItem.anti_termite_rate },
   
-  { description: masterItem.rcc_foundation_desc, l: hasGroundFloor ? (selectedPlotMaster?.footing_length_meter || 0) : 0, w: hasGroundFloor ? (selectedPlotMaster?.footing_width_meter || 0) : 0, ht: selectedPlotMaster?.footing_thickness_meter || 0, nos: hasGroundFloor ? (selectedPlotMaster?.no_of_column || 0) : 0, qty: hasGroundFloor ? Number(rccFootingQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.rcc_foundation_rate },
+  // --- FOUNDATION & EARTHWORK ITEMS (Strictly 0 if Ground Floor is not selected) ---
+  { 
+    description: masterItem.earthwork_desc, 
+    l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+    w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+    ht: isGroundFloorSelected ? (selectedPlotMaster?.footing_height_meter || 0) : 0, 
+    nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+    qty: isGroundFloorSelected ? Number(earthworkQty || 0).toFixed(2) : "0.00", 
+    unit: "CUM", 
+    rate: masterItem.earthwork_rate 
+  },
+  { 
+    description: masterItem.pcc_foundation_desc, 
+    l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+    w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+    ht: isGroundFloorSelected ? "0.2" : 0, 
+    nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+    qty: isGroundFloorSelected ? Number(pccQty || 0).toFixed(2) : "0.00", 
+    unit: "CUM", 
+    rate: masterItem.pcc_foundation_rate 
+  },
+  { 
+    description: masterItem.anti_termite_desc, 
+    l: isGroundFloorSelected ? groundLenMtr.toFixed(2) : 0, 
+    w: isGroundFloorSelected ? groundWidMtr.toFixed(2) : 0, 
+    ht: "-", 
+    nos: isGroundFloorSelected ? 1 : 0, 
+    qty: isGroundFloorSelected ? (groundLenMtr * groundWidMtr).toFixed(2) : "0.00", 
+    unit: getUnit(masterItem.anti_termite_unit), 
+    rate: masterItem.anti_termite_rate 
+  },
+  { 
+    description: masterItem.rcc_foundation_desc, 
+    l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+    w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+    ht: isGroundFloorSelected ? (selectedPlotMaster?.footing_thickness_meter || 0) : 0, 
+    nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+    qty: isGroundFloorSelected ? Number(rccFootingQty || 0).toFixed(2) : "0.00", 
+    unit: "CUM", 
+    rate: masterItem.rcc_foundation_rate 
+  },
+  
+  // --- SUPERSTRUCTURE & UPPER FLOOR ITEMS ---
   { description: masterItem.rcc_column_desc, l: selectedPlotMaster?.column_width_meter || 0, w: selectedPlotMaster?.column_length_meter || 0, ht: selectedPlotMaster?.column_height || 0, nos: totalColumnNos, qty: (Number(selectedPlotMaster?.column_width_meter || 0) * Number(selectedPlotMaster?.column_length_meter || 0) * Number(selectedPlotMaster?.column_height || 0) * totalColumnNos).toFixed(2), unit: "CUM", rate: masterItem.rcc_column_rate },
-  { description: masterItem.plinth_beam_desc, l: hasGroundFloor ? plinthLength.toFixed(2) : "0.00", w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: hasGroundFloor ? Number(plinthBeamQty || 0).toFixed(2) : "0.00", unit: "CUM", rate: masterItem.plinth_beam_rate },
+  
+  { 
+    description: masterItem.plinth_beam_desc, 
+    l: isGroundFloorSelected ? plinthLength.toFixed(2) : 0, 
+    w: isGroundFloorSelected ? Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2) : 0, 
+    ht: isGroundFloorSelected ? Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2) : 0, 
+    nos: isGroundFloorSelected ? 1 : 0, 
+    qty: isGroundFloorSelected ? Number(plinthBeamQty || 0).toFixed(2) : "0.00", 
+    unit: "CUM", 
+    rate: masterItem.plinth_beam_rate 
+  },
+  
   { description: masterItem.roof_beam_desc, l: totalRoofBeamLength.toFixed(2), w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: Number(roofBeamQty || 0).toFixed(2), unit: "CUM", rate: masterItem.roof_beam_rate },
   { description: masterItem.rcc_slab_desc, l: "-", w: "-", ht: "-", nos: "-", qty: Number(slabQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_slab_rate },
   
@@ -1256,16 +1339,21 @@ const coreItems = [
   { description: masterItem.brickwork_desc, l: "-", w: "-", ht: "2.7", nos: "1", qty: Number(brickQtyCum || 0).toFixed(2), unit: "CUM", rate: masterItem.brickwork_rate },
   { description: masterItem.internal_plaster_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(internalPlasterQty || 0).toFixed(2), unit: getUnit(masterItem.internal_plaster_unit), rate: masterItem.internal_plaster_rate },
   { description: masterItem.external_plaster_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(externalPlasterQty || 0).toFixed(2), unit: getUnit(masterItem.external_plaster_unit), rate: masterItem.external_plaster_rate },
-  { description: masterItem.parapet_wall_desc || "Parapet Wall", l: shouldHide ? "0" : maxL.toFixed(2), w: shouldHide ? "0" : maxW.toFixed(2), ht: "-", nos: 1, qty: parapetQtyRM.toFixed(2), unit: "RM", rate: parapetRate },
+  { 
+    description: masterItem.parapet_wall_desc || "Parapet Wall", 
+    l: shouldHideParapet ? "0" : maxL.toFixed(2), 
+    w: shouldHideParapet ? "0" : maxW.toFixed(2), 
+    ht: "-", 
+    nos: 1, 
+    qty: parapetQtyRM.toFixed(2), 
+    unit: "RM", 
+    rate: parapetRate 
+  },
   { description: masterItem.terrace_coba_desc || "Terrace Coba", l: "-", w: "-", ht: "-", nos: 1, qty: cobaQty.toFixed(2), unit: "SQM", rate: cobaRate.toFixed(0) },
 ];
 
-// 2. Core Total & Weights with NaN Safety Checks
-const coreTotal = coreItems.reduce((sum, row) => {
-  const q = Number(row.qty || 0);
-  const r = Number(row.rate || 0);
-  return sum + (isNaN(q * r) ? 0 : q * r);
-}, 0);
+// 2. Core Total & Weights
+const coreTotal = coreItems.reduce((sum, row) => sum + (Number(row.qty || 0) * Number(row.rate || 0)), 0);
 
 const rawBaseValue = Number(estimate.total_value || estimate.construction_cost || 0);
 const remainingBudget = Math.max(0, isNaN(rawBaseValue - coreTotal) ? 0 : rawBaseValue - coreTotal);
@@ -1332,16 +1420,19 @@ const estimateRows = [
   { description: masterItem.consultant_fee_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.cons || 0) * 100).toFixed(1) + "%" },
 ];
 
+// Calculate Grand Total Safely
 const grandTotal = estimateRows.reduce((sum, row) => {
-  const rRate = parseFloat((row.rate || "0").toString().replace('%', '')) || 0;
-  const q = Number(row?.qty || 0);
-  const r = Number(row?.rate || 0);
-  const amt = row.unit === "LS" ? (remainingBudget * (rRate / 100)) : (q * r);
-  return sum + (isNaN(amt) ? 0 : amt);
+  const qty = Number(row?.qty || 0);
+  const rateVal = row?.rate;
+  
+  if (typeof rateVal === 'string' && rateVal.includes('%')) {
+    return sum;
+  }
+  
+  return sum + (qty * Number(rateVal || 0));
 }, 0);
 
 const formattedTotal = Math.round(grandTotal).toLocaleString('en-IN');
-
 
 if (isCheckingHistory) {
   return (
@@ -1664,7 +1755,7 @@ return (
             {/* QR Code Left Mein */}
             <div className="flex flex-col items-center">
               <QRCodeSVG 
-  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software-5wi1i5qjz-divisha.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
+  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
   size={60} 
   level="H" 
 />

@@ -26,7 +26,7 @@ const slabConfig: any = {
   1200:  { door: 0.07, paint: 0.09, ms: 0.07, plumb: 0.12, elec: 0.12, floor: 0.13, ceiling: 0.05, kitchen: 0.08, furnish: 0.1, water: 0.08, cons: 0.03, bore: 0.06}, //done
   1300:  { door: 0.07, paint: 0.09, ms: 0.07, plumb: 0.12, elec: 0.12, floor: 0.12, ceiling: 0.05, kitchen: 0.08, furnish: 0.11, water: 0.08, cons: 0.03, bore: 0.06}, //done
   1400:  { door: 0.07, paint: 0.08, ms: 0.07, plumb: 0.12, elec: 0.1, floor: 0.1, ceiling: 0.05, kitchen: 0.08, furnish: 0.15, water: 0.08, cons: 0.04, bore: 0.06}, //done
-  1500:  { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.1, elec: 0.1, floor: 0.1, ceiling: 0.05, kitchen: 0.1, furnish: 0.13, water: 0.08, cons: 0.04, bore: 0.06}, //done
+  1500:  { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.1, elec: 0.1, floor: 0.1, ceiling: 0.05, kitchen: 0.1, furnish: 0.18, water: 0.08, cons: 0.04, bore: 0.06}, //done
   1600:  { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.1, ceiling: 0.05, kitchen: 0.1, furnish: 0.18, water: 0.08, cons: 0.04, bore: 0.06}, //done
   1700:  { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.06, elec: 0.06, floor: 0.08, ceiling: 0.04, kitchen: 0.06, furnish: 0.08, water: 0.06, cons: 0.04, bore: 0.04, lift: 0.35}, //done
   1800:  { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.06, elec: 0.06, floor: 0.09, ceiling: 0.04, kitchen: 0.18, furnish: 0.3, water: 0.06, cons: 0.04, bore: 0.05,  }, //done
@@ -47,12 +47,12 @@ const slabConfig: any = {
   3300:  { door: 0.04, paint: 0.03, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.12, furnish: 0.18, water: 0.04, cons: 0.03, bore: 0.03, lift: 0.31 }, //done
   3400:  { door: 0.04, paint: 0.025, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.12, furnish: 0.185, water: 0.04, cons: 0.03, bore: 0.03, lift: 0.31 }, //done
   3500:  { door: 0.04, paint: 0.025, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.12, furnish: 0.185, water: 0.04, cons: 0.03, bore: 0.03, lift: 0.31 }, //done
-  3600:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
-  3700:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
-  3800:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
-  3900:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
-  4000:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.05, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 } //done
-  
+  3600:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
+  3700:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
+  3800:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
+  3900:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
+  4000:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 }, //done
+  4100:  { door: 0.04, paint: 0.02, ms: 0.03, plumb: 0.05, elec: 0.04, floor: 0.06, ceiling: 0.04, kitchen: 0.11, furnish: 0.26, water: 0.03, cons: 0.03, bore: 0.025, lift: 0.265 } //done 
 };
 
 export default function RenovationEstimatePreview() {
@@ -862,7 +862,7 @@ if (shouldGenerateNewRef && !estimate?.id) {
     cobaQty = Math.max(gfArea, lfArea) / 10.764;
   }
 
-  // ==========================================
+// ==========================================
 // 3. Core Items Construction (With Explicit Types/Keys)
 // ==========================================
 const coreItems: Array<{
@@ -875,6 +875,8 @@ const coreItems: Array<{
   qty: any;
   unit: any;
   rate: any;
+  calculatedAmount?: number;
+  displayAmount?: string;
 }> = [
   { 
     key: "internal_plaster",
@@ -896,7 +898,7 @@ const coreItems: Array<{
   ...(!isFlat ? [
     { 
       key: "parapet_wall",
-      description: "PARAPET WALL BRICKWORKIS 2212 Masonry Norms :- 4-Feet High Roof Parapet Protection Wall: 4-Feet high premium masonry/concrete parapet wall structure seamless integrated with custom designer SS 304 or structural glass facade accents.", 
+      description: "PARAPET WALL BRICKWORKIS 2212 Masonry Norms :- 4-Feet High Roof Parapet Protection Wall...", 
       l: maxL.toFixed(2), 
       w: maxW.toFixed(2), 
       ht: "-", 
@@ -907,7 +909,7 @@ const coreItems: Array<{
     },
     { 
       key: "terrace_coba",
-      description: "TERRACE COBA WORKIS 3067 Brick Bat Coba Treatment :- 4-Inch Thick Brick-Bat Coba Waterproofing: Premium 4-inch brick-bat coba layer laid over a high-performance advanced Polyurethane (PU) continuous liquid membrane waterproofing coat with premium chinachips or seamless protective tile finishing.", 
+      description: "TERRACE COBA WORKIS 3067 Brick Bat Coba Treatment...", 
       l: "-", w: "-", ht: "-", nos: 1,  
       qty: cobaQty.toFixed(2), 
       unit: renovationMasterItem?.terrace_coba_unit || "SQM", 
@@ -924,7 +926,6 @@ const rawBaseValue = Number(estimate?.total_value || estimate?.construction_cost
 const remainingBudget = Math.max(0, isNaN(rawBaseValue - coreTotal) ? 0 : rawBaseValue - coreTotal);
 
 // 6. Weights & Slab Configurations
-
 const slabRates = Object.keys(slabConfig).map(Number).sort((a, b) => a - b);
 const activeSlab = slabRates.find(s => rate <= s) || slabRates[slabRates.length - 1];
 const w = slabConfig[activeSlab] || {};
@@ -991,7 +992,7 @@ const wElev = getSafeWeight(finalW.elev || adjustedWeights.elevation);
 const wBore = getSafeWeight(finalW.bore);
 const wFurnish = getSafeWeight(adjustedWeights.furnish || adjustedWeights.full_furnishing);
 const wFinal = getSafeWeight(adjustedWeights.final || adjustedWeights.final_finishing);
-const wLift = getSafeWeight(adjustedWeights.lift);
+const wLift = getSafeWeight(finalW.lift);
 const wConsult = getSafeWeight(adjustedWeights.cons || adjustedWeights.consultant);
 
 // 2. Exact Allocated Amounts based on Remaining Budget & Slabs
@@ -1011,14 +1012,12 @@ const amtFinal = remainingBudget * wFinal;
 const amtLift = remainingBudget * wLift;
 const amtConsult = remainingBudget * wConsult;
 
-// Standard Rate function for general items (Percentage/Weight display or direct amount)
 const getStandardRate = (weight: number) => {
   const safeW = getSafeWeight(weight);
   if (safeW === 0) return "0.00";
-  return (safeW * 100).toFixed(2) + "%"; // Ya agar aap direct allocated amount dikhana chahte hain toh amount.toFixed(2) kar sakte hain
+  return (safeW * 100).toFixed(2) + "%";
 };
 
-// Reverse Engineering Rate function ONLY for Paint & Flooring (Amount / Area)
 const getReverseEngineeredRate = (amount: number, qty: number) => {
   if (remainingBudget <= 0 || rawBaseValue <= 0 || amount <= 0 || qty <= 0) {
     return "0.00";
@@ -1026,104 +1025,182 @@ const getReverseEngineeredRate = (amount: number, qty: number) => {
   return (amount / qty).toFixed(2);
 };
 
-const estimateRows = [
+// 3. Estimate Rows with calculatedAmount attached
+const estimateRows: Array<any> = [
   ...coreItems,
-  { description: renovationMasterItem?.door_frame_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.door_frame_unit || "LS", rate: getStandardRate(wDoor) },
-  
-  // 🟢 ONLY Paint & Putty gets Reverse Engineered Rate (Amount / AreaSqM)
+  { 
+    key: "door_frame",
+    description: renovationMasterItem?.door_frame_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.door_frame_unit || "LS", 
+    rate: getStandardRate(wDoor), 
+    calculatedAmount: amtDoor 
+  },
   { 
     key: "paint_putty",
     description: renovationMasterItem?.paint_putty_desc, 
     l: "-", w: "-", ht: "-", nos: "-", 
     qty: areaSqM.toFixed(2), 
     unit: renovationMasterItem?.paint_putty_unit || "SQM", 
-    rate: getReverseEngineeredRate(amtPaint, areaSqM)
+    rate: getReverseEngineeredRate(amtPaint, areaSqM),
+    calculatedAmount: amtPaint
   },
-
-  { description: renovationMasterItem?.ms_steel_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.ms_steel_unit || "LSM", rate: getStandardRate(wMs) },
-  { description: renovationMasterItem?.plumbing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.plumbing_unit || "LS", rate: getStandardRate(wPlumb) },
-  { description: renovationMasterItem?.electrical_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.electrical_unit || "LS", rate: getStandardRate(wElec) },
-  
-  // 🟢 ONLY Flooring gets Reverse Engineered Rate (Amount / AreaSqM)
+  { 
+    key: "ms_steel",
+    description: renovationMasterItem?.ms_steel_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.ms_steel_unit || "LSM", 
+    rate: getStandardRate(wMs), 
+    calculatedAmount: amtMs 
+  },
+  { 
+    key: "plumbing",
+    description: renovationMasterItem?.plumbing_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.plumbing_unit || "LS", 
+    rate: getStandardRate(wPlumb), 
+    calculatedAmount: amtPlumb 
+  },
+  { 
+    key: "electrical",
+    description: renovationMasterItem?.electrical_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.electrical_unit || "LS", 
+    rate: getStandardRate(wElec), 
+    calculatedAmount: amtElec 
+  },
   { 
     key: "flooring",
     description: renovationMasterItem?.flooring_desc, 
-    l: "-", w: "-", ht: "-", nos: "-", qty: areaSqM.toFixed(2), unit: renovationMasterItem?.flooring_unit || "SQM", rate: getReverseEngineeredRate(amtFlooring, areaSqM)
+    l: "-", w: "-", ht: "-", nos: "-", 
+    qty: areaSqM.toFixed(2), 
+    unit: renovationMasterItem?.flooring_unit || "SQM", 
+    rate: getReverseEngineeredRate(amtFlooring, areaSqM),
+    calculatedAmount: amtFlooring
   },
-
-  { description: renovationMasterItem?.false_ceiling_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.false_ceiling_unit || "LS", rate: getStandardRate(wCeiling) },
-  { description: renovationMasterItem?.modular_kitchen_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.modular_kitchen_unit || "LS", rate: getStandardRate(wKitchen) },
+  { 
+    key: "false_ceiling",
+    description: renovationMasterItem?.false_ceiling_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.false_ceiling_unit || "LS", 
+    rate: getStandardRate(wCeiling), 
+    calculatedAmount: amtCeiling 
+  },
+  { 
+    key: "modular_kitchen",
+    description: renovationMasterItem?.modular_kitchen_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.modular_kitchen_unit || "LS", 
+    rate: getStandardRate(wKitchen), 
+    calculatedAmount: amtKitchen 
+  },
   
   ...(!isFlat ? [
-    {
-  description: "Underground RCC Water Tank: Premium high-grade M25/M30 RCC monolithic structure; specialized structural crystallization matrix along with full food-grade internal epoxy membrane sealing for total leak protection",
-  l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", rate: getStandardRate(wWater)
-},
-{
-  description: "Modern Architectural Front Elevation Work: Ultra-modern bespoke elevation layout using premium slim-line Aluminium louvers, imported natural stone facade tile cladding, high-end structural glazing, and programmable smart exterior LED strips.",
-  l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", rate: getStandardRate(wElev)
-},
-{
-  description: "Deep Borewell Excavation & Casing: Elite deep-well excavation using premium industrial-grade high-thickness casing profiles, custom mesh filter screens, extensive sand-free development flushing, and certified multi-hour yield audit.",
-  l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", rate: getStandardRate(wBore)
-}
+    { 
+      key: "water_tank",
+      description: "WATER TANK WORKIS 3370 Structural Concrete Tank :- Underground RCC Water Tank: Premium high-grade M25/M30 RCC monolithic structure; specialized structural crystallization matrix along with full food-grade internal epoxy membrane sealing for total leak protection", 
+      l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", 
+      rate: getStandardRate(wWater), calculatedAmount: amtWater 
+    },
+    { 
+      key: "modern_elevation",
+      description: "MODERN FRONT ELEVATION Architectural Design & Cladding Norms :- Modern Architectural Front Elevation Work: Ultra-modern bespoke elevation layout using premium slim-line Aluminium louvers, imported natural stone facade tile cladding, high-end structural glazing, and programmable smart exterior LED strips.", 
+      l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", 
+      rate: getStandardRate(wElev), calculatedAmount: amtElev 
+    },
+    { 
+      key: "deep_boring",
+      description: " DEEP BORING WORKCGWB & IS 2800 Norms :- Deep Borewell Excavation & Casing: Elite deep-well excavation using premium industrial-grade high-thickness casing profiles, custom mesh filter screens, extensive sand-free development flushing, and certified multi-hour yield audit.", 
+      l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: "LS", 
+      rate: getStandardRate(wBore), calculatedAmount: amtBore 
+    }
   ] : []),
 
-  { description: renovationMasterItem?.full_home_furnishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.full_home_furnishing_unit || "LS", rate: getStandardRate(wFurnish) },
   { 
-  description: renovationMasterItem?.consultant_fee_desc || "CoA & Council Norms IS 456 / IS 1893 PMC Guide Norms : - Architectural & Planning Structural Design & 3D Elevation Site Supervision & Quality Control: Turnkey bespoke Architectural, Luxury Interior, MEP & High-End Structural design packages; 24/7 digital monitoring, routine premium consultant visits, and mandatory laboratory material testing certificates.", 
-  l: "-", w: "-", ht: "-", nos: "-", 
-  qty: "1", 
-  unit: renovationMasterItem?.consultant_fee_unit || "LS", 
-  rate: getStandardRate(wConsult) 
-},
-  { description: renovationMasterItem?.final_finishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "1", unit: renovationMasterItem?.final_finishing_unit || "LS", rate: getStandardRate(wFinal) },
+    key: "full_home_furnishing",
+    description: renovationMasterItem?.full_home_furnishing_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.full_home_furnishing_unit || "LS", 
+    rate: getStandardRate(wFurnish), calculatedAmount: amtFurnish 
+  },
+  { 
+    key: "consultant_fee",
+    description: renovationMasterItem?.consultant_fee_desc || "CoA & Council Norms IS 456 / IS 1893 PMC Guide Norms : -Architectural & Planning Structural Design & 3D Elevation Site Supervision & Quality Control: Turnkey bespoke Architectural, Luxury Interior, MEP & High-End Structural design packages; 24/7 digital monitoring, routine premium consultant visits, and mandatory laboratory material testing certificates.", 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.consultant_fee_unit || "LS", 
+    rate: getStandardRate(wConsult), calculatedAmount: amtConsult 
+  },
+  { 
+    key: "final_finishing",
+    description: renovationMasterItem?.final_finishing_desc, 
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.final_finishing_unit || "LS", 
+    rate: getStandardRate(wFinal), calculatedAmount: amtFinal 
+  },
   
-  
-  ...(!isLiftHidden 
-    ? [{
-  description: "Lift Installation: Supplying & commissioning ultra-luxury 4-to-6 passenger automatic gearless smart lift with panoramic glass cabin/premium brushed SS panels, automatic rescue device (ARD), and top-tier silent operation systems.",
-  l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
-  unit: renovationMasterItem?.lift_installation_unit || "LS", 
-  rate: getStandardRate(wLift)
-}] 
-    : []
-  ),
-  
-  
+  ...(!isLiftHidden ? [{
+    key: "lift_installation",
+    description: "LIFT INTALLATION  & STR. :- Lift Installation: Supplying & commissioning ultra-luxury 4-to-6 passenger automatic gearless smart lift with panoramic glass cabin/premium brushed SS panels, automatic rescue device (ARD), and top-tier silent operation systems.",
+    l: "-", w: "-", ht: "-", nos: "-", qty: "1", 
+    unit: renovationMasterItem?.lift_installation_unit || "LS", 
+    rate: getStandardRate(wLift), calculatedAmount: amtLift
+  }] : []),
 ];
 
-// 3. Total Calculation & Precision Adjustment
-const calculatedRowsSum = estimateRows.reduce((sum, row) => {
-  if (coreItems.includes(row)) return sum; 
-  if (row.key === "flooring") return sum + amtFlooring;
-  if (row.key === "paint_putty") return sum + amtPaint;
+// ==========================================
+// Total Calculation, 2-Decimal Display & Dual Total Rows Fix
+// ==========================================
 
-  const rateStr = String(row?.rate || "0");
-  if (rateStr.includes("%")) {
-    return sum + (remainingBudget * (parseFloat(rateStr) / 100));
+let calculatedRowsSum = 0;
+let exactRowsSumUnrounded = 0; 
+let lastValidRow: any = null;
+
+estimateRows.forEach((row: any) => {
+  let rowAmt = 0;
+  let exactRowAmt = 0;
+  
+  if (row.calculatedAmount !== undefined) {
+    exactRowAmt = Number(row.calculatedAmount);
+    rowAmt = Math.round(exactRowAmt);
+  } else {
+    const q = Number(row.qty || 0);
+    const r = Number(row.rate || 0);
+    exactRowAmt = isNaN(q * r) ? 0 : (q * r);
+    rowAmt = Math.round(exactRowAmt);
+    row.calculatedAmount = exactRowAmt; 
   }
-  const qty = Number(row?.qty || 1);
-  const rate = Number(rateStr || 0);
-  return sum + (qty * rate);
-}, 0);
 
-const rawGrandTotal = coreTotal + calculatedRowsSum;
-const targetBudget = rawBaseValue;
-const discrepancy = targetBudget - rawGrandTotal;
+  calculatedRowsSum += rowAmt;
+  exactRowsSumUnrounded += exactRowAmt;
 
-// Balance minor rounding gaps on the last row if needed
-if (Math.abs(discrepancy) > 0 && Math.abs(discrepancy) < 10) {
-  const lastRow = estimateRows[estimateRows.length - 1];
-  if (lastRow && !coreItems.includes(lastRow)) {
-    const currentQty = Number(lastRow.qty || 1);
-    const currentRate = Number(lastRow.rate || 0);
-    lastRow.rate = (currentRate + (discrepancy / currentQty)).toFixed(2);
+  if (rowAmt > 0) {
+    lastValidRow = row;
+  }
+
+  // Row display amount with 2 decimal digits
+  row.displayAmount = exactRowAmt.toFixed(2);
+});
+
+const targetBudget = Math.round(rawBaseValue); 
+let discrepancy = targetBudget - calculatedRowsSum;
+
+if (discrepancy !== 0 && lastValidRow) {
+  const currentAmt = Number(lastValidRow.calculatedAmount);
+  lastValidRow.calculatedAmount = currentAmt + discrepancy;
+  lastValidRow.displayAmount = Number(lastValidRow.calculatedAmount).toFixed(2);
+  
+  if (String(lastValidRow.rate).includes("%")) {
+    const newWeightShare = Number(lastValidRow.calculatedAmount) / remainingBudget;
+    lastValidRow.rate = (newWeightShare * 100).toFixed(2) + "%";
+  } else {
+    lastValidRow.rate = (Number(lastValidRow.calculatedAmount) / Number(lastValidRow.qty || 1)).toFixed(2);
   }
 }
 
+// 📊 Dual Totals Configuration for UI Table Footer
+const subTotalFormatted = exactRowsSumUnrounded.toFixed(2); // First Total Row (Exact Sum with 2 decimals)
 const finalGrandTotal = targetBudget;
-const formattedTotal = Math.round(finalGrandTotal).toLocaleString('en-IN');
+const finalAmountFormatted = Number(finalGrandTotal).toFixed(2); // Second Total Row (Target / Adjusted Final Amount)
 
 
 if (isCheckingHistory) {
@@ -1363,15 +1440,15 @@ return (
       if (pType === 'HOUSE') {
         return (
           <table className="w-full border border-black border-collapse mb-4">
-            <tbody>
-              <tr>
-                <td className="border border-black p-2 font-bold w-[80%]">PLOT AREA</td>
-                <td className="border border-black p-2 text-center font-bold">
-                  {estimate.plot_area || savedData.plot_area || 0} {estimate.plot_unit || "SQ.FT"}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+  <tbody>
+    <tr>
+      <td className="border border-black p-2 font-bold w-[80%]">PLOT AREA</td>
+      <td className="border border-black p-2 text-center font-bold">
+        {Number(estimate.plot_area || savedData.plot_area || 0).toFixed(2)} {estimate.plot_unit || "SQ.FT"}
+      </td>
+    </tr>
+  </tbody>
+</table>
         );
       }
       return null;
@@ -1396,27 +1473,34 @@ return (
                 <td className="border border-black p-2 text-center">{index + 1}</td>
                 <td className="border border-black p-2">{floor} BUILT UP AREA</td>
                 <td className="border border-black p-2 text-center">
-                  {estimate.floor_details?.[floor]?.area || savedData.floor_details?.[floor]?.area || 0} SQ.FT
-                </td>
+  {Number(estimate.floor_details?.[floor]?.area || savedData.floor_details?.[floor]?.area || 0).toFixed(2)} SQ.FT
+</td>
               </tr>
             ));
           }
           return null;
         })()}
         <tr>
-          <td colSpan={2} className="border border-black p-2 font-bold">TOTAL BUILT UP AREA</td>
-          <td className="border border-black p-2 text-center font-bold">{totalBuiltupSqFt} SQ.FT</td>
-        </tr>
+  <td colSpan={2} className="border border-black p-2 font-bold">TOTAL BUILT UP AREA</td>
+  <td className="border border-black p-2 text-center font-bold">
+    {Number(totalBuiltupSqFt || 0).toFixed(2)} SQ.FT
+  </td>
+</tr>
       </tbody>
     </table>
 
     <div className="flex justify-between items-center border border-black bg-slate-100 p-3 my-4 font-bold text-sm">
-  <div>TOTAL BUILT UP AREA : {totalBuiltupSqFt} SQ.FT</div>
+  {/* Yahan totalBuiltupSqFt ko 2 decimals mein kiya */}
+  <div>TOTAL BUILT UP AREA : {Number(totalBuiltupSqFt || 0).toFixed(2)} SQ.FT</div>
+  
   <div>
-    RATE PER SQ.FT : ₹ {Math.round(rate).toLocaleString('en-IN')}/-
+    {/* Yahan rate ko 2 decimals ke sath format kiya */}
+    RATE PER SQ.FT : ₹ {Number(rate || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-
   </div>
+  
   <div>
-    TOTAL VALUE : ₹ {Math.round(rawBaseValue).toLocaleString('en-IN')}/-
+    {/* Yahan rawBaseValue ko 2 decimals ke sath format kiya */}
+    TOTAL VALUE : ₹ {Number(rawBaseValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-
   </div>
 </div>
 
@@ -1463,26 +1547,35 @@ return (
                 
                 return (
                   <tr key={index} className="border-b border-black hover:bg-slate-50">
-                    <td className="border border-black p-1 text-center">{index + 1}</td>
-                    <td className="border border-black p-1 font-medium capitalize">{row.description?.toLowerCase()}</td>
-                    <td className="border border-black p-1 text-center">{row.nos ?? "-"}</td>
-                    <td className="border border-black p-1 text-center">{row.qty ?? "-"}</td>
-                    <td className="border border-black p-1 text-center">{row.unit}</td>
-                    <td className="border border-black p-1 text-center">
-                      {isPercentage ? (showPercent ? `${calculatedPercent.toFixed(2)}%` : "-") : row.rate}
-                    </td>
-                    <td className="border border-black p-1 text-right font-semibold">
-                      {Math.round(rowAmount).toLocaleString("en-IN")}
-                    </td>
-                  </tr>
+  <td className="border border-black p-1 text-center">{index + 1}</td>
+  <td className="border border-black p-1 font-medium capitalize">{row.description?.toLowerCase()}</td>
+  <td className="border border-black p-1 text-center">{row.nos ?? "-"}</td>
+  
+  {/* QTY - 2 Decimals */}
+  <td className="border border-black p-1 text-center">
+    {row.qty !== undefined && row.qty !== null ? Number(row.qty).toFixed(2) : "-"}
+  </td>
+
+  <td className="border border-black p-1 text-center">{row.unit}</td>
+
+  {/* RATE - 2 Decimals */}
+  <td className="border border-black p-1 text-center">
+    {isPercentage ? (showPercent ? `${calculatedPercent.toFixed(2)}%` : "-") : (isNaN(Number(row.rate)) ? row.rate : Number(row.rate).toFixed(2))}
+  </td>
+
+  {/* AMOUNT - 2 Decimals */}
+  <td className="border border-black p-1 text-right font-semibold">
+    {Number(row.displayAmount || row.calculatedAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+  </td>
+</tr>
                 );
               })}
             <tr className="bg-slate-100 font-bold border-t-2 border-black text-base whitespace-nowrap">
-            <td colSpan={6} className="border border-black p-3 text-right uppercase tracking-wide">TOTAL AMOUNT:</td>
-            <td className="border border-black p-3 text-right font-mono">
-              ₹ {formattedTotal}
-            </td>
-          </tr>
+  <td colSpan={6} className="border border-black p-3 text-right uppercase tracking-wide">TOTAL AMOUNT:</td>
+  <td className="border border-black p-3 text-right font-mono">
+    ₹ {Math.round(Number(targetBudget || rawBaseValue || 0)).toLocaleString('en-IN')}
+  </td>
+</tr>
         </tbody>
       </table>
     </div>

@@ -26,7 +26,7 @@ export default function DocumentManagementSystem() {
     village: "Bicholi Mardana",
     surveyNo: "",
     colonyName: "",
-    docType: "Colony Layout (Approved Master Plan)",
+    docType: "Colony Layout",
   });
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -68,34 +68,16 @@ export default function DocumentManagementSystem() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [activeDoc, setActiveDoc] = useState<DocumentItem | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  useEffect(() => {
-    fetchDocuments();
-    checkUserRole();
+  // 🔄 Rotation State
+  const [rotationDeg, setRotationDeg] = useState<number>(0);
 
-    // Listen to auth state changes so role updates immediately if auth state syncs after mount
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        checkUserRole();
-      } else {
-        setIsAdmin(false);
-        setCurrentUserEmail(null);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  // Real Database Role Checker using shared supabase instance
   const checkUserRole = async () => {
     try {
-      // 1. Get current session using the shared client
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError || !session || !session.user) {
-        console.log("No active session found in document management.");
         setIsAdmin(false);
         return;
       }
@@ -103,7 +85,6 @@ export default function DocumentManagementSystem() {
       const user = session.user;
       setCurrentUserEmail(user.email || null);
 
-      // 2. Fetch role from profiles table using the user's ID
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
         .select("role")
@@ -111,19 +92,16 @@ export default function DocumentManagementSystem() {
         .single();
 
       if (profileError || !profileData) {
-        console.error("Profile fetch error:", profileError);
         setIsAdmin(false);
         return;
       }
 
-      // 3. Verify if role is admin
       if (profileData.role?.trim().toLowerCase() === "admin") {
         setIsAdmin(true);
       } else {
         setIsAdmin(false);
       }
     } catch (err) {
-      console.error("Role check exception:", err);
       setIsAdmin(false);
     }
   };
@@ -136,6 +114,35 @@ export default function DocumentManagementSystem() {
     if (data) setDocuments(data);
     if (error) console.error("Error fetching docs:", error);
   };
+
+  useEffect(() => {
+    fetchDocuments();
+    checkUserRole();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        checkUserRole();
+      } else {
+        setIsAdmin(false);
+        setCurrentUserEmail(null);
+      }
+    });
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 's' || e.key === 'P' || e.key === 'S')) {
+        e.preventDefault();
+        e.stopPropagation();
+        alert("🔒 Printing and Saving are disabled for previewed documents.");
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -154,7 +161,7 @@ export default function DocumentManagementSystem() {
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
-      alert("Access Denied: Only users with 'admin' role in profiles table can upload files.");
+      alert("Access Denied: Only users with 'admin' role can upload files.");
       return;
     }
     if (!selectedFile) {
@@ -167,13 +174,13 @@ export default function DocumentManagementSystem() {
       const fileName = `${Date.now()}_${selectedFile.name}`;
 
       const { error: storageError } = await supabase.storage
-        .from("documents")
+        .from("DOCUMENT MANAGEMENT SYSTEM")
         .upload(fileName, selectedFile);
 
       if (storageError) throw storageError;
 
       const { data: publicUrlData } = supabase.storage
-        .from("documents")
+        .from("DOCUMENT MANAGEMENT SYSTEM")
         .getPublicUrl(fileName);
 
       const fileUrl = publicUrlData.publicUrl;
@@ -207,26 +214,74 @@ export default function DocumentManagementSystem() {
     }
   };
 
-  const handleSimulatePayment = async () => {
+  const handleRazorpayPayment = async () => {
     if (!activeDoc) return;
-    const confirmPay = window.confirm("Secure Gateway: Pay ₹499 to unlock download rights?");
-    if (confirmPay) {
-      const { error } = await supabase
-        .from("documents")
-        .update({ is_paid: true })
-        .eq("id", activeDoc.id);
+    setIsProcessingPayment(true);
 
-      if (error) {
-        alert("Payment update failed: " + error.message);
+    try {
+      const res = await new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = "https://checkout.razorpay.com/v1/checkout.js";
+        script.onload = () => resolve(true);
+        script.onerror = () => resolve(false);
+        document.body.appendChild(script);
+      });
+
+      if (!res) {
+        alert("Razorpay SDK failed to load. Are you online?");
+        setIsProcessingPayment(false);
         return;
       }
 
-      setDocuments(documents.map(d => d.id === activeDoc.id ? { ...d, is_paid: true } : d));
-      setActiveDoc({ ...activeDoc, is_paid: true });
-      setShowPaymentModal(false);
-      alert("Payment Successful! Download unlocked.");
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_YourKeyHere",
+        amount: 499 * 100,
+        currency: "INR",
+        name: "LnT Document Management System",
+        description: `Unlock Document: ${activeDoc.doc_type}`,
+        handler: async function (response: any) {
+          try {
+            const { error } = await supabase
+              .from("documents")
+              .update({ 
+                is_paid: true,
+                razorpay_payment_id: response.razorpay_payment_id 
+              })
+              .eq("id", activeDoc.id);
+
+            if (error) {
+              alert("Payment recorded on Razorpay, but database update failed: " + error.message);
+              return;
+            }
+
+            setDocuments(documents.map(d => d.id === activeDoc.id ? { ...d, is_paid: true } : d));
+            setActiveDoc({ ...activeDoc, is_paid: true });
+            setShowPaymentModal(false);
+            alert("✅ Payment Successful! Download unlocked.");
+          } catch (err: any) {
+            alert("Error updating payment status: " + err.message);
+          }
+        },
+        prefill: {
+          email: currentUserEmail || "user@example.com",
+        },
+        theme: {
+          color: "#2563eb",
+        },
+      };
+
+      const paymentWindow = new (window as any).Razorpay(options);
+      paymentWindow.open();
+    } catch (err: any) {
+      alert("Payment initialization failed: " + err.message);
+    } finally {
+      setIsProcessingPayment(false);
     }
   };
+
+  const handleRotateLeft = () => setRotationDeg((prev) => (prev - 90) % 360);
+  const handleRotateRight = () => setRotationDeg((prev) => (prev + 90) % 360);
+  const handleResetRotation = () => setRotationDeg(0);
 
   const filteredDocuments = documents.filter((doc) => {
     return (
@@ -241,7 +296,13 @@ export default function DocumentManagementSystem() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-100 p-6 font-sans">
+    <div className="min-h-screen bg-slate-100 p-6 font-sans select-none">
+      <style>{`
+        @media print {
+          body { display: none !important; }
+        }
+      `}</style>
+
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header */}
@@ -272,7 +333,7 @@ export default function DocumentManagementSystem() {
           </div>
         </div>
 
-        {/* Upload Form - Visible only if role = 'admin' in profiles table */}
+        {/* Upload Form */}
         {isAdmin && (
           <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200 border-l-4 border-l-blue-600">
             <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
@@ -375,21 +436,22 @@ export default function DocumentManagementSystem() {
                         </span>
                       </td>
                       <td className="p-3 text-center space-x-1.5 whitespace-nowrap">
-                        <button 
-                          onClick={() => { setActiveDoc(doc); setPreviewUrl(doc.file_url); }}
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded text-[11px] transition shadow-xs"
-                        >
-                          View
-                        </button>
-
-                        {doc.is_paid ? (
-                          <a 
-                            href={doc.file_url} 
-                            download={doc.file_name}
-                            className="inline-block px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-[11px] transition shadow-xs"
-                          >
-                            Download
-                          </a>
+                        {doc.is_paid || isAdmin ? (
+                          <>
+                            <button 
+                              onClick={() => { setActiveDoc(doc); setPreviewUrl(doc.file_url); setRotationDeg(0); }}
+                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white font-semibold rounded text-[11px] transition shadow-xs"
+                            >
+                              View
+                            </button>
+                            <a 
+                              href={doc.file_url} 
+                              download={doc.file_name}
+                              className="inline-block px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-[11px] transition shadow-xs"
+                            >
+                              Download
+                            </a>
+                          </>
                         ) : (
                           <button 
                             onClick={() => { setActiveDoc(doc); setShowPaymentModal(true); }}
@@ -417,32 +479,90 @@ export default function DocumentManagementSystem() {
 
       {/* Preview Modal */}
       {previewUrl && activeDoc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-center items-center p-4">
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex justify-center items-center p-4"
+          onContextMenu={(e) => e.preventDefault()}
+        >
           <div className="bg-white w-full max-w-4xl h-[85vh] rounded-xl shadow-xl flex flex-col overflow-hidden">
             <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider">{activeDoc.doc_type}</h3>
                 <p className="text-[10px] text-slate-400">File: {activeDoc.file_name} ({activeDoc.file_size})</p>
               </div>
-              <button 
-                onClick={() => { setPreviewUrl(null); setActiveDoc(null); }}
-                className="bg-slate-800 hover:bg-red-600 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition"
-              >
-                ✕
-              </button>
+
+              {/* Rotation Controls */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleRotateLeft}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded transition"
+                  title="Rotate Left"
+                >
+                  ↺ -90°
+                </button>
+                <button
+                  onClick={handleRotateRight}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded transition"
+                  title="Rotate Right"
+                >
+                  ↻ +90°
+                </button>
+                <button
+                  onClick={handleResetRotation}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded transition"
+                  title="Reset"
+                >
+                  Reset
+                </button>
+                <button 
+                  onClick={() => { setPreviewUrl(null); setActiveDoc(null); setRotationDeg(0); }}
+                  className="bg-slate-800 hover:bg-red-600 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition ml-2"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
             
-            <div className="flex-1 bg-slate-100 p-2">
-              <iframe 
-                src={`${previewUrl}#toolbar=0&navpanes=0`} 
-                className="w-full h-full rounded-lg border border-slate-300 bg-white"
-                title="Document Viewer"
-              />
+            <div className="flex-1 bg-slate-100 p-2 overflow-auto flex items-center justify-center relative">
+              {activeDoc.is_paid || isAdmin ? (
+                <div 
+                  className="w-full h-full transition-transform duration-300 ease-in-out flex items-center justify-center relative"
+                  style={{ transform: `rotate(${rotationDeg}deg)` }}
+                >
+                  <div 
+                    className="absolute inset-0 z-10 bg-transparent cursor-default"
+                    onContextMenu={(e) => { e.preventDefault(); alert("Right-click is disabled."); }}
+                  ></div>
+
+                  <iframe 
+                    src={`${previewUrl}#toolbar=0&navpanes=0&scrollbar=0`} 
+                    className="w-full h-full rounded-lg border border-slate-300 bg-white"
+                    title="Document Viewer"
+                  />
+                </div>
+              ) : (
+                <div className="text-center space-y-3 p-6">
+                  <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center text-xl mx-auto font-bold">
+                    🔒
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-800">Preview Locked</h4>
+                  <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    You must complete the payment of ₹499 to view and download this document.
+                  </p>
+                  <button 
+                    onClick={() => { setPreviewUrl(null); setShowPaymentModal(true); }}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg text-xs shadow-xs"
+                  >
+                    Proceed to Payment (₹499)
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="p-3 bg-white border-t border-slate-200 flex justify-between items-center text-xs">
-              <span className="text-slate-500">🔒 Secure Viewer</span>
-              {activeDoc.is_paid ? (
+              <span className="text-slate-500 flex items-center gap-1">
+                🔒 Protected Viewer (Right-Click, Save & Print Disabled)
+              </span>
+              {activeDoc.is_paid || isAdmin ? (
                 <a href={activeDoc.file_url} download={activeDoc.file_name} className="px-4 py-2 bg-emerald-600 text-white font-semibold rounded-lg">
                   Download File
                 </a>
@@ -465,7 +585,7 @@ export default function DocumentManagementSystem() {
             </div>
             <h3 className="text-sm font-bold text-slate-900">Unlock Download Rights</h3>
             <p className="text-xs text-slate-500">
-              Unlock <span className="font-semibold text-slate-700">{activeDoc.file_name}</span> for Survey No: <span className="font-bold text-blue-600">{activeDoc.survey_no}</span>.
+              Unlock <span className="font-semibold text-slate-700">{activeDoc.file_name}</span> for Survey No: <span className="font-bold text-blue-600">{activeDoc.survey_no}</span> via Razorpay.
             </p>
             
             <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-left text-xs space-y-1">
@@ -477,8 +597,12 @@ export default function DocumentManagementSystem() {
               <button onClick={() => setShowPaymentModal(false)} className="w-1/2 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg text-xs">
                 Cancel
               </button>
-              <button onClick={handleSimulatePayment} className="w-1/2 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs shadow-xs">
-                Pay Now
+              <button 
+                onClick={handleRazorpayPayment} 
+                disabled={isProcessingPayment}
+                className="w-1/2 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg text-xs shadow-xs disabled:opacity-50"
+              >
+                {isProcessingPayment ? "Processing..." : "Pay with Razorpay"}
               </button>
             </div>
           </div>

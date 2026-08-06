@@ -92,6 +92,7 @@ export default function Sidebar() {
               <Link href="/estimate" className="block py-0.5 hover:text-blue-300">New Construction</Link>
               <Link href="/renovation-estimate" className="block py-0.5 hover:text-blue-300">Renovation</Link>
               <Link href="/extension-estimate" className="block py-0.5 hover:text-blue-300">Renovation + Extension</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
+              <Link href="/remaining-work-estimate" className="block py-0.5 hover:text-blue-300">Remaining Work</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
             </div>
           )}
         </div>
@@ -106,7 +107,18 @@ export default function Sidebar() {
             className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors"
           >
             <span>📂</span>
-            {!collapsed && <span className="font-bold">DOC. M. SYSTEM</span>}
+            {!collapsed && <span className="font-bold">DOC. MANAGEMENT</span>}
+          </Link>
+        </div>
+
+        {/* VALUATION ASSESSMENT */}
+        <div>
+          <Link 
+            href="/valuation-assessment" 
+            className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors"
+          >
+            <span>🤖</span>
+            {!collapsed && <span className="font-bold">VALUATION ASSESSMENT</span>}
           </Link>
         </div>
 

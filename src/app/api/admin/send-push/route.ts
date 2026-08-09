@@ -2,14 +2,19 @@ import { NextResponse } from 'next/server';
 import webpush from 'web-push';
 import { supabase } from '@/lib/supabase';
 
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT || 'mailto:admin@yourcompany.com',
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
-
 export async function POST(request: Request) {
   try {
+    // VAPID details ko function ke andar initialize karein taaki build error na aaye
+    if (process.env.VAPID_PRIVATE_KEY && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY) {
+      webpush.setVapidDetails(
+        process.env.VAPID_SUBJECT || 'mailto:admin@yourcompany.com',
+        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+        process.env.VAPID_PRIVATE_KEY
+      );
+    } else {
+      throw new Error('VAPID keys are missing in environment variables.');
+    }
+
     let title = '';
     let body = '';
 
@@ -49,7 +54,7 @@ export async function POST(request: Request) {
 
     await Promise.all(promises);
 
-    return NextResponse.json({ success: true, message: 'Daily broadcast sent successfully at 11:00 AM!' });
+    return NextResponse.json({ success: true, message: 'Daily broadcast sent successfully!' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

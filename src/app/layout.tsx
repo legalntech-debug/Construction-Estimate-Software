@@ -1,5 +1,5 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google"; // Geist ki jagah Inter use karein
+import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 
@@ -9,22 +9,44 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
+// PWA और App की metadata यहाँ डिफाइन करें
 export const metadata: Metadata = {
-  title: "LNT WITH AI 2.0",
-  description: "Construction Estimate & Planning System",
+  title: "LNT WITH AI 2.0 - Construction & Deed Software",
+  description: "Construction Estimate & Deed Drafting System",
+  manifest: "/manifest.json",
   icons: {
     icon: '/logo.jpg',
   },
 };
 
+// Next.js 14+ में viewport के लिए अलग से export करना सही तरीका है
+export const viewport: Viewport = {
+  themeColor: "#2563eb",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <head>
-        {/* Yeh line add karna zaroori hai */}
-        
+        {/* Service Worker Registration Script */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then((reg) => console.log('Service Worker registered!', reg))
+                    .catch((err) => console.log('Service Worker failed', err));
+                });
+              }
+            `,
+          }}
+        />
       </head>
-      <body className="h-full w-full">
+      <body className="h-full w-full font-sans">
         <AuthProvider>
           {children}
         </AuthProvider>

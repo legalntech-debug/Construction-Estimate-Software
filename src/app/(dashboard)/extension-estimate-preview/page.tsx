@@ -8,86 +8,75 @@ import "./print.css";
 import { QRCodeSVG } from 'qrcode.react';
 
 const slabConfig: any = {
-  500: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  600: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  700: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  800: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  900: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  1000: { door: 0.10, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  1100: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14}, //done//
-  1150: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14}, //done//
-  1200: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1250: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1300: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1350: { door: 0.14,  paint: 0.14, ms: 0.1,  plumb: 0.195, elec: 0.195, floor: 0.23}, //done//
-  1400: { door: 0.14,  paint: 0.14, ms: 0.11,  plumb: 0.195, elec: 0.195, floor: 0.22}, //done//
-  1500: { door: 0.131, paint: 0.125, ms: 0.13, plumb: 0.187, elec: 0.187, floor: 0.24 }, //done//
-  1550: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.17, ceiling: 0.08,water: 0.129 }, //done//
-  1600: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 }, //done//
-  1650: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 }, //done//
-  1700: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.15, water: 0.13 }, //done//
-  1750: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.28 }, //done//
-  1800: { door: 0.078, paint: 0.08, ms: 0.078, plumb: 0.13, elec: 0.13, floor: 0.135, ceiling: 0.05, kitchen: 0.154, water: 0.1, furnish: 0.065 },//done//
-  1900: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.13, elec: 0.13, floor: 0.13, ceiling: 0.06, kitchen: 0.14,  water: 0.1, furnish: 0.12},//done//
-  2000: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.10, elec: 0.10, floor: 0.11, ceiling: 0.06, kitchen: 0.13, water: 0.11, furnish: 0.16, elev: 0.04 }, //done//
-  2100: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.16, elev: 0.04, cons: 0.02}, //done//
-  2200: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2250: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2300: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2350: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2400: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2450: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.182, elev: 0.035, cons: 0.02, bore: 0.043}, //done//
-  2500: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2550: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2600: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2650: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2700: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335}, //done//
-  2750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335}, //done//
-  2800: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335}, //done//
-  2850: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335}, //done//
-  2900: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34}, //done//
-  3000: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34}, //done//
-  3100: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35}, //done//
-  3150: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35}, //done//
-  3200: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275}, //done//
-  3250: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275}, //done//
-  3500: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.095, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.195, elev: 0.02, cons: 0.023, bore: 0.017, lift: 0.24}, //done//
-  3750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.06, water: 0.023, furnish: 0.206, elev: 0.015, cons: 0.03, bore: 0.012, lift: 0.20}, //done//
-  4000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.356, elev: 0.01, cons: 0.03, bore: 0.005, lift: 0.085}, //done//
-  4250: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085}, //done//
-  4500: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085}, //done//
-
-  4750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.336, elev: 0.01, cons: 0.033, bore: 0.007, lift: 0.1}, //done//
-  5000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.337, elev: 0.01, cons: 0.033, bore: 0.006, lift: 0.1} //done//
+  1000: { door: 0.20, plumb: 0.335, elec: 0.335, paint: 0.13 },
+  1100: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14 },
+  1150: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14 },
+  1200: { door: 0.14, paint: 0.14, ms: 0.08, plumb: 0.2, elec: 0.2, floor: 0.24 },
+  1250: { door: 0.14, paint: 0.14, ms: 0.08, plumb: 0.2, elec: 0.2, floor: 0.24 },
+  1300: { door: 0.14, paint: 0.14, ms: 0.08, plumb: 0.2, elec: 0.2, floor: 0.24 },
+  1350: { door: 0.14, paint: 0.14, ms: 0.1, plumb: 0.195, elec: 0.195, floor: 0.23 },
+  1400: { door: 0.14, paint: 0.14, ms: 0.11, plumb: 0.195, elec: 0.195, floor: 0.22 },
+  1500: { door: 0.131, paint: 0.125, ms: 0.13, plumb: 0.187, elec: 0.187, floor: 0.24 },
+  1550: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.17, ceiling: 0.08, water: 0.129 },
+  1600: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07, water: 0.129 },
+  1650: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07, water: 0.129 },
+  1700: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.15, water: 0.13 },
+  1750: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.28 },
+  1800: { door: 0.078, paint: 0.08, ms: 0.078, plumb: 0.13, elec: 0.13, floor: 0.135, ceiling: 0.05, kitchen: 0.154, water: 0.1, furnish: 0.065 },
+  1900: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.13, elec: 0.13, floor: 0.13, ceiling: 0.06, kitchen: 0.14, water: 0.1, furnish: 0.12 },
+  2000: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.10, elec: 0.10, floor: 0.11, ceiling: 0.06, kitchen: 0.13, water: 0.11, furnish: 0.16, elev: 0.04 },
+  2100: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.16, elev: 0.04, cons: 0.02 },
+  2200: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2250: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2300: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2350: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2400: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2450: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.182, elev: 0.035, cons: 0.02, bore: 0.043 },
+  2500: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2550: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2600: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2650: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045 },
+  2700: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335 },
+  2750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335 },
+  2800: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335 },
+  2850: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335 },
+  2900: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34 },
+  3000: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34 },
+  3100: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35 },
+  3150: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35 },
+  3200: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275 },
+  3250: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275 },
+  3500: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.095, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.195, elev: 0.02, cons: 0.023, bore: 0.017, lift: 0.24 },
+  3750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.06, water: 0.023, furnish: 0.206, elev: 0.015, cons: 0.03, bore: 0.012, lift: 0.20 },
+  4000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.356, elev: 0.01, cons: 0.03, bore: 0.005, lift: 0.085 },
+  4250: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085 },
+  4500: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085 },
+  4750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.336, elev: 0.01, cons: 0.033, bore: 0.007, lift: 0.1 },
+  5000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.337, elev: 0.01, cons: 0.033, bore: 0.006, lift: 0.1 }
 };
 
-export default function RemainingWorkEstimatePreviewPage() {
+export default function ExtensionEstimatePreviewPage() {
   const router = useRouter();
   const { currentUser, setCurrentUser } = useAuth();
 
-  // 1. Core States
   const [estimate, setEstimate] = useState<any>(null);
   const [masterItem, setMasterItem] = useState<any>(null);
   const [selectedPlotMaster, setSelectedPlotMaster] = useState<any>(null);
   const [totalColumnNos, setTotalColumnNos] = useState(0);
 
-  // 2. Control & UI States
   const [isPaid, setIsPaid] = useState(false);
-  const [showPayModal, setShowPayModal] = useState(false);
   const [totalEstimates, setTotalEstimates] = useState(0);
   const [requiresPayment, setRequiresPayment] = useState(false);
   const [validationReason, setValidationReason] = useState("");
   const [isCheckingHistory, setIsCheckingHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 3. Custom Letterhead System
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
   const [customHeaderTitle, setCustomHeaderTitle] = useState('');
   const [customSubtitle, setCustomSubtitle] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [legalText, setLegalText] = useState("WE PROVIDE TECHNICAL SERVICES INCLUDING CONSTRUCTION ESTIMATION, BUILDING PLANNING AND DESIGN, BUILDING PERMISSION AND PLAN APPROVAL, SITE LAYOUT .");
   const [disclaimerText, setDisclaimerText] = useState("This estimation is provided purely as a tentative budgetary guide for informational purposes at the request of the customer to understand the potential scope and incurred costs of the house/bungalow. It is not a binding commercial contract, a fixed-price quotation, or a guaranteed construction cost, as final expenses may vary significantly due to market fluctuations in material prices (e.g., steel, cement), unforeseen site-specific conditions, design changes, and local regulatory requirements. Before initiating any financial commitments, the customer is strictly advised to conduct a detailed site inspection and consult with qualified structural engineers and contractors to obtain finalized site-specific BOQs and quotes. The estimator bears no financial or legal liability for any budget shortfalls, cost overruns, or discrepancies that may arise during actual construction, and the use of this document for any financial or institutional application remains the sole responsibility of the customer. This document is valid for 60 days from the date of issue.");
-  const [showSignature, setShowSignature] = useState(false);
   const [signatureDetails, setSignatureDetails] = useState<string | null>(null);
   const userCategory = (currentUser?.user_type || 'INDIVIDUAL USER').toUpperCase();
   const [isFinalized, setIsFinalized] = useState(false);
@@ -96,10 +85,13 @@ export default function RemainingWorkEstimatePreviewPage() {
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/...");
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
   
-    
+  const isGroundFloorOnly = estimate?.floors === 1 || false;
+  const groundFloorArea = estimate?.groundFloorArea || 0;
+  const firstFloorArea = estimate?.firstFloorArea || 0;
+  const totalCombinedArea = groundFloorArea + firstFloorArea;
+
   const checkEstimatePaymentStatus = async (currentRefNo: string) => {
     if (!currentRefNo) return;
-
     try {
       const { data } = await supabase
         .from('estimates')
@@ -118,31 +110,32 @@ export default function RemainingWorkEstimatePreviewPage() {
   };
 
   useEffect(() => {
-    const savedData = JSON.parse(localStorage.getItem("estimatePreview") || "{}");
+    const data = localStorage.getItem("extensionEstimatePreview");
+    if (!data) {
+      router.push("/extension-estimate"); 
+      return;
+    }
+    try {
+      const parsedData = JSON.parse(data);
+      setEstimate(parsedData);
+      if (parsedData?.rate_per_sqft) {
+        loadMasterItem(Number(parsedData.rate_per_sqft));
+      }
+    } catch (e) {
+      console.error("Error parsing preview data", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    const savedData = JSON.parse(localStorage.getItem("extensionEstimatePreview") || "{}");
     if (savedData?.ref_no) {
       checkEstimatePaymentStatus(savedData.ref_no);
     }
   }, []);
 
   useEffect(() => {
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-      if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-        e.preventDefault();
-        alert("Please complete the payment (₹21) before printing or saving the estimate!");
-      }
-    }
-  };
-
-  window.addEventListener('keydown', handleKeyDown);
-  return () => {
-    window.removeEventListener('keydown', handleKeyDown);
-  };
-}, [isPaid, isAlreadyPaid, userCategory]);
-
-  useEffect(() => {
     const checkExistingPayment = async () => {
-      const savedData = localStorage.getItem("estimatePreview");
+      const savedData = localStorage.getItem("extensionEstimatePreview");
       if (!savedData) return;
       try {
         const parsed = JSON.parse(savedData);
@@ -196,30 +189,7 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   const handleRazorpayPayment = () => handlePayment();
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-          e.preventDefault();
-          alert("Please complete the payment (₹21) before printing or saving the estimate!");
-          handlePayment();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isPaid, isAlreadyPaid, userCategory]);
-
   const handleSaveAndPrint = async () => {
-    if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-      alert("Please complete the payment (₹21) before printing or saving the estimate!");
-      handlePayment();
-      return;
-    }
-
     if (isSaving) return;
     setIsSaving(true);
     try {
@@ -244,7 +214,6 @@ export default function RemainingWorkEstimatePreviewPage() {
       }
       window.print();
     } catch (error) {
-      console.error("Print error:", error);
     } finally {
       setIsSaving(false);
     }
@@ -275,13 +244,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         amount: 2100,
         currency: "INR",
         name: "Construction Estimate",
-        order_id: data.id, 
-        config: {
-          display: {
-            sequence: ["block.upi_qr", "block.cards", "block.netbanking", "block.wallet"],
-            preferences: { show_default_blocks: true },
-          },
-        },
+        order_id: data.id,
         handler: async function (response: any) {
           try {
             const paymentDetails = {
@@ -317,13 +280,6 @@ export default function RemainingWorkEstimatePreviewPage() {
       alert("Payment initialization failed. Please try again.");
     }
   };
-  
-  useEffect(() => {
-    const savedLogo = localStorage.getItem("customLogo");
-    if (savedLogo) {
-      setLogoUrl(savedLogo);
-    }
-  }, []);
 
   useEffect(() => {
     const initializeDashboard = async () => {
@@ -375,21 +331,20 @@ export default function RemainingWorkEstimatePreviewPage() {
     const caseTypeMap: any = {
       "NEW CONSTRUCTION": "estimate_fee",
       "RENOVATION": "plan_fee",
-      "RENOVATION + EXTENSION": "route_map_fee"
+      "RENOVATION + EXTENSION": "route_map_fee",
+      "EXTENSION & RENOVATION": "route_map_fee"
     };
     const targetColumn = caseTypeMap[caseType] || "estimate_fee";
 
     const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
     const cleanRName = repName?.split(/[.\s]+/)[0].trim();
-  
-    const { data, error } = await supabase
+    
+    const { data } = await supabase
       .from("clients")
       .select(targetColumn)
       .ilike("client_name", `${cleanCName}%`) 
       .ilike("representative_name", `${cleanRName}%`)
       .maybeSingle();
-
-    if (error) return 0;
 
     return data ? Number(data[targetColumn] || 0) : 0;
   };
@@ -410,7 +365,6 @@ export default function RemainingWorkEstimatePreviewPage() {
 
     try {
       setIsSaving(true);
-
       let activeEstimateId = estimate?.id || null;
       let activeRefNo = estimate?.ref_no && !estimate?.ref_no.startsWith("TEMP") && !estimate?.ref_no.includes("...") 
         ? estimate.ref_no 
@@ -494,7 +448,7 @@ export default function RemainingWorkEstimatePreviewPage() {
           date: now.toISOString() 
         },
         p_fee_standard: Number(consultingFee) || 0,
-        p_estimate_type: estimate?.estimate_type || 'RENOVATION',
+        p_estimate_type: estimate?.estimate_type || 'EXTENSION & RENOVATION',
         p_plan_type: estimate?.plan_type || 'BASIC',
         p_rate_per_sqft: Number(estimate?.rate_per_sqft || 0),
         p_floor_details: (estimate?.floor_details && typeof estimate.floor_details === 'object') ? estimate.floor_details : {},
@@ -524,8 +478,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         setEstimate((prev: any) => ({ ...prev, id: result.estimate_id, ref_no: result.ref_no }));
         setIsFinalized(true);
         setIsPaid(true);
-        localStorage.removeItem("renovationEstimatePreview");
-        localStorage.removeItem("estimatePreview");
+        localStorage.removeItem("extensionEstimatePreview");
         alert(`Saved successfully! Ref: ${result.ref_no}`);
         setTimeout(() => window.print(), 500);
       }
@@ -536,14 +489,20 @@ export default function RemainingWorkEstimatePreviewPage() {
     }
   };
 
+  // Helper to check if Ground Floor has Proposed construction
+  const isGroundFloorProposed = (() => {
+    const gfMode = estimate?.floor_modes?.["GROUND FLOOR"];
+    const gfSelected = estimate?.selected_floors?.includes("GROUND FLOOR");
+    if (!gfSelected) return false;
+    return gfMode === "PROPOSED" || gfMode === "BOTH";
+  })();
+
   useEffect(() => {
     let isMounted = true;
 
     async function calculateDynamicColumns() {
       if (!estimate) return;
-      
       const floors = estimate.selected_floors || [];
-      const floorWiseItems = estimate.floor_wise_items || {};
       let otherFloorsCols = 0;
       let groundCols = 0;
 
@@ -551,19 +510,16 @@ export default function RemainingWorkEstimatePreviewPage() {
         const fData = estimate.floor_details?.[floor];
         if (!fData) continue;
 
-        const count = await getColumnsForFloor(fData.width, fData.length);
+        const count = await getColumnsForFloor(fData.width || fData.proposed?.width || 0, fData.length || fData.proposed?.length || 0);
         if (floor === "GROUND FLOOR") {
-          const isGroundFoundationSelected = floorWiseItems["GROUND FLOOR"] 
-            ? (floorWiseItems["GROUND FLOOR"].includes("rcc_foundation") || floorWiseItems["GROUND FLOOR"].includes("earthwork"))
-            : true;
-          groundCols = isGroundFoundationSelected ? count * 2 : count;
+          groundCols = count;
         } else {
           otherFloorsCols += count;
         }
       }
 
-      const finalTotal = groundCols + otherFloorsCols;
-      
+      // Agar ground floor proposed hai toh columns double honge, nahi toh sirf upper/other floors ke columns rahenge
+      const finalTotal = isGroundFloorProposed ? (groundCols * 2) + otherFloorsCols : otherFloorsCols;
       if (isMounted && totalColumnNos !== finalTotal) {
         setTotalColumnNos(finalTotal);
       }
@@ -574,61 +530,7 @@ export default function RemainingWorkEstimatePreviewPage() {
     return () => {
       isMounted = false;
     };
-  }, [estimate, totalColumnNos]);
-
-  useEffect(() => {
-    const loadAndVerifyEstimateData = async () => {
-      const data = localStorage.getItem("estimatePreview");
-      if (!data) return;
-
-      const estimateData = JSON.parse(data);
-      let workingEstimate = { ...estimateData, id: estimateData.id || null };
-
-      if (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-")) {
-        try {
-          const { data: existingRecord } = await supabase
-            .from("estimates")
-            .select("*")
-            .eq("customer_name", workingEstimate.customer_name)
-            .eq("property_address", workingEstimate.property_address)
-            .maybeSingle();
-
-          if (existingRecord) {
-            workingEstimate.id = existingRecord.id;
-            workingEstimate.ref_no = existingRecord.ref_no;
-            if (existingRecord.payment_status === 'paid' || existingRecord.status === 'paid') {
-              setIsPaid(true);
-              setIsAlreadyPaid(true);
-            }
-          }
-        } catch (err) {}
-      }
-
-      setEstimate(workingEstimate);
-
-      const statusCheck = (workingEstimate.status || "").trim().toUpperCase();
-      const paymentStatusCheck = (workingEstimate.payment_status || "").trim().toUpperCase();
-      
-      const isPaidFlag = 
-        workingEstimate.isAlreadyPaid === true || 
-        workingEstimate.is_paid === true ||
-        statusCheck === "RECEIVED" || 
-        statusCheck === "PAID" ||
-        statusCheck === "SUCCESS" ||
-        paymentStatusCheck === "PAID";
-
-      if (isPaidFlag) {
-        setIsPaid(true);
-        setIsAlreadyPaid(true);
-      }
-      
-      if (workingEstimate.rate_per_sqft) {
-        loadMasterItem(Number(workingEstimate.rate_per_sqft));
-      }
-    };
-
-    loadAndVerifyEstimateData();
-  }, []);
+  }, [estimate, totalColumnNos, isGroundFloorProposed]);
 
   useEffect(() => {
     if (estimate) {
@@ -677,7 +579,7 @@ export default function RemainingWorkEstimatePreviewPage() {
       window.removeEventListener('contextmenu', preventRightClick);
     };
   }, []);
-  
+
   const loadMasterItem = async (selectedRate: number) => {
     const { data, error } = await supabase.from("master_items").select("*");
     if (error || !data) return;
@@ -690,7 +592,20 @@ export default function RemainingWorkEstimatePreviewPage() {
     setMasterItem(nearest);
   };
 
-  if (!estimate) return <div className="p-10">Loading...</div>;
+  if (!estimate) {
+    return (
+      <div className="p-10 flex flex-col items-center justify-center min-h-screen">
+        <p className="text-red-600 font-bold mb-4">No Estimate Data Found in LocalStorage!</p>
+        <button 
+          onClick={() => router.push('/extension-estimate')} 
+          className="bg-blue-600 text-white px-4 py-2 rounded font-bold"
+        >
+          Go Back to Estimate Input
+        </button>
+      </div>
+    );
+  }
+  
   if (!masterItem) return <div className="p-10">Loading Master Items...</div>;
 
   const formatQty = (val: number) => Number(val || 0).toFixed(2);
@@ -717,7 +632,6 @@ export default function RemainingWorkEstimatePreviewPage() {
 
     if (typeof ground === 'object' && ground !== null) {
       const targetLayer = ground.proposed || ground;
-      
       rawWidth = targetLayer.width ?? targetLayer.width_feet ?? targetLayer.length_x ?? targetLayer.val ?? 0;
       rawLength = targetLayer.length ?? targetLayer.length_feet ?? targetLayer.width_y ?? targetLayer.val ?? 0;
       
@@ -743,8 +657,8 @@ export default function RemainingWorkEstimatePreviewPage() {
     if (!Number.isInteger(length)) length = Math.ceil(length);
 
     if (width <= 0 || length <= 0) {
-      width = 20; 
-      length = 50; 
+      width = 20;
+      length = 50;
     }
 
     let { data } = await supabase
@@ -763,7 +677,6 @@ export default function RemainingWorkEstimatePreviewPage() {
         .eq("width_feet", width)
         .eq("length_feet", l)
         .limit(1);
-
       if (data && data.length > 0) return data[0];
     }
 
@@ -775,15 +688,14 @@ export default function RemainingWorkEstimatePreviewPage() {
           .eq("width_feet", w)
           .eq("length_feet", l)
           .limit(1);
-
         if (data && data.length > 0) return data[0];
       }
     }
     return null;
   }
 
-  const gfLength = estimate.floor_details?.["GROUND FLOOR"]?.length || 0;
-  const gfWidth = estimate.floor_details?.["GROUND FLOOR"]?.width || 0;
+  const gfLength = estimate.floor_details?.["GROUND FLOOR"]?.proposed?.length || estimate.floor_details?.["GROUND FLOOR"]?.length || 0;
+  const gfWidth = estimate.floor_details?.["GROUND FLOOR"]?.proposed?.width || estimate.floor_details?.["GROUND FLOOR"]?.width || 0;
 
   const baseLintelLength = gfLength > 0 && gfWidth > 0 ? ((2 * ((gfLength / 3.28) + (gfWidth / 3.28))) * 1.8) : 0;
   const lintelWidth = 0.1;
@@ -812,61 +724,45 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   const chajjaQty = chajjaLength * chajjaWidth * chajjaDepth * chajjaNos;
   const stairNos = estimate.selected_floors?.filter((f: string) => f !== "TOWER").length || 0;
-
   const stairL = 10;
   const stairW = 1.1;
   const stairT = 0.12;
   const stairQty = stairL * stairW * stairT * stairNos;
 
   let totalSteelQty = 0;
-  const floorWiseItems = estimate.floor_wise_items || {};
-
   estimate.selected_floors?.forEach((floor: string, index: number) => {
-    const floorItems = floorWiseItems[floor] || estimate.selected_items || [];
-    if (!floorItems.includes("reinforcement_steel")) return; // Skip steel calculation for this floor if not selected
-
-    const floorArea = Number(estimate.floor_details?.[floor]?.area || 0);
+    const floorDataObj = estimate.floor_details?.[floor] || {};
+    const floorArea = Number(floorDataObj.proposed?.area || floorDataObj.existing?.area || floorDataObj.area || 0);
     let kgPerSqft = 3.6; 
-
     if (index >= 4) {
       kgPerSqft += (index - 3) * 0.3;
     }
-
     if (floorArea > 1500) {
       kgPerSqft += 0.2;
     }
-
-   totalSteelQty += (floorArea * kgPerSqft);
+    totalSteelQty += (floorArea * kgPerSqft);
   });
 
-  const currentEstimate = estimate || { total_builtup_area: 0, selected_floors: [], floor_details: {}, rate_per_sqft: 0, total_value: 0, construction_cost: 0 };
   const currentMasterItem = masterItem || { reinforcement_steel_rate: 0, shuttering_rate: 0, preliminary_rate: 0, earthwork_rate: 0 };
-  const currentPlotMaster = selectedPlotMaster || { footing_width_meter: 0, footing_length_meter: 0, footing_height_meter: 0, no_of_column: 0, footing_thickness_meter: 0, column_width_meter: 0, column_length_meter: 0, column_height: 0, beam_width_meter: 0, beam_depth_meter: 0, slab_thicknes: 0, plinth_slab_thicknes: 0 };
-
   const baseRate = Number(currentMasterItem.reinforcement_steel_rate || 0);
-  const actualFloorsCount = currentEstimate.selected_floors?.filter((f: string) => f !== "TOWER").length || 1;
+  const actualFloorsCount = estimate.selected_floors?.filter((f: string) => f !== "TOWER").length || 1;
   const effectiveRate = actualFloorsCount > 4 ? (baseRate + (actualFloorsCount - 4)) : baseRate;
   
-  const shutteringQty = Number(currentEstimate.total_builtup_area || 0) / 10.76;
+  const shutteringQty = Number(estimate.total_builtup_area || 0) / 10.76;
   const baseShutterRate = Number(currentMasterItem.shuttering_rate || 0);
-  const totalFloorCount = currentEstimate.selected_floors?.length || 1;
+  const totalFloorCount = estimate.selected_floors?.length || 1;
 
   let shutteringRate = baseShutterRate;
-
   if (totalFloorCount > 3) {
     const floorsToApply30 = Math.min(totalFloorCount - 3, 3);
     shutteringRate += (floorsToApply30 * 30);
-    
     if (totalFloorCount > 6) {
       shutteringRate += ((totalFloorCount - 6) * 10);
     }
   }
-  
+
   const builtupAreaSqFt = Number(estimate.total_builtup_area || 0);
   const builtupAreaSqMt = builtupAreaSqFt / 10.76;
-
-  const floorCount = estimate.selected_floors?.length || 1;
-  const hasTower = estimate.selected_floors?.includes("TOWER");
 
   let brickMultiplier = 0.92;
   if (builtupAreaSqFt >= 200 && builtupAreaSqFt <= 600) brickMultiplier = 0.82;
@@ -880,94 +776,56 @@ export default function RemainingWorkEstimatePreviewPage() {
   const internalPlasterQty = builtupAreaSqMt * 3.35;
   const externalPlasterQty = builtupAreaSqMt * 3;
 
-  let totalDoorWindowNos = 0;
-
-  estimate.selected_floors?.forEach((floor: string) => {
-      if (floor === "TOWER") {
-          totalDoorWindowNos += 1;
-      } else {
-          const floorArea = Number(estimate.floor_details?.[floor]?.area || 0);
-          let count = 0;
-
-          if (floorArea < 500) count = 2;
-          else if (floorArea >= 500 && floorArea <= 750) count = 4;
-          else if (floorArea >= 751 && floorArea <= 800) count = 5;
-          else if (floorArea >= 801 && floorArea <= 1000) count = 6;
-          else if (floorArea >= 1001 && floorArea <= 1250) count = 7;
-          else if (floorArea >= 1251 && floorArea <= 1500) count = 8;
-          else if (floorArea >= 1501 && floorArea <= 1800) count = 9;
-          else if (floorArea > 1800) {
-              const extra = Math.floor((floorArea - 1801) / 1000) + 1;
-              count = 9 + extra;
-          }
-          totalDoorWindowNos += count;
-      }
-  });
-
-  const doorFrameNos = totalDoorWindowNos;
-  const doorFrameQty = totalDoorWindowNos;
-  const paintQtySqMt = builtupAreaSqMt;
   const msSteelQty = Number(estimate.total_value || 0) * 0.05;
-
   const ratePerSqft = Number(estimate.rate_per_sqft || 0);
-  let plumbingElectricPercent = 0.05;
-
-  if (ratePerSqft >= 1000 && ratePerSqft <= 1200) plumbingElectricPercent = 0.05;
-  else if (ratePerSqft >= 1201 && ratePerSqft <= 1400) plumbingElectricPercent = 0.06;
-  else if (ratePerSqft >= 1401 && ratePerSqft <= 1600) plumbingElectricPercent = 0.075;
-  else if (ratePerSqft >= 1601 && ratePerSqft <= 1800) plumbingElectricPercent = 0.08;
-  else if (ratePerSqft >= 1801 && ratePerSqft <= 2100) plumbingElectricPercent = 0.09;
-  else if (ratePerSqft > 2100) plumbingElectricPercent = 0.10;
-
-  const displayPercent = Number((plumbingElectricPercent * 100).toFixed(2)).toString() + "%";
-  const totalBuiltupSqFt = Number(estimate.total_builtup_area || 0);
-  const totalBuiltupSqm = totalBuiltupSqFt / 10.76;
 
   const spm = selectedPlotMaster || { 
     footing_width_meter: 0, footing_length_meter: 0, footing_height_meter: 0, 
     no_of_column: 0, footing_thickness_meter: 0, column_width_meter: 0, 
     column_length_meter: 0, column_height: 0 
   };
-  const est = estimate || { floor_details: {} };
 
-  const earthworkQty = 
-    (Number(spm.footing_width_meter || 0) + 0.6) * 
+  // Agar Ground Floor proposed nahi hai, toh foundation work ki quantities zero ho jayengi
+  const earthworkQty = isGroundFloorProposed ? (Number(spm.footing_width_meter || 0) + 0.6) * 
     (Number(spm.footing_length_meter || 0) + 0.6) * 
     (Number(spm.footing_height_meter || 0) + 0.6) * 
-    Number(spm.no_of_column || 0);
+    Number(spm.no_of_column || 0) : 0;
 
   const pccThickness = 0.2; 
-  const pccQty = (
-    parseFloat(String(spm.footing_length_meter || 0)) *
+  const pccQty = isGroundFloorProposed ? parseFloat(String(spm.footing_length_meter || 0)) *
     parseFloat(String(spm.footing_width_meter || 0)) *
     pccThickness *
-    parseFloat(String(spm.no_of_column || 0))
-  );
+    parseFloat(String(spm.no_of_column || 0)) : 0;
 
-  const rccFootingQty = Number(spm.footing_width_meter || 0) * Number(spm.footing_length_meter || 0) * Number(spm.footing_thickness_meter || 0) * Number(spm.no_of_column || 0);
-  const columnQty = Number(spm.column_width_meter || 0) * Number(spm.column_length_meter || 0) * Number(spm.column_height || 0) * Number(spm.no_of_column || 0);
+  const rccFootingQty = isGroundFloorProposed ? Number(spm.footing_width_meter || 0) * Number(spm.footing_length_meter || 0) * Number(spm.footing_thickness_meter || 0) * Number(spm.no_of_column || 0) : 0;
+  const columnQty = Number(spm.column_width_meter || 0) * Number(spm.column_length_meter || 0) * Number(spm.column_height || 0) * totalColumnNos;
   
-  const gf = est.floor_details?.["GROUND FLOOR"];
-  const plinthLength = gf ? (2 * ((Number(gf.length || 0) / 3.28) + (Number(gf.width || 0) / 3.28))) * 1.8 : 0;
-  const plinthBeamQty = plinthLength * 0.20 * 0.30;
+  const plinthLength = gfLength > 0 && gfWidth > 0 ? (2 * ((gfLength / 3.28) + (gfWidth / 3.28))) * 1.8 : 0;
+  const plinthBeamQty = isGroundFloorProposed ? plinthLength * 0.20 * 0.30 : 0;
 
-  const floors = est.selected_floors || [];
+  const floorsList = estimate.selected_floors || [];
   let totalRoofBeamLength = 0;
 
-  for (const floor of floors) {
-    const fData = est.floor_details?.[floor];
+  for (const floor of floorsList) {
+    const fData = estimate.floor_details?.[floor];
     if (fData) {
-      const floorBeamLen = (2 * ((Number(fData.length || 0) / 3.28) + (Number(fData.width || 0) / 3.28))) * 1.8;
-      totalRoofBeamLength += floorBeamLen;
+      const fL = fData.proposed?.length || fData.length || 0;
+      const fW = fData.proposed?.width || fData.width || 0;
+      if (fL > 0 && fW > 0) {
+        const floorBeamLen = (2 * ((fL / 3.28) + (fW / 3.28))) * 1.8;
+        totalRoofBeamLength += floorBeamLen;
+      }
     }
   }
   const roofBeamQty = totalRoofBeamLength * 0.20 * 0.30;
 
-  const totalAreaSqMt = Number(est.total_builtup_area || 0) / 10.76;
-  const gfAreaSqMt = Number(est.floor_details?.["GROUND FLOOR"]?.area || 0) / 10.76;
-  const slabThick = Number(spm.slab_thicknes || 0);
-  const plinthThick = Number(spm.plinth_slab_thicknes || 0);
-  const slabQty = (totalAreaSqMt * slabThick) + (gfAreaSqMt * plinthThick);
+  const totalAreaSqMt = Number(estimate.total_builtup_area || 0) / 10.76;
+  const gfFloorData = estimate.floor_details?.["GROUND FLOOR"];
+  const gfAreaVal = gfFloorData?.proposed?.area || gfFloorData?.existing?.area || gfFloorData?.area || 0;
+  const gfAreaSqMt = Number(gfAreaVal) / 10.76;
+  const slabThick = Number(spm.slab_thicknes || 0.12);
+  const plinthThick = Number(spm.plinth_slab_thicknes || 0.10);
+  const slabQty = (totalAreaSqMt * slabThick) + (isGroundFloorProposed ? (gfAreaSqMt * plinthThick) : 0);
 
   const floorOrder: { [key: string]: number } = {
     "GROUND FLOOR": 1, "FIRST FLOOR": 2, "SECOND FLOOR": 3,
@@ -975,28 +833,28 @@ export default function RemainingWorkEstimatePreviewPage() {
     "SIXTH FLOOR": 7, "SEVENTH FLOOR": 8, "EIGHTH FLOOR": 9,
   };
 
-  const sortedFloors = [...(est.selected_floors || [])].sort((a, b) => {
+  const sortedFloors = [...(estimate.selected_floors || [])].sort((a, b) => {
     return (floorOrder[a] || 100) - (floorOrder[b] || 100);
   });
 
-  const rate = ratePerSqft; 
   const selectedFloors = estimate.selected_floors || [];
+  const isOnlyGroundAndTower = selectedFloors.every((f: string) => f === "GROUND FLOOR" || f === "TOWER");
+  const hasUpperFloors = selectedFloors.some((f: string) => f !== "GROUND FLOOR" && f !== "TOWER");
+  const isRateAbove1450 = ratePerSqft > 1450;
+  const isRateInRange = ratePerSqft > 1550 && ratePerSqft < 1900;
 
-  const isOnlyGroundAndTower = selectedFloors.every(f => f === "GROUND FLOOR" || f === "TOWER");
-  const hasUpperFloors = selectedFloors.some(f => f !== "GROUND FLOOR" && f !== "TOWER");
-  const isRateAbove1450 = rate > 1450;
-  const isRateInRange = rate > 1550 && rate < 1900;
   const shouldHideParapet = isRateInRange && isOnlyGroundAndTower;
 
-  const gfL = Number(estimate.floor_details?.["GROUND FLOOR"]?.length || 0) / 3.28;
-  const gfW = Number(estimate.floor_details?.["GROUND FLOOR"]?.width || 0) / 3.28;
+  const groundLenMtr = gfLength > 0 ? gfLength / 3.28 : 0;
+  const groundWidMtr = gfWidth > 0 ? gfWidth / 3.28 : 0;
 
   const lastFloorName = estimate.selected_floors?.filter((f: string) => f !== "TOWER").slice(-1)[0] || "GROUND FLOOR";
-  const lfL = Number(estimate.floor_details?.[lastFloorName]?.length || 0) / 3.28;
-  const lfW = Number(estimate.floor_details?.[lastFloorName]?.width || 0) / 3.28;
+  const lastFloorObj = estimate.floor_details?.[lastFloorName] || {};
+  const lfL = (lastFloorObj.proposed?.length || lastFloorObj.length || 0) / 3.28;
+  const lfW = (lastFloorObj.proposed?.width || lastFloorObj.width || 0) / 3.28;
 
-  const maxL = Math.max(gfL, lfL);
-  const maxW = Math.max(gfW, lfW);
+  const maxL = Math.max(groundLenMtr, lfL);
+  const maxW = Math.max(groundWidMtr, lfW);
 
   const parapetQtyRM = shouldHideParapet ? 0 : (2 * (maxL + maxW));
   const parapetRate = Number(masterItem.parapet_wall_rate || 0);
@@ -1008,7 +866,7 @@ export default function RemainingWorkEstimatePreviewPage() {
     const getFloorArea = (floorKey: string) => {
       const fObj = estimate.floor_details?.[floorKey];
       if (!fObj) return 0;
-      const rawArea = fObj.area ?? fObj.builtup_area ?? fObj.sqft ?? fObj.total_area ?? 0;
+      const rawArea = fObj.proposed?.area || fObj.existing?.area || fObj.area || 0;
       const parsed = parseFloat(String(rawArea).replace(/[^0-9.]/g, ''));
       return isNaN(parsed) ? 0 : parsed;
     };
@@ -1027,31 +885,9 @@ export default function RemainingWorkEstimatePreviewPage() {
   }
 
   const cobaRate = Number(masterItem.terrace_coba_rate || 0);
-  const isGroundFloorSelected = selectedFloors ? selectedFloors.includes("GROUND FLOOR") : true;
-
-  const getSafeFloorDim = (floorName: string, dimType: string) => {
-    const val = estimate.floor_details?.[floorName]?.[dimType];
-    const num = Number(val);
-    return isNaN(num) || num <= 0 ? 0 : num / 3.28;
-  };
-
-  const groundLenMtr = getSafeFloorDim("GROUND FLOOR", "length");
-  const groundWidMtr = getSafeFloorDim("GROUND FLOOR", "width");
-
-  const selectedItems = estimate.selected_items || [
-    "preliminary", "earthwork", "pcc_foundation", "anti_termite", "rcc_foundation", 
-    "rcc_column", "plinth_beam", "roof_beam", "rcc_slab", "rcc_lintel", "rcc_chajja", 
-    "rcc_staircase", "reinforcement_steel", "shuttering", "brickwork", 
-    "internal_plaster", "external_plaster", "parapet_wall", "terrace_coba",
-    "door_frame_desc", "paint_putty_desc", "ms_steel_desc", "plumbing_desc", 
-    "electrical_desc", "flooring_desc", "false_ceiling_desc", "modular_kitchen_desc", 
-    "water_tank_desc", "full_home_furnishing_desc", "modern_elevation_desc", 
-    "deep_boring_desc", "final_finishing_desc", "lift_installation_desc", "consultant_fee_desc"
-  ];
 
   const coreItems = [
     { 
-      id: "preliminary",
       description: masterItem.preliminary_desc || "Preliminary Work", 
       l: formatQty(groundLenMtr), 
       w: formatQty(groundWidMtr), 
@@ -1062,180 +898,67 @@ export default function RemainingWorkEstimatePreviewPage() {
       rate: masterItem.preliminary_rate 
     },
     { 
-      id: "earthwork",
       description: masterItem.earthwork_desc, 
-      l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
-      w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
-      ht: isGroundFloorSelected ? (selectedPlotMaster?.footing_height_meter || 0) : 0, 
-      nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
-      qty: isGroundFloorSelected ? Number(earthworkQty || 0).toFixed(2) : "0.00", 
+      l: isGroundFloorProposed ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+      w: isGroundFloorProposed ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+      ht: isGroundFloorProposed ? (selectedPlotMaster?.footing_height_meter || 0) : 0, 
+      nos: isGroundFloorProposed ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+      qty: isGroundFloorProposed ? Number(earthworkQty || 0).toFixed(2) : "0.00", 
       unit: "CUM", 
       rate: masterItem.earthwork_rate 
     },
     { 
-      id: "pcc_foundation",
       description: masterItem.pcc_foundation_desc, 
-      l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
-      w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
-      ht: isGroundFloorSelected ? "0.2" : 0, 
-      nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
-      qty: isGroundFloorSelected ? Number(pccQty || 0).toFixed(2) : "0.00", 
+      l: isGroundFloorProposed ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+      w: isGroundFloorProposed ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+      ht: isGroundFloorProposed ? "0.2" : 0, 
+      nos: isGroundFloorProposed ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+      qty: isGroundFloorProposed ? Number(pccQty || 0).toFixed(2) : "0.00", 
       unit: "CUM", 
       rate: masterItem.pcc_foundation_rate 
     },
     { 
-      id: "anti_termite",
       description: masterItem.anti_termite_desc, 
-      l: isGroundFloorSelected ? groundLenMtr.toFixed(2) : 0, 
-      w: isGroundFloorSelected ? groundWidMtr.toFixed(2) : 0, 
+      l: isGroundFloorProposed ? groundLenMtr.toFixed(2) : 0, 
+      w: isGroundFloorProposed ? groundWidMtr.toFixed(2) : 0, 
       ht: "-", 
-      nos: isGroundFloorSelected ? 1 : 0, 
-      qty: isGroundFloorSelected ? (groundLenMtr * groundWidMtr).toFixed(2) : "0.00", 
+      nos: isGroundFloorProposed ? 1 : 0, 
+      qty: isGroundFloorProposed ? (groundLenMtr * groundWidMtr).toFixed(2) : "0.00", 
       unit: getUnit(masterItem.anti_termite_unit), 
       rate: masterItem.anti_termite_rate 
     },
     { 
-      id: "rcc_foundation",
       description: masterItem.rcc_foundation_desc, 
-      l: isGroundFloorSelected ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
-      w: isGroundFloorSelected ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
-      ht: isGroundFloorSelected ? (selectedPlotMaster?.footing_thickness_meter || 0) : 0, 
-      nos: isGroundFloorSelected ? (selectedPlotMaster?.no_of_column || 0) : 0, 
-      qty: isGroundFloorSelected ? Number(rccFootingQty || 0).toFixed(2) : "0.00", 
+      l: isGroundFloorProposed ? (selectedPlotMaster?.footing_length_meter || 0) : 0, 
+      w: isGroundFloorProposed ? (selectedPlotMaster?.footing_width_meter || 0) : 0, 
+      ht: isGroundFloorProposed ? (selectedPlotMaster?.footing_thickness_meter || 0) : 0, 
+      nos: isGroundFloorProposed ? (selectedPlotMaster?.no_of_column || 0) : 0, 
+      qty: isGroundFloorProposed ? Number(rccFootingQty || 0).toFixed(2) : "0.00", 
       unit: "CUM", 
       rate: masterItem.rcc_foundation_rate 
     },
+    { description: masterItem.rcc_column_desc, l: selectedPlotMaster?.column_width_meter || 0, w: selectedPlotMaster?.column_length_meter || 0, ht: selectedPlotMaster?.column_height || 0, nos: totalColumnNos, qty: (Number(selectedPlotMaster?.column_width_meter || 0) * Number(selectedPlotMaster?.column_length_meter || 0) * Number(selectedPlotMaster?.column_height || 0) * totalColumnNos).toFixed(2), unit: "CUM", rate: masterItem.rcc_column_rate },
     { 
-      id: "rcc_column",
-      description: masterItem.rcc_column_desc, 
-      l: selectedPlotMaster?.column_width_meter || 0, 
-      w: selectedPlotMaster?.column_length_meter || 0, 
-      ht: (floorWiseItems["GROUND FLOOR"] ? (floorWiseItems["GROUND FLOOR"].includes("rcc_foundation") || floorWiseItems["GROUND FLOOR"].includes("earthwork")) : (selectedItems.includes("rcc_foundation") || selectedItems.includes("earthwork")))
-          ? (Number(selectedPlotMaster?.column_height || 0) + Number(selectedPlotMaster?.footing_depth_meter || 0)) 
-          : Number(selectedPlotMaster?.column_height || 0), 
-      nos: totalColumnNos, 
-      qty: (
-        Number(selectedPlotMaster?.column_width_meter || 0) * 
-        Number(selectedPlotMaster?.column_length_meter || 0) * 
-        ((floorWiseItems["GROUND FLOOR"] ? (floorWiseItems["GROUND FLOOR"].includes("rcc_foundation") || floorWiseItems["GROUND FLOOR"].includes("earthwork")) : (selectedItems.includes("rcc_foundation") || selectedItems.includes("earthwork")))
-          ? (Number(selectedPlotMaster?.column_height || 0) + Number(selectedPlotMaster?.footing_depth_meter || 0)) 
-          : Number(selectedPlotMaster?.column_height || 0)) * 
-        totalColumnNos
-      ).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.rcc_column_rate 
-    },
-    { 
-      id: "plinth_beam",
       description: masterItem.plinth_beam_desc, 
-      l: isGroundFloorSelected ? plinthLength.toFixed(2) : 0, 
-      w: isGroundFloorSelected ? Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2) : 0, 
-      ht: isGroundFloorSelected ? Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2) : 0, 
-      nos: isGroundFloorSelected ? 1 : 0, 
-      qty: isGroundFloorSelected ? Number(plinthBeamQty || 0).toFixed(2) : "0.00", 
+      l: isGroundFloorProposed ? plinthLength.toFixed(2) : 0, 
+      w: isGroundFloorProposed ? Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2) : 0, 
+      ht: isGroundFloorProposed ? Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2) : 0, 
+      nos: isGroundFloorProposed ? 1 : 0, 
+      qty: isGroundFloorProposed ? Number(plinthBeamQty || 0).toFixed(2) : "0.00", 
       unit: "CUM", 
       rate: masterItem.plinth_beam_rate 
     },
+    { description: masterItem.roof_beam_desc, l: totalRoofBeamLength.toFixed(2), w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), nos: 1, qty: Number(roofBeamQty || 0).toFixed(2), unit: "CUM", rate: masterItem.roof_beam_rate },
+    { description: masterItem.rcc_slab_desc, l: "-", w: "-", ht: "-", nos: "-", qty: Number(slabQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_slab_rate },
+    { description: masterItem.rcc_lintel_desc, l: lintelLength.toFixed(2), w: lintelWidth, ht: lintelDepth, nos: lintelNos, qty: Number(lintelQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_lintel_rate },
+    { description: masterItem.rcc_chajja_desc, l: chajjaLength, w: chajjaWidth, ht: chajjaDepth, nos: chajjaNos, qty: Number(chajjaQty || 0).toFixed(2), unit: "CUM", rate: masterItem.rcc_chajja_rate },
+    { description: masterItem.rcc_staircase_desc, l: stairL.toFixed(2), w: stairW.toFixed(2), ht: stairT.toFixed(2), nos: stairNos, qty: Number(stairQty || 0).toFixed(2), unit: getUnit(masterItem.rcc_staircase_unit), rate: masterItem.rcc_staircase_rate },
+    { description: masterItem.reinforcement_steel_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(totalSteelQty || 0).toFixed(2), unit: getUnit(masterItem.reinforcement_steel_unit), rate: effectiveRate.toFixed(2) },
+    { description: masterItem.shuttering_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(shutteringQty || 0).toFixed(2), unit: "SQ.MT", rate: shutteringRate.toFixed(2) },
+    { description: masterItem.brickwork_desc, l: "-", w: "-", ht: "2.7", nos: "1", qty: Number(brickQtyCum || 0).toFixed(2), unit: "CUM", rate: masterItem.brickwork_rate },
+    { description: masterItem.internal_plaster_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(internalPlasterQty || 0).toFixed(2), unit: getUnit(masterItem.internal_plaster_unit), rate: masterItem.internal_plaster_rate },
+    { description: masterItem.external_plaster_desc, l: "-", w: "-", ht: "-", nos: 1, qty: Number(externalPlasterQty || 0).toFixed(2), unit: getUnit(masterItem.external_plaster_unit), rate: masterItem.external_plaster_rate },
     { 
-      id: "roof_beam",
-      description: masterItem.roof_beam_desc, 
-      l: totalRoofBeamLength.toFixed(2), 
-      w: Number(selectedPlotMaster?.beam_width_meter || 0).toFixed(2), 
-      ht: Number(selectedPlotMaster?.beam_depth_meter || 0).toFixed(2), 
-      nos: 1, 
-      qty: Number(roofBeamQty || 0).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.roof_beam_rate 
-    },
-    { 
-      id: "rcc_slab",
-      description: masterItem.rcc_slab_desc, 
-      l: "-", w: "-", ht: "-", nos: "-", 
-      qty: Number(slabQty || 0).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.rcc_slab_rate 
-    },
-    { 
-      id: "rcc_lintel",
-      description: masterItem.rcc_lintel_desc, 
-      l: lintelLength.toFixed(2), 
-      w: lintelWidth, 
-      ht: lintelDepth, 
-      nos: lintelNos, 
-      qty: Number(lintelQty || 0).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.rcc_lintel_rate 
-    },
-    { 
-      id: "rcc_chajja",
-      description: masterItem.rcc_chajja_desc, 
-      l: chajjaLength, 
-      w: chajjaWidth, 
-      ht: chajjaDepth, 
-      nos: chajjaNos, 
-      qty: Number(chajjaQty || 0).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.rcc_chajja_rate 
-    },
-    { 
-      id: "rcc_staircase",
-      description: masterItem.rcc_staircase_desc, 
-      l: stairL.toFixed(2), 
-      w: stairW.toFixed(2), 
-      ht: stairT.toFixed(2), 
-      nos: stairNos, 
-      qty: Number(stairQty || 0).toFixed(2), 
-      unit: getUnit(masterItem.rcc_staircase_unit), 
-      rate: masterItem.rcc_staircase_rate 
-    },
-    { 
-      id: "reinforcement_steel",
-      description: masterItem.reinforcement_steel_desc, 
-      l: "-", w: "-", ht: "-", 
-      nos: 1, 
-      qty: Number(totalSteelQty || 0).toFixed(2), 
-      unit: getUnit(masterItem.reinforcement_steel_unit), 
-      rate: effectiveRate.toFixed(2) 
-    },
-    { 
-      id: "shuttering",
-      description: masterItem.shuttering_desc, 
-      l: "-", w: "-", ht: "-", 
-      nos: 1, 
-      qty: Number(shutteringQty || 0).toFixed(2), 
-      unit: "SQ.MT", 
-      rate: shutteringRate.toFixed(2) 
-    },
-    { 
-      id: "brickwork",
-      description: masterItem.brickwork_desc, 
-      l: "-", w: "-", 
-      ht: "2.7", 
-      nos: "1", 
-      qty: Number(brickQtyCum || 0).toFixed(2), 
-      unit: "CUM", 
-      rate: masterItem.brickwork_rate 
-    },
-    { 
-      id: "internal_plaster",
-      description: masterItem.internal_plaster_desc, 
-      l: "-", w: "-", ht: "-", 
-      nos: 1, 
-      qty: Number(internalPlasterQty || 0).toFixed(2), 
-      unit: getUnit(masterItem.internal_plaster_unit), 
-      rate: masterItem.internal_plaster_rate 
-    },
-    { 
-      id: "external_plaster",
-      description: masterItem.external_plaster_desc, 
-      l: "-", w: "-", ht: "-", 
-      nos: 1, 
-      qty: Number(externalPlasterQty || 0).toFixed(2), 
-      unit: getUnit(masterItem.external_plaster_unit), 
-      rate: masterItem.external_plaster_rate 
-    },
-    { 
-      id: "parapet_wall",
       description: masterItem.parapet_wall_desc || "Parapet Wall", 
       l: shouldHideParapet ? "0" : maxL.toFixed(2), 
       w: shouldHideParapet ? "0" : maxW.toFixed(2), 
@@ -1245,52 +968,18 @@ export default function RemainingWorkEstimatePreviewPage() {
       unit: "RM", 
       rate: parapetRate 
     },
-    { 
-      id: "terrace_coba",
-      description: masterItem.terrace_coba_desc || "Terrace Coba", 
-      l: "-", w: "-", ht: "-", 
-      nos: 1, 
-      qty: cobaQty.toFixed(2), 
-      unit: "SQM", 
-      rate: cobaRate.toFixed(0) 
-    },
+    { description: masterItem.terrace_coba_desc || "Terrace Coba", l: "-", w: "-", ht: "-", nos: 1, qty: cobaQty.toFixed(2), unit: "SQM", rate: cobaRate.toFixed(0) },
   ];
 
-  // Check if item is selected globally or on any active floor
-  const isItemSelected = (itemId: string) => {
-    if (floorWiseItems && Object.keys(floorWiseItems).length > 0) {
-      // Check if item is selected in any of the selected/active floors
-      return sortedFloors.some((floor: string) => {
-        const itemsOnFloor = floorWiseItems[floor];
-        return itemsOnFloor ? itemsOnFloor.includes(itemId) : selectedItems.includes(itemId);
-      });
-    }
-    return selectedItems.includes(itemId);
-  };
-
-  const coreItemsWithAmount = coreItems.map(item => {
-    const isSelected = isItemSelected(item.id);
-    const calculatedQty = isSelected ? Number(item.qty || 0) : 0;
-    const rate = Number(item.rate || 0);
-    const totalAmount = calculatedQty * rate;
-    
-    return {
-      ...item,
-      qty: calculatedQty,
-      hidden: !isSelected,
-      totalAmount: totalAmount
-    };
-  });
-
-  const coreTotal = coreItemsWithAmount.reduce((sum, row) => sum + row.totalAmount, 0);
+  const coreTotal = coreItems.reduce((sum, row) => sum + (Number(row.qty || 0) * Number(row.rate || 0)), 0);
   const rawBaseValue = Number(estimate.total_value || estimate.construction_cost || 0);
   const remainingBudget = Math.max(0, isNaN(rawBaseValue - coreTotal) ? 0 : rawBaseValue - coreTotal);
 
   const slabRates = Object.keys(slabConfig).map(Number).sort((a, b) => a - b);
-  const activeSlab = slabRates.find(s => rate <= s) || 5000;
+  const activeSlab = slabRates.find(s => ratePerSqft <= s) || 5000;
   const w = slabConfig[activeSlab];
-  const isGroundFloorOnly = selectedFloors.length === 1 && selectedFloors.includes("GROUND FLOOR");
-  const isLiftHidden = rate >= 2700 && isGroundFloorOnly;
+  
+  const isLiftHidden = ratePerSqft >= 2700 && isGroundFloorOnly;
   const baseLiftWeight = w.lift || 0;
   const liftWeightToDistribute = isLiftHidden ? baseLiftWeight : 0;
 
@@ -1309,35 +998,24 @@ export default function RemainingWorkEstimatePreviewPage() {
     lift: finalLiftWeight
   };
 
-  const allEstimateRows = [
-    ...coreItemsWithAmount,
-    { id: "door_frame_desc", description: masterItem.door_frame_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.door || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("door_frame_desc") },
-    { id: "paint_putty_desc", description: masterItem.paint_putty_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.paint || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("paint_putty_desc") },
-    { id: "ms_steel_desc", description: masterItem.ms_steel_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.ms || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("ms_steel_desc") },
-    { id: "plumbing_desc", description: masterItem.plumbing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.plumb || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("plumbing_desc") },
-    { id: "electrical_desc", description: masterItem.electrical_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.elec || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("electrical_desc") },
-    { id: "flooring_desc", description: masterItem.flooring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.floor || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("flooring_desc") },
-    { id: "false_ceiling_desc", description: masterItem.false_ceiling_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.ceiling || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("false_ceiling_desc") },
-    { id: "modular_kitchen_desc", description: masterItem.modular_kitchen_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.kitchen || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("modular_kitchen_desc") },
-    { id: "water_tank_desc", description: masterItem.water_tank_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.water || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("water_tank_desc") },
-    { id: "full_home_furnishing_desc", description: masterItem.full_home_furnishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.furnish || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("full_home_furnishing_desc") },
-    { id: "modern_elevation_desc", description: masterItem.modern_elevation_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.elev || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("modern_elevation_desc") },
-    { id: "deep_boring_desc", description: masterItem.deep_boring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: isItemSelected("deep_boring_desc") ? 1 : 0, unit: "LS", rate: ((finalW.bore || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("deep_boring_desc") },
-    { id: "final_finishing_desc", description: masterItem.final_finishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.final || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("final_finishing_desc") },
-    { 
-      id: "lift_installation_desc", 
-      description: masterItem.lift_installation_desc, 
-      l: "-", w: "-", ht: "-", nos: "-", qty: (isItemSelected("lift_installation_desc") && !isLiftHidden) ? 1 : 0, unit: "LS", 
-      rate: ((finalW.lift || 0) * 100).toFixed(1) + "%",
-      hidden: isLiftHidden || !isItemSelected("lift_installation_desc")
-    },
-    { id: "consultant_fee_desc", description: masterItem.consultant_fee_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.cons || 0) * 100).toFixed(1) + "%", hidden: !isItemSelected("consultant_fee_desc") },
+  const estimateRows = [
+    ...coreItems,
+    { description: masterItem.door_frame_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.door || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.paint_putty_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.paint || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.ms_steel_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.ms || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.plumbing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.plumb || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.electrical_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.elec || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.flooring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.floor || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.false_ceiling_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.ceiling || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.modular_kitchen_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.kitchen || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.water_tank_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.water || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.full_home_furnishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.furnish || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.modern_elevation_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.elev || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.deep_boring_desc, l: "-", w: "-", ht: "-", nos: "-", qty: 1, unit: "LS", rate: ((finalW.bore || 0) * 100).toFixed(1) + "%" },
+    { description: masterItem.final_finishing_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.final || 0) * 100).toFixed(1) + "%" },
+    ...(!isLiftHidden ? [{ description: masterItem.lift_installation_desc, l: "-", w: "-", ht: "-", nos: "-", qty: 1, unit: "LS", rate: ((finalW.lift || 0) * 100).toFixed(1) + "%" }] : []),
+    { description: masterItem.consultant_fee_desc, l: "-", w: "-", ht: "-", nos: "-", qty: "-", unit: "LS", rate: ((finalW.cons || 0) * 100).toFixed(1) + "%" },
   ];
-
-  const estimateRows = allEstimateRows.filter(row => {
-    const shouldKeep = isItemSelected(row.id) && !row.hidden;
-    return shouldKeep;
-  });
 
   if (isCheckingHistory) {
     return (
@@ -1348,34 +1026,10 @@ export default function RemainingWorkEstimatePreviewPage() {
     );
   }
 
- return (
+  return (
     <div className="print-area print-page p-10 bg-white min-h-screen relative">
-      
-      <style jsx global>{`
-        @media print {
-          .no-print { display: none !important; }
-          .draft-watermark { display: none !important !important; }
-          
-          ${!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' ? 'body { display: none !important; }' : ''}
-        }
-
-        .draft-watermark {
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotate(-35deg);
-          font-size: 130px;
-          font-weight: 900;
-          color: rgba(239, 68, 68, 0.15);
-          z-index: 9999;
-          pointer-events: none;
-          letter-spacing: 0.2em;
-          user-select: none;
-        }
-      `}</style>
-
-      {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') && (
-        <div className="draft-watermark">DRAFT</div>
+      {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (!estimate?.id || estimate?.id === "temp-id" || !estimate?.ref_no)) && (
+        <div className="draft-watermark no-print">DRAFT</div>
       )}
 
       {['ENGINEER', 'ARCHITECT'].includes(userCategory) && (
@@ -1476,14 +1130,15 @@ export default function RemainingWorkEstimatePreviewPage() {
               <p className="text-sm text-black font-medium uppercase">{customSubtitle || "ENTER DESIGNATION"}</p>
             ) : (
               <>
-                <p>ADDRESS GROUND FLOOR, BUILDING NO.</p>
-                <p> 180/5, MEGHDOOT NAGAR, INDORE</p>
+                <p>ADDRESS GROUND FLOOR, BUILDING NO. 180/5,</p>
+                <p>MEGHDOOT NAGAR, INDORE</p>
                 <p>CONTACT NO. 79875-61396</p>
                 <p>Gmail: legalntech@gmail.com</p>
               </>
             )}
           </div>
         </div>
+
         <div className="mt-4 text-[15px] text-center font-bold text-slate-600 uppercase leading-relaxed border-t pt-2">
           <textarea
             value={legalText}
@@ -1494,6 +1149,7 @@ export default function RemainingWorkEstimatePreviewPage() {
           />
           <hr className="w-full border border-black border-collapse mb-4"/>
         </div>
+        
         <div className="flex justify-between items-center text-sm mt-2 px-1 font-semibold">
           <span className="font-semibold">
             <strong>REF NO:</strong>{" "}
@@ -1505,7 +1161,7 @@ export default function RemainingWorkEstimatePreviewPage() {
 
       <div className="text-center mb-6">
         <h2 className="text-xl font-bold uppercase text-center">
-          PROPOSED CONSTRUCTION ESTIMATE FOR REMAINING WORK ON {sortedFloors.join(" + ")}
+          EXTENSION & RENOVATION ESTIMATE FOR {sortedFloors.join(" + ")}
         </h2>
       </div>
 
@@ -1539,23 +1195,49 @@ export default function RemainingWorkEstimatePreviewPage() {
         <thead>
           <tr>
             <th className="border border-black p-2 w-[80px]">SR</th>
-            <th className="border border-black p-2">DESCRIPTION</th>
-            <th className="border border-black p-2 w-[180px]">AREA</th>
+            <th className="border border-black p-2">DESCRIPTION / FLOOR TYPE</th>
+            <th className="border border-black p-2 w-[120px]">STATUS</th>
+            <th className="border border-black p-2 w-[150px]">AREA</th>
           </tr>
         </thead>
         <tbody>
-          {sortedFloors.map((floor: string, index: number) => (
-            <tr key={floor}>
-              <td className="border border-black p-2 text-center">{index + 1}</td>
-              <td className="border border-black p-2">{floor} BUILT UP AREA</td>
-              <td className="border border-black p-2 text-center">
-                {estimate.floor_details?.[floor]?.area || 0} SQ.FT
-              </td>
-            </tr>
-          ))}
+          {Object.entries(estimate?.floor_details || {})
+            .map(([floor, data]: [string, any], index: number) => {
+              const mode = estimate?.floor_modes?.[floor] || "BOTH";
+              const rowsToRender = [];
+
+              if (mode === "BOTH" || mode === "EXISTING") {
+                rowsToRender.push(
+                  <tr key={`existing-${floor}`}>
+                    <td className="border border-black p-2 text-center">{index + 1}</td>
+                    <td className="border border-black p-2">{floor} BUILT UP AREA</td>
+                    <td className="border border-black p-2 text-center text-orange-600 font-semibold">EXISTING</td>
+                    <td className="border border-black p-2 text-center">{data?.existing?.area || 0} SQ.FT</td>
+                  </tr>
+                );
+              }
+
+              if (mode === "BOTH" || mode === "PROPOSED") {
+                rowsToRender.push(
+                  <tr key={`proposed-${floor}`}>
+                    <td className="border border-black p-2 text-center">{index + 1}</td>
+                    <td className="border border-black p-2 font-bold">{floor} BUILT UP AREA</td>
+                    <td className="border border-black p-2 text-center text-purple-700 font-bold">PROPOSED</td>
+                    <td className="border border-black p-2 text-center font-bold">{data?.proposed?.area || 0} SQ.FT</td>
+                  </tr>
+                );
+              }
+
+              return rowsToRender;
+            })}
+
           <tr>
-            <td colSpan={2} className="border border-black p-2 font-bold">TOTAL BUILT UP AREA</td>
-            <td className="border border-black p-2 text-center font-bold">{estimate.total_builtup_area} SQ.FT</td>
+            <td colSpan={3} className="border border-black p-2 font-bold text-right">
+              TOTAL BUILT UP AREA
+            </td>
+            <td className="border border-black p-2 text-center font-bold">
+              {estimate.total_builtup_area} SQ.FT
+            </td>
           </tr>
         </tbody>
       </table>
@@ -1704,8 +1386,8 @@ export default function RemainingWorkEstimatePreviewPage() {
 
         <button
           onClick={() => {
-            localStorage.removeItem("estimatePreview");
-            router.push("/estimate");
+            localStorage.removeItem("extensionEstimatePreview");
+            router.push("/extension-estimate");
           }}
           className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold ml-4" 
         >

@@ -51,7 +51,7 @@ export default function SignupPage() {
     email: '',
     password: '',
     userType: 'INDIVIDUAL',
-    planType: 'BASIC ENGINE PLAN', // Default Plan
+    planType: 'BASIC PLAN', // Default Plan
     firmName: '',
     city: '',
     state: '',
@@ -251,7 +251,7 @@ export default function SignupPage() {
         {/* CENTER PANEL (FORM CONTAINER) */}
         <div className="w-full max-w-md bg-white text-black rounded-2xl shadow-2xl p-6">
           <h1 className="text-2xl font-black text-blue-900 text-center uppercase tracking-tight">
-            L&T SIGNUP PORTAL
+            LnT SIGNUP PORTAL
           </h1>
           <p className="text-xs text-center text-gray-500 mb-4 font-bold tracking-wider">
             ACCOUNT REGISTRATION FORM
@@ -373,7 +373,7 @@ export default function SignupPage() {
       className="mt-1.5 h-4 w-4 shrink-0"
     />
     <label htmlFor="terms" className="text-[11px] text-slate-800 font-medium leading-relaxed cursor-pointer">
-      I agree to the <b>DRC Consultant Terms of Service & Strict No-Refund Policy</b>. I verify all details before payment and acknowledge that all software estimates are <b>strictly non-refundable</b>, meant for preliminary use only, carry <b>zero financial or professional liability</b>, and require independent professional verification.
+      I agree to the <b>Legal n Tech Consultant Terms of Service & Strict No-Refund Policy</b>. I verify all details before payment and acknowledge that all software estimates are <b>strictly non-refundable</b>, meant for preliminary use only, carry <b>zero financial or professional liability</b>, and require independent professional verification.
     </label>
   </div>
 </div>

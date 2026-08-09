@@ -1,0 +1,88 @@
+/* --- 1. Global Page Settings --- */
+@page {
+  size: A4 portrait;
+  margin: 15mm; /* Margins ko thoda balanced kiya hai taaki content 3 pages mein fit ho */
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages);
+    font-size: 10pt;
+    color: #333;
+  }
+}
+
+/* --- 2. Screen & General Styles --- */
+.no-print {
+  display: block; /* Screen ke liye normal display */
+}
+
+/* --- 3. Print Styles (Optimized for Multi-page Control) --- */
+@media print {
+  /* HIDE: Navigation, sidebar, aur wo elements jo print nahi karne hain */
+  nav, aside, .sidebar, .left-sidebar, #sidebar, .dashboard-sidebar, 
+  iframe, .no-print, button { 
+    display: none !important; 
+  }
+
+  /* Reset Layout for Print */
+  html, body, #__next, main {
+    background: white !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Container Adjustment */
+  .print-page, .estimate-container, .report-container, .preview-container, #estimate-preview-container {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Table Rows ko beech se cut hone se bachane ke liye */
+  tr, .table-row-item {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* DRAFT Watermark Force Print */
+  .draft-watermark {
+    display: block !important;
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(-45deg) !important;
+    color: rgba(220, 38, 38, 0.08) !important;
+    z-index: 9999 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+/* --- 4. Draft Watermark Styling (Default State) --- */
+.draft-watermark {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) rotate(-45deg) !important;
+  font-size: 8rem !important;
+  font-weight: 900 !important;
+  color: rgba(220, 38, 38, 0.08) !important;
+  pointer-events: none !important;
+  white-space: nowrap !important;
+  z-index: 9999 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1rem !important;
+}
+
+/* --- 5. Button Style Helper --- */
+.pay-button-class {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+@media print {
+  /* Isse table ka header agle pages par repeat nahi hoga */
+  thead {
+    display: table-row-group !important;
+  }
+}

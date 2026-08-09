@@ -10,7 +10,15 @@ const EXTRA_FLOORS = [
   "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR"
 ];
 
-// Comprehensive checklist including Structural and all requested Finishing items
+const GROUND_ONLY_ITEMS = [
+  "preliminary", 
+  "earthwork", 
+  "pcc_foundation", 
+  "anti_termite", 
+  "rcc_foundation", 
+  "plinth_beam"
+];
+
 const AVAILABLE_CORE_ITEMS = [
   // Structural & Masonry Items
   { id: "preliminary", label: "Preliminary Work" },
@@ -28,6 +36,8 @@ const AVAILABLE_CORE_ITEMS = [
   { id: "reinforcement_steel", label: "Reinforcement Steel" },
   { id: "shuttering", label: "Shuttering & Formwork" },
   { id: "brickwork", label: "Brickwork Masonry" },
+  { id: "internal_plaster", label: "Internal Plaster" },
+  { id: "external_plaster", label: "External Plaster" },
   { id: "parapet_wall", label: "Parapet Wall" },
   { id: "terrace_coba", label: "Terrace Coba Waterproofing" },
   
@@ -65,10 +75,17 @@ export default function RemainingWorkEstimateInputPage() {
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
   
-  // Item selection states
+  // Item selection states (Global or General fallback)
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>(AVAILABLE_CORE_ITEMS.map(i => i.id));
   const [tempSelectedItems, setTempSelectedItems] = useState<string[]>(selectedItems);
+
+  // Floor-wise Remaining Work Item mapping state: Record<floorName, itemIds[]>
+  const [floorWiseItems, setFloorWiseItems] = useState<Record<string, string[]>>({
+    "GROUND FLOOR": AVAILABLE_CORE_ITEMS.map(i => i.id)
+  });
+  const [activeItemFloor, setActiveItemFloor] = useState<string | null>(null);
+  const [tempFloorWiseItems, setTempFloorWiseItems] = useState<string[]>([]);
 
   const [floorData, setFloorData] = useState<Record<string, { length: number; width: number; area: number }>>({});
   const [rate, setRate] = useState<number>(0);
@@ -102,6 +119,9 @@ export default function RemainingWorkEstimateInputPage() {
         }
         if (parsed.selected_items && Array.isArray(parsed.selected_items)) {
           setSelectedItems(parsed.selected_items);
+        }
+        if (parsed.floor_wise_items) {
+          setFloorWiseItems(parsed.floor_wise_items);
         }
       } catch (e) {
         console.error("Failed to parse saved estimate:", e);
@@ -287,6 +307,7 @@ export default function RemainingWorkEstimateInputPage() {
       plot_area: plotArea,
       selected_floors: selectedFloors,
       selected_items: selectedItems,
+      floor_wise_items: floorWiseItems,
       floor_details: floorData,
       total_builtup_area: manualTotalBuiltUp,
       rate_per_sqft: rate,
@@ -322,6 +343,7 @@ export default function RemainingWorkEstimateInputPage() {
     setRepresentative("");
     setSelectedFloors(DEFAULT_FLOORS);
     setSelectedItems(AVAILABLE_CORE_ITEMS.map(i => i.id));
+    setFloorWiseItems({ "GROUND FLOOR": AVAILABLE_CORE_ITEMS.map(i => i.id) });
   };
 
   return (
@@ -382,26 +404,41 @@ export default function RemainingWorkEstimateInputPage() {
           <button onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className="border border-black px-6 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 w-full">+ CHOOSE FLOORS</button>
         </div>
         <div className="col-span-3">
-          <label className="font-bold block text-[12pt]">SELECT WORK ITEMS: ({selectedItems.length} SELECTED)</label>
-          <button onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className="border border-black px-6 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 w-full">+ CHOOSE ITEMS</button>
+          <label className="font-bold block text-[12pt]">GLOBAL WORK ITEMS</label>
+          <button onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className="border border-black px-6 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 w-full">+ CHOOSE GLOBAL ITEMS</button>
         </div>
       </div>
 
       <div className="mt-4 border border-black rounded-none overflow-hidden">
-        <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA DETAILS</div>
+        <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA & FLOOR-WISE REMAINING WORK DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
             .filter(f => selectedFloors.includes(f))
-            .map((f) => (
-              <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white">
-                <span className="col-span-4 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black">{f}</span>
-                <div className="col-span-4 grid grid-cols-2 gap-0 border-r border-black">
-                  <input type="number" step="0.01" placeholder="W (FEET)" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
-                  <input type="number" step="0.01" placeholder="L (FEET)" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+            .map((f) => {
+              const currentFloorItems = floorWiseItems[f] || AVAILABLE_CORE_ITEMS.map(i => i.id);
+              return (
+                <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white p-2">
+                  <span className="col-span-3 font-bold text-black uppercase text-[12pt] text-center border-r border-black">{f}</span>
+                  <div className="col-span-3 grid grid-cols-2 gap-0 border-r border-black px-1">
+                    <input type="number" step="0.01" placeholder="W" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none text-sm" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
+                    <input type="number" step="0.01" placeholder="L" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none text-sm border-l border-gray-200" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+                  </div>
+                  <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-2 p-1 text-center font-bold text-black text-[11pt] bg-transparent border-r border-black" />
+                  <div className="col-span-4 flex items-center justify-between px-2">
+                    <span className="text-[10pt] font-semibold text-gray-700">{currentFloorItems.length} items chosen</span>
+                    <button 
+                      onClick={() => {
+                        setActiveItemFloor(f);
+                        setTempFloorWiseItems(currentFloorItems);
+                      }} 
+                      className="border border-black px-2 py-1 text-[9pt] font-bold bg-gray-100 hover:bg-gray-200 uppercase"
+                    >
+                      Configure Work
+                    </button>
+                  </div>
                 </div>
-                <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-black text-[12pt] bg-transparent" />
-              </div>
-            ))}
+              );
+            })}
         </div>
       </div>
 
@@ -444,7 +481,24 @@ export default function RemainingWorkEstimateInputPage() {
               <button className="border border-black px-4 py-2" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
               <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => {
                 const floorSequence = ["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"];
-                setSelectedFloors([...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b)));
+                const newSelected = [...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b));
+                setSelectedFloors(newSelected);
+
+                // Auto initialize default items for newly added floors (excluding ground-only items for upper floors)
+                setFloorWiseItems(prev => {
+                  const updated = { ...prev };
+                  newSelected.forEach(f => {
+                    if (!updated[f]) {
+                      const isGroundOrBasement = f === "GROUND FLOOR" || f === "BASEMENT";
+                      const defaultItemsForFloor = AVAILABLE_CORE_ITEMS
+                        .filter(item => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id))
+                        .map(i => i.id);
+                      updated[f] = defaultItemsForFloor;
+                    }
+                  });
+                  return updated;
+                });
+
                 setIsFloorModalOpen(false);
               }}>ADD SELECTED</button>
             </div>
@@ -452,11 +506,11 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       )}
 
-      {/* Item Checklist Modal for Remaining Work */}
+      {/* Global Item Checklist Modal for Remaining Work */}
       {isItemModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT STRUCTURAL & FINISHING ITEMS</h2>
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT GLOBAL STRUCTURAL & FINISHING ITEMS</h2>
             <div className="flex gap-2 mb-3">
               <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems(AVAILABLE_CORE_ITEMS.map(i => i.id))}>Select All</button>
               <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems([])}>Deselect All</button>
@@ -473,8 +527,62 @@ export default function RemainingWorkEstimateInputPage() {
               <button className="border border-black px-4 py-2" onClick={() => setIsItemModalOpen(false)}>CANCEL</button>
               <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => {
                 setSelectedItems(tempSelectedItems);
+                setFloorWiseItems(prev => {
+                  const updated = { ...prev };
+                  selectedFloors.forEach(f => {
+                    const isGroundOrBasement = f === "GROUND FLOOR" || f === "BASEMENT";
+                    updated[f] = tempSelectedItems.filter(id => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(id));
+                  });
+                  return updated;
+                });
                 setIsItemModalOpen(false);
-              }}>APPLY ITEMS</button>
+              }}>APPLY GLOBALLY</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floor-wise Item Configuration Modal */}
+      {activeItemFloor && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">CONFIG REMAINING WORK FOR: {activeItemFloor}</h2>
+            <div className="flex gap-2 mb-3">
+              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => {
+                const isGroundOrBasement = activeItemFloor === "GROUND FLOOR" || activeItemFloor === "BASEMENT";
+                const allowed = AVAILABLE_CORE_ITEMS
+                  .filter(item => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id))
+                  .map(i => i.id);
+                setTempFloorWiseItems(allowed);
+              }}>Select All</button>
+              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempFloorWiseItems([])}>Deselect All</button>
+            </div>
+            <div className="space-y-2 max-h-[380px] overflow-auto mb-4 pr-1">
+              {AVAILABLE_CORE_ITEMS
+                .filter(item => {
+                  const isGroundOrBasement = activeItemFloor === "GROUND FLOOR" || activeItemFloor === "BASEMENT";
+                  return isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id);
+                })
+                .map((item) => (
+                  <label key={item.id} className="flex items-center gap-3 cursor-pointer p-2 border-b">
+                    <input 
+                      type="checkbox" 
+                      checked={tempFloorWiseItems.includes(item.id)} 
+                      onChange={() => setTempFloorWiseItems(prev => prev.includes(item.id) ? prev.filter(i => i !== item.id) : [...prev, item.id])} 
+                    />
+                    {item.label}
+                  </label>
+                ))}
+            </div>
+            <div className="flex justify-end gap-3 mt-4">
+              <button className="border border-black px-4 py-2" onClick={() => setActiveItemFloor(null)}>CANCEL</button>
+              <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => {
+                setFloorWiseItems(prev => ({
+                  ...prev,
+                  [activeItemFloor]: tempFloorWiseItems
+                }));
+                setActiveItemFloor(null);
+              }}>SAVE FLOOR WORK</button>
             </div>
           </div>
         </div>

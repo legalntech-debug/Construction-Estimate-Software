@@ -31,3 +31,25 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// --- PUSH NOTIFICATION LISTENERS ---
+self.addEventListener('push', function (event) {
+  const data = event.data ? event.data.json() : {};
+  const title = data.title || 'Company Update';
+  const options = {
+    body: data.body || 'Naya update aaya hai, app check karein!',
+    icon: '/icon.png', // Aap apne app ka logo yahan rakh sakte hain
+    badge: '/badge.png'
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
+});
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  event.waitUntil(
+    clients.openWindow('/') // Notification par click karte hi app khul jayegi
+  );
+});

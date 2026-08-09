@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// Import modular engines
 import { PlotDimensions, PlotShape, PlotSide, FloorData, FloorRoom, CadTool, CadObject, CadPoint } from "@/lib/constructionPlan/types";
 import { ROOM_CATALOG, DEFAULT_ROOM_SELECTION, BHK_PRESETS, getRoomDefinition, calculateRoomAutoArea } from "@/lib/constructionPlan/roomRules";
 import { validateConstructionPlan } from "@/lib/constructionPlan/floorValidation";
@@ -99,6 +98,14 @@ export default function ConstructionPlanInputPage() {
     D: 40,
   });
 
+  const [cadAngleMode, setCadAngleMode] = useState<"AUTO" | "MANUAL">("AUTO");
+  const [plotAngles, setPlotAngles] = useState({
+    A: 0,
+    B: 0,
+    C: 90,
+    D: 90,
+  });
+
   const [autoDimensionSide, setAutoDimensionSide] = useState<PlotSide>("B");
   const [boundaryNorth, setBoundaryNorth] = useState("ARAJI OF DEEPAK SINGH");
   const [boundarySouth, setBoundarySouth] = useState("20' WIDE ROAD");
@@ -125,6 +132,8 @@ export default function ConstructionPlanInputPage() {
   const [orthMode, setOrthMode] = useState(true);
   const [osnapMode, setOsnapMode] = useState(true);
   const [cadZoom, setCadZoom] = useState(1);
+  const [activeDrawingStart, setActiveDrawingStart] = useState<CadPoint | null>(null);
+  const [mouseCurrentPoint, setMouseCurrentPoint] = useState<CadPoint | null>(null);
 
   useEffect(() => {
     const savedData = localStorage.getItem("estimateData") || localStorage.getItem("estimatePreview");
@@ -179,10 +188,7 @@ export default function ConstructionPlanInputPage() {
     fetchData();
   }, []);
 
-  // Use plotEngine for accurate area computation
   const plotArea = useMemo(() => calculatePlotArea(plotDimensions, plotShape), [plotDimensions, plotShape]);
-
-  // Use setback rules engine
   const setbacks = useMemo(() => calculateSetbacks(plotArea, 20, roadFacingOption.includes("CORNER")), [plotArea, roadFacingOption]);
   const buildableFootprint = useMemo(() => calculateBuildableFootprint(plotDimensions, setbacks), [plotDimensions, setbacks]);
 
@@ -195,6 +201,18 @@ export default function ConstructionPlanInputPage() {
 
     const { data } = await supabase.from("clients").select("estimate_fee").eq("client_name", name).maybeSingle();
     setRegisteredFee(Number(data?.estimate_fee || 0));
+  };
+
+  const updateDimensionAndCheckShape = (side: keyof PlotDimensions, value: number) => {
+    const updatedDims = { ...plotDimensions, [side]: value };
+    setPlotDimensions(updatedDims);
+
+    // Auto switch to IRREGULAR / L-SHAPE if opposite dimensions differ
+    if (updatedDims.A !== updatedDims.B || updatedDims.C !== updatedDims.D) {
+      if (plotShape === "RECTANGULAR" || plotShape === "SQUARE") {
+        setPlotShape("IRREGULAR / L-SHAPE");
+      }
+    }
   };
 
   const updateFloorArea = (floor: string, field: "length" | "width", value: number) => {
@@ -281,16 +299,15 @@ export default function ConstructionPlanInputPage() {
 
   const totalBuiltUpArea = useMemo(() => Object.values(floorData).reduce((sum, floor) => sum + Number(floor.area || 0), 0), [floorData]);
 
-  // Use door/window calculation engine
   const residentialFloors = selectedFloors.filter((floor) => floor !== "BASEMENT" && floor !== "TOWER");
   const floorCount = residentialFloors.length;
   const hasTower = selectedFloors.includes("TOWER");
   const doorWindowSpec = useMemo(() => calculateDoorsAndWindows(totalBuiltUpArea, floorCount, hasTower), [totalBuiltUpArea, floorCount, hasTower]);
 
   const cadPlotPoints = useMemo(() => {
-    const A = plotDimensions.A || 1;
+    const A = plotDimensions.A || 20;
     const B = plotDimensions.B || A;
-    const C = plotDimensions.C || 1;
+    const C = plotDimensions.C || 40;
     const D = plotDimensions.D || C;
 
     if (plotShape === "SQUARE") return [{ x: 0, y: 0 }, { x: A, y: 0 }, { x: A, y: A }, { x: 0, y: A }];
@@ -298,17 +315,38 @@ export default function ConstructionPlanInputPage() {
     return [{ x: 0, y: 0 }, { x: A, y: 0 }, { x: B, y: C }, { x: Math.max(0, B - D), y: D }];
   }, [plotDimensions, plotShape]);
 
-  const cadScale = useMemo(() => {
-    const maxX = Math.max(...cadPlotPoints.map((point) => point.x), 1);
-    const maxY = Math.max(...cadPlotPoints.map((point) => point.y), 1);
-    return Math.min(620 / maxX, 480 / maxY);
+  const { cadScale, offsetX, offsetY } = useMemo(() => {
+    const minX = Math.min(...cadPlotPoints.map(p => p.x), 0);
+    const maxX = Math.max(...cadPlotPoints.map(p => p.x), 1);
+    const minY = Math.min(...cadPlotPoints.map(p => p.y), 0);
+    const maxY = Math.max(...cadPlotPoints.map(p => p.y), 1);
+
+    const plotWidth = maxX - minX;
+    const plotHeight = maxY - minY;
+
+    const canvasWidth = 800;
+    const canvasHeight = 550;
+
+    const scaleX = canvasWidth / (plotWidth || 1);
+    const scaleY = canvasHeight / (plotHeight || 1);
+    const scale = Math.min(scaleX, scaleY) * 0.7;
+
+    const cx = (canvasWidth - plotWidth * scale) / 2 - minX * scale;
+    const cy = (canvasHeight - plotHeight * scale) / 2 - minY * scale;
+
+    return { cadScale: scale, offsetX: cx, offsetY: cy };
   }, [cadPlotPoints]);
 
-  const scaledPlotPoints = cadPlotPoints.map((point) => ({ x: point.x * cadScale, y: point.y * cadScale }));
-
+  const scaledPlotPoints = cadPlotPoints.map((point) => ({
+    x: point.x * cadScale + offsetX,
+    y: point.y * cadScale + offsetY,
+  }));
+  
   const setCadCommand = (command: CadTool) => {
     setCadTool(command);
     setCadPoints([]);
+    setActiveDrawingStart(null);
+    setMouseCurrentPoint(null);
     setCadText("");
   };
 
@@ -338,38 +376,57 @@ export default function ConstructionPlanInputPage() {
     setSelectedCadObjectIds(copies.map((object) => object.id));
   };
 
+  const undoLastCadAction = () => {
+    if (cadObjects.length === 0) return;
+    setCadObjects((previous) => previous.slice(0, previous.length - 1));
+    setSelectedCadObjectIds([]);
+  };
+
   const addCadObject = (object: Omit<CadObject, "id">) => {
     const newObject: CadObject = { ...object, id: `CAD-${Date.now()}-${Math.random().toString(36).slice(2)}` };
     setCadObjects((previous) => [...previous, newObject]);
     setSelectedCadObjectIds([newObject.id]);
   };
 
-  const handleCadCanvasClick = (event: React.MouseEvent<SVGSVGElement>) => {
+  const handleCadMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     let x = (event.clientX - rect.left) / cadZoom;
     let y = (event.clientY - rect.top) / cadZoom;
 
-    if (orthMode && cadPoints.length > 0) {
-      const last = cadPoints[cadPoints.length - 1];
-      if (Math.abs(x - last.x) > Math.abs(y - last.y)) y = last.y;
-      else x = last.x;
+    if (orthMode && activeDrawingStart) {
+      if (Math.abs(x - activeDrawingStart.x) > Math.abs(y - activeDrawingStart.y)) y = activeDrawingStart.y;
+      else x = activeDrawingStart.x;
     }
+    setMouseCurrentPoint({ x, y });
+  };
 
-    const point = { x, y };
+  const handleCadCanvasClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (!mouseCurrentPoint) return;
+    const point = mouseCurrentPoint;
 
-    if (cadTool === "LINE" || cadTool === "PLINE") {
+    if (cadTool === "SELECT") {
+      return;
+    } else if (cadTool === "LINE") {
+      if (!activeDrawingStart) {
+        setActiveDrawingStart(point);
+      } else {
+        addCadObject({ type: "LINE", points: [activeDrawingStart, point], layer: "USER-GEOMETRY" });
+        setActiveDrawingStart(null);
+      }
+    } else if (cadTool === "PLINE") {
       const nextPoints = [...cadPoints, point];
       setCadPoints(nextPoints);
-      if (cadTool === "LINE" && nextPoints.length === 2) {
-        addCadObject({ type: "LINE", points: nextPoints, layer: "USER-GEOMETRY" });
-        setCadPoints([]);
-      }
     } else if (cadTool === "RECTANGLE") {
-      if (cadPoints.length === 0) setCadPoints([point]);
-      else {
-        const first = cadPoints[0];
-        addCadObject({ type: "RECTANGLE", points: [first, { x: point.x, y: first.y }, point, { x: first.x, y: point.y }], layer: "USER-GEOMETRY" });
-        setCadPoints([]);
+      if (!activeDrawingStart) {
+        setActiveDrawingStart(point);
+      } else {
+        const first = activeDrawingStart;
+        addCadObject({ 
+          type: "RECTANGLE", 
+          points: [first, { x: point.x, y: first.y }, point, { x: first.x, y: point.y }], 
+          layer: "USER-GEOMETRY" 
+        });
+        setActiveDrawingStart(null);
       }
     } else if (cadTool === "TEXT") {
       if (!cadText.trim()) {
@@ -385,6 +442,7 @@ export default function ConstructionPlanInputPage() {
     if (cadTool === "PLINE" && cadPoints.length >= 2) {
       addCadObject({ type: "POLYLINE", points: cadPoints, layer: "USER-GEOMETRY" });
       setCadPoints([]);
+      setActiveDrawingStart(null);
     }
   };
 
@@ -399,7 +457,6 @@ export default function ConstructionPlanInputPage() {
       return;
     }
 
-    // Use floorValidation engine
     const validation = validateConstructionPlan(plotArea, selectedFloors, floorData, floorRooms);
     if (!validation.isValid) {
       alert(validation.errors[0].message);
@@ -416,7 +473,6 @@ export default function ConstructionPlanInputPage() {
     const finalFee = feeMode === "AUTO" ? registeredFee : manualFee;
     const totalRoomArea = selectedFloors.reduce((sum, floor) => sum + getFloorRoomTotal(floor), 0);
 
-    // Use sheetEngine for final output layout preparation
     const sheetConfig = prepareSheetLayout({
       ref_no: currentRefNo || `PLAN-${Date.now()}`,
       customer_name: customerName,
@@ -609,47 +665,34 @@ export default function ConstructionPlanInputPage() {
                 value={plotDimensions[side]}
                 onChange={(event) => {
                   const value = Number(event.target.value) || 0;
-                  setPlotDimensions((previous) => ({ ...previous, [side]: value }));
+                  updateDimensionAndCheckShape(side, value);
                 }}
                 className="w-full border border-black p-2 text-center text-lg font-bold bg-white"
               />
             </div>
           ))}
         </div>
-
-        {/* AUTO DIMENSION */}
-        <div className="border-t border-b border-black p-3 bg-yellow-50">
-          <div className="font-black text-xs mb-1">AUTOMATIC OPPOSITE-SIDE DIMENSION</div>
-          <div className="flex gap-2 items-center flex-wrap">
-            <span className="text-xs font-bold">IF ONE SIDE IS LEFT BLANK / CHANGED:</span>
-            <select
-              value={autoDimensionSide}
-              onChange={(event) => setAutoDimensionSide(event.target.value as PlotSide)}
-              className="border border-black p-2 text-sm font-bold bg-white"
-            >
-              {(["A", "B", "C", "D"] as PlotSide[]).map((side) => (
-                <option key={side} value={side}>AUTO {side}</option>
-              ))}
-            </select>
-            <span className="text-xs font-medium">Geometry engine will calculate the missing compatible side.</span>
-          </div>
-        </div>
       </div>
 
-      {/* FOUR BOUNDARIES (2x2 Grid Layout) */}
+      {/* FOUR BOUNDARIES */}
       <div className="border border-black mb-4">
         <div className="bg-slate-900 text-white p-2 text-center font-black text-xl">
           FOUR BOUNDARIES
         </div>
 
-        <div className="grid grid-cols-2 border-b border-black">
+        <div className="grid grid-cols-2">
           {(
             [
+              ["NORTH", boundaryNorth, setBoundaryNorth],
+              ["SOUTH", boundarySouth, setBoundarySouth],
               ["EAST", boundaryEast, setBoundaryEast],
               ["WEST", boundaryWest, setBoundaryWest],
             ] as [string, string, React.Dispatch<React.SetStateAction<string>>][]
           ).map(([label, value, setter], index) => (
-            <div key={label} className={`p-3 ${index === 0 ? "border-r border-black" : ""}`}>
+            <div 
+              key={label} 
+              className={`p-3 border-black ${index % 2 === 0 ? "border-r" : ""} ${index < 2 ? "border-b" : ""}`}
+            >
               <label className="font-bold text-[12pt] block mb-1">{label}</label>
               <input
                 type="text"
@@ -878,13 +921,38 @@ export default function ConstructionPlanInputPage() {
         <div className="fixed inset-0 z-50 bg-black/80 p-2">
           <div className="bg-white w-full h-full border-2 border-black flex flex-col">
             <div className="bg-slate-950 text-white p-2 flex items-center justify-between">
-              <div className="font-black text-xs">CONSTRUCTION CAD — {plotShape}</div>
-              <button type="button" onClick={() => setIsCadModalOpen(false)} className="bg-red-600 px-4 py-1 font-black text-xs">
-                CLOSE
-              </button>
+              <div className="font-black text-xs">
+                CONSTRUCTION CAD — {plotShape} | ROAD: {roadFacingOption}
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1 bg-white text-black px-2 py-0.5 text-[10px] font-black border border-black">
+                  <span>90° FIXED WALL:</span>
+                  <select 
+                    id="cad-grow-side-select" 
+                    className="bg-gray-100 border border-black px-1 text-[10px] font-black outline-none"
+                    defaultValue="RIGHT_ALIGNED"
+                  >
+                    <option value="RIGHT_ALIGNED">RIGHT (A WALL 90°)</option>
+                    <option value="RIGHT_ALIGNED">RIGHT (B WALL 90°)</option>
+                    <option value="RIGHT_ALIGNED">RIGHT (D WALL 90°)</option>
+                    <option value="LEFT_ALIGNED">LEFT (C WALL 90°)</option>
+                    <option value="EQUAL">EQUAL BALANCE</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1 bg-white text-black px-2 py-0.5 text-[10px] font-black border border-black">
+                  <span>ZOOM: {Math.round(cadZoom * 100)}%</span>
+                  <button type="button" onClick={() => setCadZoom((prev) => Math.max(0.2, prev - 0.1))} className="px-1 font-bold hover:bg-gray-200">-</button>
+                  <button type="button" onClick={() => setCadZoom((prev) => Math.min(3, prev + 0.1))} className="px-1 font-bold hover:bg-gray-200">+</button>
+                  <button type="button" onClick={() => setCadZoom(1)} className="px-1 font-bold hover:bg-gray-200 text-red-600">RESET</button>
+                </div>
+                <button type="button" onClick={() => setIsCadModalOpen(false)} className="bg-red-600 px-4 py-1 font-black text-xs">
+                  CLOSE
+                </button>
+              </div>
             </div>
 
-            <div className="border-b border-black bg-gray-100 p-2 flex gap-1 flex-wrap">
+            <div className="border-b border-black bg-gray-100 p-2 flex gap-1 flex-wrap items-center">
               {(["SELECT", "LINE", "PLINE", "RECTANGLE", "OFFSET", "MOVE", "COPY", "ROTATE", "DELETE", "DIMENSION", "TEXT", "HATCH"] as CadTool[]).map((tool) => (
                 <button
                   key={tool}
@@ -897,6 +965,7 @@ export default function ConstructionPlanInputPage() {
               ))}
               <button type="button" onClick={() => setOrthMode((v) => !v)} className={`px-2 py-1 border border-black text-[9px] font-black ${orthMode ? "bg-green-600 text-white" : "bg-white"}`}>ORTHO</button>
               <button type="button" onClick={() => setOsnapMode((v) => !v)} className={`px-2 py-1 border border-black text-[9px] font-black ${osnapMode ? "bg-green-600 text-white" : "bg-white"}`}>OSNAP</button>
+              <button type="button" onClick={undoLastCadAction} className="px-2 py-1 border border-black text-[9px] font-black bg-yellow-200">UNDO</button>
               <button type="button" onClick={copySelectedCadObjects} className="px-2 py-1 border border-black text-[9px] font-black bg-white">COPY</button>
               <button type="button" onClick={() => rotateSelectedCadObjects(cadRotation)} className="px-2 py-1 border border-black text-[9px] font-black bg-white">ROTATE</button>
               <button type="button" onClick={deleteSelectedCadObjects} className="px-2 py-1 border border-black text-[9px] font-black bg-red-100">DELETE</button>
@@ -905,39 +974,450 @@ export default function ConstructionPlanInputPage() {
             </div>
 
             <div className="flex-1 grid grid-cols-12 overflow-hidden">
-              <div className="col-span-9 relative bg-white overflow-auto">
-                <div className="absolute top-2 left-2 z-10 bg-yellow-300 border border-black px-2 py-1 text-[9px] font-black">
-                  NORTH ↑
+              <div 
+                ref={(node) => {
+                  if (node) {
+                    const handleWheelSmooth = (e: WheelEvent) => {
+                      e.preventDefault();
+                      const zoomFactor = e.deltaY < 0 ? 0.1 : -0.1;
+                      setCadZoom((prev) => Math.min(Math.max(0.2, prev + zoomFactor), 3));
+                    };
+                    node.addEventListener("wheel", handleWheelSmooth, { passive: false });
+                  }
+                }}
+                className="col-span-9 relative bg-white overflow-auto"
+              >
+                <div className="absolute top-2 left-2 z-10 bg-yellow-300 border border-black px-2 py-1 text-[9px] font-black flex items-center gap-1">
+                  <span>NORTH</span>
+                  <span>
+                    {roadFacingOption?.includes("SOUTH") ? "↓" : roadFacingOption?.includes("NORTH") ? "↑" : roadFacingOption?.includes("EAST") ? "←" : "→"}
+                  </span>
                 </div>
-                <svg width={900} height={650} className="w-full h-full min-w-[700px] min-h-[500px]" onClick={handleCadCanvasClick} onDoubleClick={handleCadDoubleClick}>
+
+                <svg 
+                  width="2000" 
+                  height="2000" 
+                  className="bg-white min-w-[1500px] min-h-[1500px] cursor-crosshair" 
+                  onMouseMove={handleCadMouseMove}
+                  onClick={handleCadCanvasClick} 
+                  onDoubleClick={handleCadDoubleClick}
+                >
                   <defs>
                     <pattern id="cad-grid" width="20" height="20" patternUnits="userSpaceOnUse">
                       <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#e5e7eb" strokeWidth="1" />
                     </pattern>
                     <pattern id="cad-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                      <line x1="0" y1="0" x2="0" y2="10" stroke="#94a3b8" strokeWidth="2" />
+                      <line x1="0" y1="0" x2="0" y2="10" stroke="#94a3b8" strokeWidth="1.5" />
                     </pattern>
+                    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                      <path d="M 0 0 L 10 5 L 0 10 z" fill="black" />
+                    </marker>
                   </defs>
                   <rect x="0" y="0" width="100%" height="100%" fill="url(#cad-grid)" />
-                  <g transform={`translate(120 80) scale(${cadZoom})`}>
-                    <polygon
-                      points={scaledPlotPoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                      fill="url(#cad-hatch)"
-                      stroke="black"
-                      strokeWidth="2"
-                    />
-                  </g>
+                  
+                  {/* Master Group Rotation for Plot & Road */}
+                  {(() => {
+                    const masterRotation = cadAngleMode === "MANUAL" ? plotAngles.A : 0;
+                    const baseCenterX = 600;
+                    const baseY = 650;
+
+                    return (
+                      <g transform={`scale(${cadZoom}) translate(${baseCenterX}, ${baseY}) rotate(${masterRotation}) translate(${-baseCenterX}, ${-baseY})`}>
+                        {scaledPlotPoints.length > 0 && (() => {
+                          let dimA = Number(plotDimensions.A) || 20;
+                          let dimB = Number(plotDimensions.B) || dimA;
+                          let dimC = Number(plotDimensions.C) || 50;
+                          let dimD = Number(plotDimensions.D) || dimC;
+
+                          if (plotShape === "RECTANGULAR" || plotShape === "SQUARE") {
+                            dimB = dimA;
+                            dimD = dimC;
+                          }
+
+                          const scale = 10; 
+                          const bottomWidth = dimA * scale;
+                          const topWidth = dimB * scale;
+                          const heightLeft = dimC * scale;
+                          const heightRight = dimD * scale;
+
+                          const growSelectEl = document.getElementById("cad-grow-side-select") as HTMLSelectElement;
+                          const alignmentMode = growSelectEl ? growSelectEl.value : "RIGHT_ALIGNED";
+
+                          const pBottomLeft = { x: baseCenterX - bottomWidth / 2, y: baseY };
+                          const pBottomRight = { x: baseCenterX + bottomWidth / 2, y: baseY };
+
+                          let pTopLeft, pTopRight;
+
+                          if (plotShape === "RECTANGULAR" || plotShape === "SQUARE" || dimA === dimB) {
+                            pTopLeft = { x: baseCenterX - topWidth / 2, y: baseY - heightLeft };
+                            pTopRight = { x: baseCenterX + topWidth / 2, y: baseY - heightRight };
+                          } else if (alignmentMode === "LEFT_ALIGNED") {
+                            pTopLeft = { x: pBottomLeft.x, y: baseY - heightLeft };
+                            pTopRight = { x: pBottomLeft.x + topWidth, y: baseY - heightRight };
+                          } else if (alignmentMode === "RIGHT_ALIGNED") {
+                            pTopRight = { x: pBottomRight.x, y: baseY - heightRight };
+                            pTopLeft = { x: pBottomRight.x - topWidth, y: baseY - heightLeft };
+                          } else {
+                            pTopLeft = { x: baseCenterX - topWidth / 2, y: baseY - heightLeft };
+                            pTopRight = { x: baseCenterX + topWidth / 2, y: baseY - heightRight };
+                          }
+
+                          const correctedPoints = [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
+                          const xs = correctedPoints.map(p => p.x);
+                          const ys = correctedPoints.map(p => p.y);
+                          const minX = Math.min(...xs);
+                          const maxX = Math.max(...xs);
+                          const minY = Math.min(...ys);
+                          const maxY = Math.max(...ys);
+                          const centerX = (minX + maxX) / 2;
+                          const centerY = (minY + maxY) / 2;
+                          const offsetDist = 8;
+
+                          const angleTop = Math.atan2(pTopRight.y - pTopLeft.y, pTopRight.x - pTopLeft.x) * (180 / Math.PI);
+
+                          return (
+                            <>
+                              <polygon
+                                points={correctedPoints.map((point) => `${point.x},${point.y}`).join(" ")}
+                                fill="url(#cad-hatch)"
+                                stroke="black"
+                                strokeWidth="1.5"
+                              />
+
+                              <g style={{ fontSize: "10px", fontWeight: "bold", fontFamily: "sans-serif" }}>
+                                {(() => {
+                                  const midX = (pTopLeft.x + pTopRight.x) / 2;
+                                  const midY = (pTopLeft.y + pTopRight.y) / 2;
+                                  const distDim = -28; 
+                                  const distBnd = -52; 
+                                  const nx = -Math.sin((angleTop * Math.PI) / 180);
+                                  const ny = Math.cos((angleTop * Math.PI) / 180);
+                                  return (
+                                    <g>
+                                      <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x + nx * distDim} y2={pTopLeft.y + ny * distDim} stroke="black" strokeWidth="0.8" />
+                                      <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + nx * distDim} y2={pTopRight.y + ny * distDim} stroke="black" strokeWidth="0.8" />
+                                      <text x={midX + nx * distBnd} y={midY + ny * distBnd} textAnchor="middle" dominantBaseline="middle" fill="blue" transform={`rotate(${angleTop}, ${midX + nx * distBnd}, ${midY + ny * distBnd})`}>
+                                        NORTH: {boundaryNorth || "-"}
+                                      </text>
+                                      <g transform={`translate(${midX + nx * distDim}, ${midY + ny * distDim}) rotate(${angleTop})`}>
+                                        <line x1={-topWidth/2 + 2} y1="0" x2="-16" y2="0" stroke="black" strokeWidth="0.8" markerStart="url(#arrow)" />
+                                        <line x1="16" y1="0" x2={topWidth/2 - 2} y2="0" stroke="black" strokeWidth="0.8" markerEnd="url(#arrow)" />
+                                        <rect x="-15" y="-8" width="30" height="14" fill="white" />
+                                        <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="black">{dimB}'</text>
+                                      </g>
+                                    </g>
+                                  );
+                                })()}
+
+                                <g>
+                                  <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x} y2={pBottomLeft.y + 22} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x} y2={pBottomRight.y + 22} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pBottomLeft.x + offsetDist} y1={pBottomLeft.y + 15} x2={pBottomRight.x - offsetDist} y2={pBottomRight.y + 15} stroke="black" strokeWidth="0.8" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
+                                  <rect x={centerX - 16} y={pBottomLeft.y + 8} width="32" height="14" fill="white" />
+                                  <text x={centerX} y={pBottomLeft.y + 15} textAnchor="middle" dominantBaseline="middle" fill="black">{dimA}'</text>
+                                </g>
+
+                                <g>
+                                  <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + 22} y2={pTopRight.y} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x + 22} y2={pBottomRight.y} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pTopRight.x + 15} y1={pTopRight.y + offsetDist} x2={pBottomRight.x + 15} y2={pBottomRight.y - offsetDist} stroke="black" strokeWidth="0.8" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
+                                  <text x={maxX + 55} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="green" transform={`rotate(90, ${maxX + 55}, ${centerY})`}>
+                                    EAST: {boundaryEast || "-"}
+                                  </text>
+                                  <rect x={maxX + 10} y={centerY - 6} width="32" height="14" fill="white" />
+                                  <text x={maxX + 26} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="black">{dimD}'</text>
+                                </g>
+
+                                <g>
+                                  <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x - 22} y2={pTopLeft.y} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x - 22} y2={pBottomLeft.y} stroke="black" strokeWidth="0.8" />
+                                  <line x1={pTopLeft.x - 15} y1={pTopLeft.y + offsetDist} x2={pBottomLeft.x - 15} y2={pBottomLeft.y - offsetDist} stroke="black" strokeWidth="0.8" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
+                                  <text x={minX - 55} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="purple" transform={`rotate(-90, ${minX - 55}, ${centerY})`}>
+                                    WEST: {boundaryWest || "-"}
+                                  </text>
+                                  <rect x={minX - 42} y={centerY - 6} width="32" height="14" fill="white" />
+                                  <text x={minX - 26} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="black">{dimC}'</text>
+                                </g>
+                              </g>
+
+                              {/* Road follows slope accurately */}
+                              {(() => {
+                                const extension = 60;
+                                const roadHeight = 80;
+                                let rx = pBottomLeft.x - extension;
+                                let ry = pBottomRight.y;
+                                let rw = (pBottomRight.x - pBottomLeft.x) + extension * 2;
+                                let rh = roadHeight;
+                                let labelText = boundarySouth ? boundarySouth : "ROAD";
+
+                                if (roadFacingOption?.includes("NORTH")) {
+                                  ry = pTopLeft.y - roadHeight;
+                                  labelText = boundaryNorth ? boundaryNorth : "ROAD";
+                                } else if (roadFacingOption?.includes("EAST")) {
+                                  rx = maxX;
+                                  ry = minY - extension;
+                                  rw = roadHeight;
+                                  rh = (maxY - minY) + extension * 2;
+                                  labelText = boundaryEast ? boundaryEast : "ROAD";
+                                } else if (roadFacingOption?.includes("WEST")) {
+                                  rx = minX - roadHeight;
+                                  ry = minY - extension;
+                                  rw = roadHeight;
+                                  rh = (maxY - minY) + extension * 2;
+                                  labelText = boundaryWest ? boundaryWest : "ROAD";
+                                }
+
+                                return (
+                                  <g>
+                                    <rect x={rx} y={ry} width={rw} height={rh} fill="#f3f4f6" stroke="black" strokeWidth="1.5" />
+                                    <text x={rx + rw / 2} y={ry + rh / 2 + 4} textAnchor="middle" fill="black" style={{ fontWeight: "900", fontSize: "10px", fontFamily: "sans-serif" }}>
+                                      {labelText}
+                                    </text>
+                                  </g>
+                                );
+                              })()}
+
+                              <g transform={`translate(${centerX}, ${centerY})`}>
+                                <rect x="-55" y="-14" width="110" height="28" fill="white" stroke="black" strokeWidth="0.8" />
+                                <text x="0" y="4" textAnchor="middle" fill="black" style={{ fontWeight: "900", fontSize: "11px", fontFamily: "sans-serif" }}>
+                                  PROPOSED SITE
+                                </text>
+                              </g>
+                            </>
+                          );
+                        })()}
+
+                        {/* Render User CAD Objects */}
+                        {cadObjects.map((obj) => {
+                          const isSelected = selectedCadObjectIds.includes(obj.id);
+                          const strokeColor = isSelected ? "red" : "black";
+                          const strokeW = 1.5;
+
+                          if (obj.type === "LINE" && obj.points.length >= 2) {
+                            return (
+                              <line
+                                key={obj.id}
+                                x1={obj.points[0].x}
+                                y1={obj.points[0].y}
+                                x2={obj.points[1].x}
+                                y2={obj.points[1].y}
+                                stroke={strokeColor}
+                                strokeWidth={strokeW}
+                                onClick={(e) => { e.stopPropagation(); toggleCadSelection(obj.id); }}
+                                className="cursor-pointer"
+                              />
+                            );
+                          }
+                          if ((obj.type === "POLYLINE" || obj.type === "RECTANGLE") && obj.points.length >= 2) {
+                            return (
+                              <polygon
+                                key={obj.id}
+                                points={obj.points.map(p => `${p.x},${p.y}`).join(" ")}
+                                fill="none"
+                                stroke={strokeColor}
+                                strokeWidth={strokeW}
+                                onClick={(e) => { e.stopPropagation(); toggleCadSelection(obj.id); }}
+                                className="cursor-pointer"
+                              />
+                            );
+                          }
+                          if (obj.type === "TEXT" && obj.points.length > 0) {
+                            return (
+                              <text
+                                key={obj.id}
+                                x={obj.points[0].x}
+                                y={obj.points[0].y}
+                                fill={strokeColor}
+                                fontSize="12"
+                                fontWeight="bold"
+                                transform={`rotate(${obj.rotation || 0}, ${obj.points[0].x}, ${obj.points[0].y})`}
+                                onClick={(e) => { e.stopPropagation(); toggleCadSelection(obj.id); }}
+                                className="cursor-pointer"
+                              >
+                                {obj.text}
+                              </text>
+                            );
+                          }
+                          return null;
+                        })}
+
+                        {/* LIVE INTERACTIVE DRAWING PREVIEW */}
+                        {activeDrawingStart && mouseCurrentPoint && (
+                          <>
+                            {cadTool === "LINE" && (
+                              <line
+                                x1={activeDrawingStart.x}
+                                y1={activeDrawingStart.y}
+                                x2={mouseCurrentPoint.x}
+                                y2={mouseCurrentPoint.y}
+                                stroke="blue"
+                                strokeWidth="1.5"
+                                strokeDasharray="4"
+                              />
+                            )}
+                            {cadTool === "RECTANGLE" && (
+                              <rect
+                                x={Math.min(activeDrawingStart.x, mouseCurrentPoint.x)}
+                                y={Math.min(activeDrawingStart.y, mouseCurrentPoint.y)}
+                                width={Math.abs(mouseCurrentPoint.x - activeDrawingStart.x)}
+                                height={Math.abs(mouseCurrentPoint.y - activeDrawingStart.y)}
+                                fill="none"
+                                stroke="blue"
+                                strokeWidth="1.5"
+                                strokeDasharray="4"
+                              />
+                            )}
+                          </>
+                        )}
+                        {cadTool === "PLINE" && cadPoints.length > 0 && mouseCurrentPoint && (
+                          <polyline
+                            points={[...cadPoints, mouseCurrentPoint].map(p => `${p.x},${p.y}`).join(" ")}
+                            fill="none"
+                            stroke="blue"
+                            strokeWidth="1.5"
+                            strokeDasharray="4"
+                          />
+                        )}
+                      </g>
+                    );
+                  })()}
                 </svg>
               </div>
-
+              
+              {/* Live Dimensions Panel */}
               <div className="col-span-3 border-l border-black bg-gray-100 p-3 overflow-y-auto">
-                <div className="font-black text-xs border-b border-black pb-2 mb-3">PLOT INFORMATION</div>
+                <div className="flex items-center justify-between border-b border-black pb-2 mb-3">
+                  <div className="font-black text-xs">LIVE PLOT DIMENSIONS</div>
+                  <div className="flex items-center gap-1">
+                    <button 
+                      type="button" 
+                      onClick={() => setCadAngleMode("AUTO")} 
+                      className={`px-1.5 py-0.5 text-[9px] font-black border border-black ${cadAngleMode === "AUTO" ? "bg-black text-white" : "bg-white"}`}
+                    >
+                      AUTO
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setCadAngleMode("MANUAL")} 
+                      className={`px-1.5 py-0.5 text-[9px] font-black border border-black ${cadAngleMode === "MANUAL" ? "bg-black text-white" : "bg-white"}`}
+                    >
+                      MANUAL
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-2 text-[10px]">
-                  <div className="border border-black bg-white p-2"><b>A — FRONT:</b> {plotDimensions.A}'</div>
-                  <div className="border border-black bg-white p-2"><b>B — OPPOSITE:</b> {plotDimensions.B}'</div>
-                  <div className="border border-black bg-white p-2"><b>C — LEFT:</b> {plotDimensions.C}'</div>
-                  <div className="border border-black bg-white p-2"><b>D — RIGHT:</b> {plotDimensions.D}'</div>
+                  {/* A SIDE */}
+                  <div className="border border-black bg-white p-1.5 flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <b>A — FRONT:</b>
+                      <span className="text-[9px] text-gray-500">{cadAngleMode === "AUTO" ? "Angle: 0° (Auto)" : `Angle: ${plotAngles.A}°`}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <input 
+                        type="number" 
+                        value={plotDimensions.A} 
+                        onChange={(e) => updateDimensionAndCheckShape("A", Number(e.target.value))} 
+                        className="w-2/3 border border-black px-2 py-1 font-black text-xs outline-none bg-yellow-50"
+                        placeholder="Length"
+                      />
+                      <input 
+                        type="number" 
+                        disabled={cadAngleMode === "AUTO"}
+                        value={plotAngles.A} 
+                        onChange={(e) => setPlotAngles({...plotAngles, A: Number(e.target.value) || 0})} 
+                        className="w-1/3 border border-black px-1 py-1 font-bold text-[10px] text-center bg-gray-50 disabled:opacity-50"
+                        title="Angle (°)"
+                        placeholder="°"
+                      />
+                    </div>
+                  </div>
+
+                  {/* B SIDE */}
+                  <div className="border border-black bg-white p-1.5 flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <b>B — OPPOSITE:</b>
+                      <span className="text-[9px] text-gray-500">{cadAngleMode === "AUTO" ? "Angle: 0° (Auto)" : `Angle: ${plotAngles.B}°`}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <input 
+                        type="number" 
+                        value={plotDimensions.B} 
+                        onChange={(e) => updateDimensionAndCheckShape("B", Number(e.target.value))} 
+                        className="w-2/3 border border-black px-2 py-1 font-black text-xs outline-none bg-yellow-50"
+                        placeholder="Length"
+                      />
+                      <input 
+                        type="number" 
+                        disabled={cadAngleMode === "AUTO"}
+                        value={plotAngles.B} 
+                        onChange={(e) => setPlotAngles({...plotAngles, B: Number(e.target.value) || 0})} 
+                        className="w-1/3 border border-black px-1 py-1 font-bold text-[10px] text-center bg-gray-50 disabled:opacity-50"
+                        title="Angle (°)"
+                        placeholder="°"
+                      />
+                    </div>
+                  </div>
+
+                  {/* C SIDE */}
+                  <div className="border border-black bg-white p-1.5 flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <b>C — LEFT:</b>
+                      <span className="text-[9px] text-gray-500">{cadAngleMode === "AUTO" ? "Angle: 90° (Auto)" : `Angle: ${plotAngles.C}°`}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <input 
+                        type="number" 
+                        value={plotDimensions.C} 
+                        onChange={(e) => updateDimensionAndCheckShape("C", Number(e.target.value))} 
+                        className="w-2/3 border border-black px-2 py-1 font-black text-xs outline-none bg-yellow-50"
+                        placeholder="Length"
+                      />
+                      <input 
+                        type="number" 
+                        disabled={cadAngleMode === "AUTO"}
+                        value={plotAngles.C} 
+                        onChange={(e) => setPlotAngles({...plotAngles, C: Number(e.target.value) || 90})} 
+                        className="w-1/3 border border-black px-1 py-1 font-bold text-[10px] text-center bg-gray-50 disabled:opacity-50"
+                        title="Angle (°)"
+                        placeholder="°"
+                      />
+                    </div>
+                  </div>
+
+                  {/* D SIDE */}
+                  <div className="border border-black bg-white p-1.5 flex flex-col gap-1">
+                    <div className="flex justify-between items-center">
+                      <b>D — RIGHT:</b>
+                      <span className="text-[9px] text-gray-500">{cadAngleMode === "AUTO" ? "Angle: 90° (Auto)" : `Angle: ${plotAngles.D}°`}</span>
+                    </div>
+                    <div className="flex gap-1">
+                      <input 
+                        type="number" 
+                        value={plotDimensions.D} 
+                        onChange={(e) => updateDimensionAndCheckShape("D", Number(e.target.value))} 
+                        className="w-2/3 border border-black px-2 py-1 font-black text-xs outline-none bg-yellow-50"
+                        placeholder="Length"
+                      />
+                      <input 
+                        type="number" 
+                        disabled={cadAngleMode === "AUTO"}
+                        value={plotAngles.D} 
+                        onChange={(e) => setPlotAngles({...plotAngles, D: Number(e.target.value) || 90})} 
+                        className="w-1/3 border border-black px-1 py-1 font-bold text-[10px] text-center bg-gray-50 disabled:opacity-50"
+                        title="Angle (°)"
+                        placeholder="°"
+                      />
+                    </div>
+                  </div>
+
                   <div className="border border-black bg-yellow-100 p-2 font-black">AREA: {plotArea.toFixed(2)} SQ.FT</div>
+                  
+                  <div className="mt-4 font-black text-xs border-b border-black pb-1">BOUNDARIES</div>
+                  <div className="border border-black bg-white p-1.5"><b>North:</b> {boundaryNorth || "-"}</div>
+                  <div className="border border-black bg-white p-1.5"><b>South:</b> {boundarySouth || "-"}</div>
+                  <div className="border border-black bg-white p-1.5"><b>East:</b> {boundaryEast || "-"}</div>
+                  <div className="border border-black bg-white p-1.5"><b>West:</b> {boundaryWest || "-"}</div>
                 </div>
                 <button
                   type="button"

@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { createWorker } from 'tesseract.js';
 import * as XLSX from 'xlsx';
+import DocumentScanner from "../../../components/DocumentScanner";
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
@@ -48,8 +48,6 @@ export default function ExtensionEstimatePage() {
   const [registeredFee, setRegisteredFee] = useState<number>(0);
   const [totalBuiltUpArea, setTotalBuiltUpArea] = useState(0);
   const caseType = "EXTENSION & RENOVATION";
-  
-  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     let newTotal = 0;
@@ -130,55 +128,6 @@ export default function ExtensionEstimatePage() {
     router.push("/extension-estimate-preview");
   };
 
-  const handleExportExcel = () => {
-    if (!customerName.trim() || totalBuiltUpArea <= 0) {
-      alert("Please ensure Customer Name and Floor Areas are entered before exporting.");
-      return;
-    }
-
-    const excelRows: any[] = [
-      { "FIELD": "ESTIMATE TYPE", "VALUE": caseType },
-      { "FIELD": "CLIENT NAME", "VALUE": selectedClientName },
-      { "FIELD": "REPRESENTATIVE", "VALUE": representative },
-      { "FIELD": "CUSTOMER NAME", "VALUE": customerName },
-      { "FIELD": "PROPERTY ADDRESS", "VALUE": propertyAddress },
-      { "FIELD": "PLOT AREA (SQ.FT)", "VALUE": plotArea },
-      { "FIELD": "", "VALUE": "" }
-    ];
-
-    selectedFloors.forEach(floor => {
-      const fData = floorData[floor];
-      const mode = floorModes[floor] || "BOTH";
-
-      if (fData) {
-        if (mode === "BOTH" || mode === "PROPOSED") {
-          excelRows.push({
-            "FIELD": `${floor} - PROPOSED`,
-            "VALUE": `Width: ${fData.proposed?.width || 0} | Length: ${fData.proposed?.length || 0} | Area: ${fData.proposed?.area || 0} SQ.FT`
-          });
-        }
-        if (mode === "BOTH" || mode === "EXISTING") {
-          excelRows.push({
-            "FIELD": `${floor} - EXISTING`,
-            "VALUE": `Width: ${fData.existing?.width || 0} | Length: ${fData.existing?.length || 0} | Area: ${fData.existing?.area || 0} SQ.FT`
-          });
-        }
-      }
-    });
-
-    excelRows.push(
-      { "FIELD": "", "VALUE": "" },
-      { "FIELD": "TOTAL BUILT UP AREA", "VALUE": `${totalBuiltUpArea} SQ.FT` },
-      { "FIELD": "RATE PER SQ.FT", "VALUE": rate },
-      { "FIELD": "TOTAL AMOUNT", "VALUE": `${amount} /-` }
-    );
-
-    const worksheet = XLSX.utils.json_to_sheet(excelRows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Extension Estimate");
-    XLSX.writeFile(workbook, `${customerName.replace(/[^a-zA-Z0-9]/g, "_")}_Extension_Estimate.xlsx`);
-  };
-
   useEffect(() => {
     const fetchData = async () => {
       const { data: clientsTable, error } = await supabase
@@ -246,46 +195,6 @@ export default function ExtensionEstimatePage() {
     });
   };
 
-  const handleScanAndFill = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.type === 'application/pdf') {
-      alert("Please upload an image file (JPG/PNG) of the document for scanning.");
-      return;
-    }
-
-    setIsScanning(true);
-    try {
-      const worker = await createWorker('eng');
-      const imageUrl = URL.createObjectURL(file);
-      
-      const ret = await worker.recognize(imageUrl);
-      const rawText = ret.data.text;
-      
-      await worker.terminate();
-      URL.revokeObjectURL(imageUrl);
-
-      const cleanText = rawText.replace(/\s+/g, ' ').toUpperCase();
-      setCustomerName(cleanText.slice(0, 40));
-      setPropertyAddress(cleanText);
-
-      const areaMatch = cleanText.match(/(\d+)\s*(SQFT|SQ\.FT|SQUARE FEET|GAJ|METER)/i);
-      if (areaMatch) {
-        setPlotArea(areaMatch[1]);
-      } else {
-        setPlotArea("400");
-      }
-
-      setIsScanning(false);
-      alert("Document successfully scanned and dynamic details loaded!");
-    } catch (err: any) {
-      console.error("Scan Error:", err);
-      setIsScanning(false);
-      alert(`Error scanning document: ${err.message}`);
-    }
-  };
-
   const handleGenerate = async () => {
     if (!selectedClientName.trim() || !representative.trim()) {
       alert("Validation Error: Please select both Client Name and Representative.");
@@ -332,10 +241,14 @@ export default function ExtensionEstimatePage() {
         <h1 className="text-2xl font-bold text-center w-full pl-32">
           EXTENSION & RENOVATION ESTIMATE INPUT FORM
         </h1>
-        <label className={`cursor-pointer bg-blue-600 text-white px-4 py-2 text-[10pt] font-bold uppercase border border-black hover:bg-blue-700 transition flex items-center gap-2 whitespace-nowrap ${isScanning ? "opacity-50 pointer-events-none" : ""}`}>
-          {isScanning ? "Scanning..." : "📄 Scan & Fill"}
-          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={handleScanAndFill} />
-        </label>
+        {/* स्मार्ट डॉक्यूमेंट स्कैनर कंपोनेंट यहाँ जुड़ गया है */}
+        <DocumentScanner 
+          onScanComplete={({ customerName, propertyAddress, plotArea }) => {
+            if (customerName) setCustomerName(customerName);
+            if (propertyAddress) setPropertyAddress(propertyAddress);
+            if (plotArea) setPlotArea(plotArea);
+          }} 
+        />
       </div>
       
       <div className="grid grid-cols-7 gap-4 mb-4 border-b border-black pb-4">
@@ -359,12 +272,10 @@ export default function ExtensionEstimatePage() {
         <div className="col-span-2">
           <label className="font-bold block text-[12pt]">CLIENT NAME</label>
           <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH CLIENT..." />
-          <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
         </div>
         <div className="col-span-2">
           <label className="font-bold block text-[12pt]">REPRESENTATIVE</label>
           <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH REP..." />
-          <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
         </div>
       </div>
 

@@ -92,7 +92,8 @@ export default function Sidebar() {
               <Link href="/estimate" className="block py-0.5 hover:text-blue-300">New Construction</Link>
               <Link href="/renovation-estimate" className="block py-0.5 hover:text-blue-300">Renovation</Link>
               <Link href="/extension-estimate" className="block py-0.5 hover:text-blue-300">Renovation + Extension</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
-              <Link href="/remaining-work-estimate" className="block py-0.5 hover:text-blue-300">Remaining Work</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
+              <Link href="/remaining-work-estimate" className="block py-0.5 hover:text-blue-300">Remaining Work</Link>
+              <Link href="/construction-certificate" className="block py-0.5 hover:text-blue-300">Construction Certificate</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
             </div>
           )}
         </div>

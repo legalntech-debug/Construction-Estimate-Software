@@ -77,7 +77,7 @@ export default function SignupPage() {
       setForm({ ...form, mobile: numericValue });
     } else if (name === 'userType') {
       if (value === 'INDIVIDUAL') {
-        setForm({ ...form, userType: value, planType: 'BASIC ENGINE PLAN' });
+        setForm({ ...form, userType: value, planType: 'BASIC PLAN' });
       } else {
         setForm({ ...form, userType: value });
       }
@@ -173,7 +173,9 @@ export default function SignupPage() {
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
 
-    // 3. Insert Data into Profiles Table
+    // 3. Insert Data into Profiles Table (Updated with Premium Approval Check)
+    const isPremium = form.planType === 'PREMIUM PLAN';
+
     const { error: profileError } = await supabase.from('profiles').insert([
       {
         id: user.id,
@@ -186,6 +188,7 @@ export default function SignupPage() {
         city: form.city,
         state: form.state,
         user_code: generatedUserId,
+        status: isPremium ? 'PENDING' : 'active', // <--- Ye naya check add kiya hai
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
       },
@@ -354,7 +357,7 @@ export default function SignupPage() {
     <div className="space-y-1">
       <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Choose Engine Plan</label>
       <select name="planType" value={form.planType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
-        <option value="BASIC ENGINE PLAN">BASIC ENGINE PLAN</option>
+        <option value="BASIC PLAN">BASIC PLAN</option>
         {form.userType !== 'INDIVIDUAL' && (
           <option value="PREMIUM PLAN">PREMIUM PLAN</option>
         )}
@@ -415,14 +418,24 @@ export default function SignupPage() {
           {step === 3 && (
             <div className="text-center space-y-2">
               <div className="text-green-600 text-5xl font-bold animate-bounce">✓</div>
-              <h2 className="font-black text-blue-900 tracking-tight text-lg">ACCOUNT CREATED SUCCESSFULLY</h2>
+              <h2 className="font-black text-blue-900 tracking-tight text-lg">
+                {form.planType === 'PREMIUM PLAN' ? 'REGISTRATION SUBMITTED FOR APPROVAL' : 'ACCOUNT CREATED SUCCESSFULLY'}
+              </h2>
+
+              {/* WARNING BOX FOR PREMIUM PLAN PENDING APPROVAL */}
+              {form.planType === 'PREMIUM PLAN' && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-xl font-medium text-left">
+                  ⚠️ You have selected the <b>Premium Plan</b>. Your account status is currently set to <b>Pending Admin Approval</b>. You will be able to log in once the admin reviews and authorizes your profile.
+                </div>
+              )}
+              {/* --------------------------------------------- */}
 
               <div className="bg-gray-100 p-4 rounded-xl mt-3 text-left text-xs font-mono border border-gray-200 space-y-1">
                 <p><b>SYSTEM ID :</b> <span className="text-blue-900 font-bold">{credentials.userId}</span></p>
                 <p><b>PASSWORD  :</b> <span className="text-slate-800 font-bold">{credentials.password}</span></p>
                 <p><b>CATEGORY  :</b> <span className="text-slate-800 font-bold">{form.userType}</span></p>
                 <p><b>LOCATION  :</b> <span className="text-slate-800 font-bold">{form.city}, {form.state}</span></p>
-                <p><b>PLAN TYPE  :</b> <span className="text-slate-800 font-bold">{form.planType}</span></p>
+                <p><b>PLAN TYPE :</b> <span className="text-slate-800 font-bold">{form.planType}</span></p>
                 {form.userType !== 'INDIVIDUAL' && <p><b>FIRM NAME :</b> <span className="text-slate-800 font-bold">{form.firmName}</span></p>}
               </div>
 

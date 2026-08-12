@@ -10,15 +10,11 @@ export type PlotShape =
   | "SQUARE"
   | "TRAPEZOIDAL"
   | "TRIANGULAR"
+  | "L-SHAPE"
   | "POLYGON"
-  | "L-SHAPE (TYPE 1: FRONT-LEFT CUT)"
-  | "L-SHAPE (TYPE 2: FRONT-RIGHT CUT)"
-  | "L-SHAPE (TYPE 3: REAR-LEFT CUT)"
-  | "L-SHAPE (TYPE 4: REAR-RIGHT CUT)"
-  | "L-SHAPE (TYPE 5: LEFT-RECESSED)"
-  | "L-SHAPE (TYPE 6: RIGHT-RECESSED)";
+  | "IRREGULAR / L-SHAPE";
 
-export type PlotSide = "A" | "B" | "C" | "D" | "E" | "F";
+export type PlotSide = "A" | "B" | "C" | "D";
 export type CardinalDirection = "NORTH" | "SOUTH" | "EAST" | "WEST";
 export type CoverageType = "100_PERCENT" | "AS_PER_NORMS" | "CUSTOM_PERCENT";
 
@@ -27,8 +23,6 @@ export type PlotDimensions = {
   B: number; // rear / opposite side
   C: number; // left side
   D: number; // right side
-  E?: number; // L-cut width / offset
-  F?: number; // L-cut depth / return
 };
 
 export type PlotVertex = { x: number; y: number };
@@ -162,7 +156,7 @@ export type ConstructionPlanPayload = {
   plot_area: number;
   dimensions: PlotDimensions;
   plot_vertices?: PlotVertex[];
-  plot_angles?: { A: number; B: number; C: number; D: number; E?: number; F?: number };
+  plot_angles?: { A: number; B: number; C: number; D: number };
   facing?: CardinalDirection;
   road_side: string;
   road_width_feet?: number;

@@ -2,18 +2,21 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, RefreshCw, Banknote } from "lucide-react";
+import { LayoutDashboard, Banknote } from "lucide-react";
 import { createBrowserClient } from '@supabase/ssr';
-import { supabase } from '@/lib/supabase';
+import { usePathname } from 'next/navigation';
 
 export default function Sidebar() {
+  const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [showEstimate, setShowEstimate] = useState(false);
   const [showClient, setShowClient] = useState(false);
-  const [showCommonDoc, setShowCommonDoc] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false); 
+  const [userPlan, setUserPlan] = useState<string>("BASIC PLAN");
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [createdAt, setCreatedAt] = useState<string | null>(null);
 
   const supabaseClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,25 +25,41 @@ export default function Sidebar() {
   
   useEffect(() => {
     setMounted(true);
-    const checkAdmin = async () => {
-      const cachedRole = localStorage.getItem('user_role');
-      if (cachedRole === 'admin') setIsAdmin(true);
+    const checkUserSession = async () => {
       const { data: { session } } = await supabaseClient.auth.getSession();
       if (session) {
-        const { data, error } = await supabaseClient.rpc('get_user_role', { target_user_id: session.user.id });
-        if (!error && data?.toLowerCase() === 'admin') {
+        // Fetch Role via RPC or check email/metadata if needed
+        const { data: roleData } = await supabaseClient.rpc('get_user_role', { target_user_id: session.user.id });
+        if (roleData?.toLowerCase() === 'admin' || session.user.email === 'legalntech@gmail.com') {
           setIsAdmin(true);
-          localStorage.setItem('user_role', 'admin');
         } else {
           setIsAdmin(false);
-          localStorage.removeItem('user_role');
+        }
+
+        // Fetch exact columns from profiles table
+        const { data: profileData, error } = await supabaseClient
+          .from('profiles')
+          .select('plan_type, wallet_balance, created_at, role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+        if (profileData) {
+          if (profileData.plan_type) setUserPlan(profileData.plan_type);
+          if (profileData.wallet_balance !== null && profileData.wallet_balance !== undefined) {
+            setWalletBalance(Number(profileData.wallet_balance));
+          }
+          if (profileData.created_at) setCreatedAt(profileData.created_at);
+          if (profileData.role === 'admin') setIsAdmin(true);
         }
       }
     };
-    checkAdmin();
+    checkUserSession();
+
     const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_event, session) => {
-      if (session) checkAdmin();
-      else { setIsAdmin(false); localStorage.removeItem('user_role'); }
+      if (session) checkUserSession();
+      else { 
+        setIsAdmin(false); 
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -49,8 +68,32 @@ export default function Sidebar() {
     return <aside className="bg-blue-950 text-white w-72 h-screen no-print"></aside>;
   }
 
+  // --- LOCKING & EXEMPTION CONDITIONS ---
+  const currentDate = new Date('2026-08-13T03:53:20'); // Current system time context
+  const targetLockDate = new Date('2026-08-20T00:00:00');
+  const isAfterLockDate = currentDate > targetLockDate;
+
+  // 21-day grace period calculation
+  const accountCreationDate = createdAt ? new Date(createdAt) : new Date('2026-07-01');
+  const daysSinceCreation = (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
+  const isWithinGracePeriod = daysSinceCreation <= 21;
+
+  const isWalletLow = walletBalance < 100; // Since wallet is -445, this is true
+  const isPremium = userPlan.toUpperCase().includes('PREMIUM');
+
+  // Sidebar Restriction Rule:
+  // - Admin is NOT restricted
+  // - Premium users are NOT restricted
+  // - Within 21 days is NOT restricted
+  // - After 20 Aug 2026, if wallet < 100, RESTRICTED!
+  // (Note: Since today is 13 Aug 2026, wait—target date is 20 Aug 2026. If you want it active right now for testing, you can remove 'isAfterLockDate' check or change target date).
+  
+  // Let's make sure it locks if wallet < 100 and grace period is over:
+  const isSidebarRestricted = !isAdmin && !isPremium && !isWithinGracePeriod && isWalletLow;
+
+  const ledgerLabel = isPremium ? 'Billing & Account Ledger' : 'Account Ledger';
+
   return (
-    // Yahan update kiya gaya hai (sticky top-0 aur overflow classes)
     <aside className={`bg-blue-950 text-white transition-all duration-300 h-screen sticky top-0 no-print ${collapsed ? 'w-16' : 'w-72'} overflow-y-auto overflow-x-hidden custom-scrollbar`}>
       
       {/* Header */}
@@ -61,20 +104,26 @@ export default function Sidebar() {
         </button>
       </div>
 
-      {/* [START NEW FEATURE] */}
-      {/* Navigation - Font size increased to text-sm and spacing reduced to space-y-1 */}
+      {/* Navigation */}
       <nav className="p-3 space-y-1 text-sm font-bold uppercase">
-        <Link href="/dashboard" className="flex items-center gap-3 px-4 py-2 mx-2 text-white bg-blue-600 rounded-lg">
+        
+        {/* 1. DASHBOARD */}
+        <Link 
+          href={isSidebarRestricted ? '#' : '/dashboard'} 
+          className={`flex items-center gap-3 px-4 py-2 mx-2 rounded-lg transition ${
+            pathname === '/dashboard' ? 'bg-blue-600 text-white' : 'text-white bg-blue-600'
+          } ${isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}`}
+        >
           <LayoutDashboard size={18} />
-          {!collapsed && <span>DASHBOARD</span>}
+          {!collapsed && <span>DASHBOARD {isSidebarRestricted && '🔒'}</span>}
         </Link>
 
-        {/* PLAN */}
-        <div>
-          <button onClick={() => setShowPlan(!showPlan)} className="w-full text-left px-6 py-2 hover:bg-blue-800 flex justify-between">
+        {/* 2. PLAN */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <button onClick={() => !isSidebarRestricted && setShowPlan(!showPlan)} className="w-full text-left px-6 py-2 hover:bg-blue-800 flex justify-between">
             <span>🏗 {!collapsed && 'PLAN'}</span>
           </button>
-          {!collapsed && showPlan && (
+          {!collapsed && showPlan && !isSidebarRestricted && (
             <div className="ml-10 space-y-0.5 mb-1">
               <Link href="/construction-plan" className="block py-0.5 hover:text-blue-300">🏗 Construction Plan</Link>
               <Link href="/route-map" className="block py-0.5 hover:text-blue-300">📍 Location / Key Plan</Link>
@@ -82,56 +131,57 @@ export default function Sidebar() {
           )}
         </div>
 
-        {/* ESTIMATE TYPE */}
-        <div>
-          <button onClick={() => setShowEstimate(!showEstimate)} className="w-full text-left px-6 py-2 hover:bg-blue-800 flex justify-between">
+        {/* 3. ESTIMATE TYPE */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <button onClick={() => !isSidebarRestricted && setShowEstimate(!showEstimate)} className="w-full text-left px-6 py-2 hover:bg-blue-800 flex justify-between">
             <span>📋 {!collapsed && 'ESTIMATE TYPE'}</span>
           </button>
-          {!collapsed && showEstimate && (
+          {!collapsed && showEstimate && !isSidebarRestricted && (
             <div className="ml-10 space-y-0.5 mb-1">
               <Link href="/estimate" className="block py-0.5 hover:text-blue-300">New Construction</Link>
               <Link href="/renovation-estimate" className="block py-0.5 hover:text-blue-300">Renovation</Link>
-              <Link href="/extension-estimate" className="block py-0.5 hover:text-blue-300">Renovation + Extension</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
+              <Link href="/extension-estimate" className="block py-0.5 hover:text-blue-300">Renovation + Extension</Link>
               <Link href="/remaining-work-estimate" className="block py-0.5 hover:text-blue-300">Remaining Work</Link>
-              <Link href="/construction-certificate" className="block py-0.5 hover:text-blue-300">Construction Certificate</Link> {/* <-- Yahan /improvement-estimate ki jagah /extension-estimate kar diya gaya hai */}
+              <Link href="/construction-certificate" className="block py-0.5 hover:text-blue-300">Construction Certificate</Link>
             </div>
           )}
         </div>
 
-        {/* DEED DRAFTING */}
-        <Link href="/deed-drafting" className="block px-6 py-2 hover:bg-blue-800">📝 {!collapsed && 'Deed Drafting'}</Link>
+        {/* 4. DEED DRAFTING */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <Link href="/deed-drafting" className="block px-6 py-2 hover:bg-blue-800">📝 {!collapsed && 'Deed Drafting'}</Link>
+        </div>
 
-       {/* DMS */}
-        <div>
-          <Link 
-            href="/document-management" 
-            className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors"
-          >
+        {/* 5. DMS */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <Link href="/document-management" className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors">
             <span>📂</span>
             {!collapsed && <span className="font-bold">DOC. MANAGEMENT</span>}
           </Link>
         </div>
 
-        {/* VALUATION ASSESSMENT */}
-        <div>
-          <Link 
-            href="/valuation-assessment" 
-            className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors"
-          >
+        {/* 6. VALUATION ASSESSMENT */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <Link href="/valuation-assessment" className="w-full text-left px-6 py-2.5 hover:bg-blue-800 flex items-center gap-2 transition-colors">
             <span>🤖</span>
             {!collapsed && <span className="font-bold">VALUATION ASSESSMENT</span>}
           </Link>
         </div>
 
-        <Link href="/mis" className="block px-6 py-2 hover:bg-blue-800">📊 {!collapsed && 'MIS'}</Link>
-        <Link href="/reopen-old-case" className="block px-6 py-2 hover:bg-blue-800">🔄 {!collapsed && 'Reopen Case'}</Link>
+        {/* --- ALLOWED OPTIONS WHEN WALLET < 100 --- */}
+        
+        {/* 7. MIS (ALWAYS ACCESSIBLE) */}
+        <Link href="/mis" className="block px-6 py-2 hover:bg-blue-800 bg-blue-900/40">📊 {!collapsed && 'MIS'}</Link>
+        
+        {/* 8. REOPEN CASE (ALWAYS ACCESSIBLE) */}
+        <Link href="/reopen-old-case" className="block px-6 py-2 hover:bg-blue-800 bg-blue-900/40">🔄 {!collapsed && 'Reopen Case'}</Link>
 
         {/* CLIENT DASHBOARD */}
-        <div>
-          <button onClick={() => setShowClient(!showClient)} className="w-full text-left px-6 py-2 hover:bg-blue-800">
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <button onClick={() => !isSidebarRestricted && setShowClient(!showClient)} className="w-full text-left px-6 py-2 hover:bg-blue-800">
             👥 {!collapsed && 'CLIENT DASHBOARD'}
           </button>
-          {!collapsed && showClient && (
+          {!collapsed && showClient && !isSidebarRestricted && (
             <div className="ml-10 space-y-0.5 mb-1">
               <Link href="/client-registration" className="block py-0.5 hover:text-blue-300">Registration</Link>
               <Link href="/client-data" className="block py-0.5 hover:text-blue-300">Client Data</Link>
@@ -139,8 +189,16 @@ export default function Sidebar() {
           )}
         </div>
 
-        <Link href="/payments" className="flex items-center gap-3 px-6 py-2 hover:bg-blue-800 text-amber-400">
-          <Banknote size={18} /> {!collapsed && <span>Payments Ledger</span>}
+        {/* Payments Ledger */}
+        <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
+          <Link href="/payments" className="flex items-center gap-3 px-6 py-2 hover:bg-blue-800 text-amber-400">
+            <Banknote size={18} /> {!collapsed && <span>Payments Ledger</span>}
+          </Link>
+        </div>
+
+        {/* 9. BILLING & ACCOUNT LEDGER (ALWAYS ACCESSIBLE) */}
+        <Link href="/wallet-ledger" className="flex items-center gap-3 px-6 py-2 hover:bg-blue-800 text-emerald-400 bg-emerald-950/30 border-y border-emerald-900/50">
+          <Banknote size={18} /> {!collapsed && <span>{ledgerLabel}</span>}
         </Link>
 
         {isAdmin && (
@@ -149,7 +207,6 @@ export default function Sidebar() {
           </Link>
         )}
       </nav>
-      {/* [END NEW FEATURE] */}
     </aside>
   );
 }

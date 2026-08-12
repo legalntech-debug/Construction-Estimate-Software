@@ -194,44 +194,42 @@ const handleSaveClient = async () => {
   </div>
 
   {/* NAME */}
+<div>
+  <label className="font-semibold">
+    {clientCategory === 'BANKER'
+      ? 'BANK NAME *'
+      : clientCategory === 'DSA'
+      ? 'DSA FIRM NAME *'
+      : clientCategory === 'CONSTRUCTOR'
+      ? 'COMPANY NAME *'
+      : clientCategory === 'ENGINEER'
+      ? 'ENGINEER NAME *'
+      : 'CLIENT NAME *'}
+  </label>
 
-  <div>
-    <label className="font-semibold">
+  <input
+    type="text"
+    value={clientName}
+    onChange={(e) => setClientName(e.target.value.replace(/\s+/g, ' ').toUpperCase())}
+    onBlur={(e) => setClientName(e.target.value.trim().replace(/\s+/g, ' ').toUpperCase())}
+    className="w-full border rounded-lg p-2 mt-1 uppercase"
+  />
+</div>
 
-      {clientCategory === 'BANKER'
-        ? 'BANK NAME *'
-        : clientCategory === 'DSA'
-        ? 'DSA FIRM NAME *'
-        : clientCategory === 'CONSTRUCTOR'
-        ? 'COMPANY NAME *'
-        : clientCategory === 'ENGINEER'
-        ? 'ENGINEER NAME *'
-        : 'CLIENT NAME *'}
+{/* REPRESENTATIVE NAME*/}
+<div>
+  <label className="font-semibold">
+    REPRESENTATIVE NAME*
+  </label>
 
-    </label>
-
-    <input
-  type="text"
-  value={clientName}
-  onChange={(e) => setClientName(e.target.value.toUpperCase())}
-  className="w-full border rounded-lg p-2 mt-1 uppercase"
-/>
-  </div>
-
-  {/* REPRESENTATIVE NAME*/}
-
-  <div>
-    <label className="font-semibold">
-      REPRESENTATIVE NAME*
-    </label>
-
-    <input
-  type="text"
-  value={representative}
-  onChange={(e) => setRepresentative(e.target.value.toUpperCase())}
-  className="w-full border rounded-lg p-2 mt-1 uppercase"
-/>
-  </div>
+  <input
+    type="text"
+    value={representative}
+    onChange={(e) => setRepresentative(e.target.value.replace(/\s+/g, ' ').toUpperCase())}
+    onBlur={(e) => setRepresentative(e.target.value.trim().replace(/\s+/g, ' ').toUpperCase())}
+    className="w-full border rounded-lg p-2 mt-1 uppercase"
+  />
+</div>
 
 </div>
 

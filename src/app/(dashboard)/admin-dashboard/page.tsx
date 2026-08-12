@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import DashboardChart from '@/app/components/DashboardChart';
 import SystemAlerts from '../../components/SystemAlerts';
@@ -11,94 +10,12 @@ import RazorpayRevenueChart from '@/app/components/RazorpayRevenueChart';
 import RazorpayTableWithFilter from '@/app/components/RazorpayTableWithFilter';
 import PushNotificationManager from '@/components/PushNotificationManager';
 
-// --- ADMIN BROADCAST PANEL COMPONENT ---
-function AdminBroadcastPanel() {
-  const [title, setTitle] = useState('☀️ Good Morning! L&T Consultant Services');
-  const [body, setBody] = useState('Get your sale estimate & map drafting done 24/7 anytime via L&T Consultant Software.');
-  const [loading, setLoading] = useState(false);
-  const [showBroadcastPanel, setShowBroadcastPanel] = useState(false);
-
-  const handleSendBroadcast = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !body) {
-      alert('Please enter both title and message.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await fetch('/api/admin/send-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, body }),
-      });
-
-      const result = await response.json();
-      if (result.success) {
-        alert('Global Push Notification sent successfully to all users!');
-      } else {
-        alert('Failed to send broadcast: ' + result.error);
-      }
-    } catch (err: any) {
-      alert('Error: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h3 className="font-bold text-slate-800 text-base">📢 Send Broadcast Push Notification</h3>
-          <p className="text-xs text-slate-500">Send an instant notification directly to all users' mobile and desktop screens.</p>
-        </div>
-        <button 
-          onClick={() => setShowBroadcastPanel(!showBroadcastPanel)}
-          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-        >
-          {showBroadcastPanel ? 'Hide [-]' : 'Show [+]'}
-        </button>
-      </div>
-
-      {showBroadcastPanel && (
-        <form onSubmit={handleSendBroadcast} className="space-y-3 pt-2">
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Notification Title</label>
-            <input 
-              type="text" 
-              placeholder="e.g. Daily Update / New Feature" 
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Message Body</label>
-            <textarea 
-              placeholder="e.g. Din ka naya estimate check karna na bhulein!" 
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required
-            />
-          </div>
-
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm uppercase tracking-wider"
-          >
-            {loading ? 'Broadcasting...' : '🚀 Blast Notification to All Users'}
-          </button>
-        </form>
-      )}
-    </div>
-  );
-}
+// --- IMPORTED SUB-COMPONENTS ---
+import AdminBroadcastWidget from './components/AdminBroadcastWidget';
+import AdminCreateUserWidget from './components/AdminCreateUserWidget';
+import AdminPendingApprovalsWidget from './components/AdminPendingApprovalsWidget';
+import AdminRefundRequestsWidget from './components/AdminRefundRequestsWidget';
+import PremiumBillingWidget from './components/PremiumBillingWidget'; // <-- Added Premium Billing Widget
 
 export default function AdminDashboardPage(props: { 
   searchParams: Promise<{ filter?: string; inactiveDays?: string }> 
@@ -108,38 +25,35 @@ export default function AdminDashboardPage(props: {
 
   const [userTableSearch, setUserTableSearch] = useState('');
 
-  // Toggle Visibility States for Sections (Hide/Show)
   const [hiddenSections, setHiddenSections] = useState<{ [key: string]: boolean }>({
-    gstManager: false,
-    gatewayAnalytics: false,
-    recharge: false,
-    health: false,
-    kpi: false,
-    rbac: false,
-    audit: false,
-    inactive: false,
-    razorpayChart: false,
-    mis: false,
-    gateway: false,
+    gstManager: true,
+    gatewayAnalytics: true,
+    recharge: true,
+    health: true,
+    kpi: true,
+    rbac: true,
+    audit: true,
+    inactive: true,
+    razorpayChart: true,
+    mis: true,
+    gateway: true,
+    premiumBilling: false, // <-- State for Premium Billing Widget section toggle
   });
 
   const toggleSection = (key: string) => {
     setHiddenSections(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // Modal / Drill-down state for user estimates
   const [selectedUserForEstimates, setSelectedUserForEstimates] = useState<any>(null);
   const [userEstimatesList, setUserEstimatesList] = useState<any[]>([]);
 
-  // Modal Filter States
   const [modalFilterType, setModalFilterType] = useState<'all' | 'date' | 'month'>('all');
   const [modalSelectedDate, setModalSelectedDate] = useState('');
   const [modalSelectedMonth, setModalSelectedMonth] = useState('');
 
-  // Wallet Recharge Requests State
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
+  const [refundRequests, setRefundRequests] = useState<any[]>([]);
 
-  // --- GST & Income Management States ---
   const [incomes, setIncomes] = useState<any[]>([]);
   const [incomeForm, setIncomeForm] = useState({
     client_name: '',
@@ -150,14 +64,12 @@ export default function AdminDashboardPage(props: {
     description: '',
   });
 
-  // Advanced Gateway Filter States (Dynamic & Fully Integrated)
   const [gatewayFilterMode, setGatewayFilterMode] = useState<'month' | 'date' | 'year' | 'fy'>('month');
-  const [selectedGatewayMonth, setSelectedGatewayMonth] = useState(new Date().toISOString().slice(0, 7)); // e.g. "2026-08"
-  const [selectedGatewayDate, setSelectedGatewayDate] = useState(new Date().toISOString().slice(0, 10)); // e.g. "2026-08-09"
-  const [selectedGatewayYear, setSelectedGatewayYear] = useState(new Date().getFullYear().toString()); // e.g. "2026"
+  const [selectedGatewayMonth, setSelectedGatewayMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedGatewayDate, setSelectedGatewayDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedGatewayYear, setSelectedGatewayYear] = useState(new Date().getFullYear().toString());
   const [selectedGatewayFY, setSelectedGatewayFY] = useState('2026-27');
 
-  // States for all fetched dashboard data
   const [dashboardData, setDashboardData] = useState<any>({
     records: [],
     stats: [],
@@ -181,7 +93,6 @@ export default function AdminDashboardPage(props: {
     });
   }, [props.searchParams]);
 
-  // --- SECURITY ENHANCEMENT: PRINT / SCREENSHOT RESTRICTION ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey && (e.key === 'p' || e.key === 'P' || e.key === 's' || e.key === 'S')) || e.key === 'PrintScreen') {
@@ -199,84 +110,85 @@ export default function AdminDashboardPage(props: {
   const filter = searchParamsData.filter || 'all';
   const inactiveDays = Number(searchParamsData.inactiveDays || 30);
 
+  const fetchDashboardData = async () => {
+    const startTime = Date.now();
+    let startDate = new Date(); 
+    
+    if (filter === 'day') startDate.setDate(startDate.getDate() - 1);
+    else if (filter === 'week') startDate.setDate(startDate.getDate() - 7);
+    else if (filter === 'month') startDate.setMonth(startDate.getMonth() - 1);
+    else if (filter === 'year') startDate.setFullYear(startDate.getFullYear() - 1);
+    else if (filter === 'fy') startDate.setMonth(3, 1); 
+    else startDate.setFullYear(2020);
+
+    try {
+      const [
+        recordsRes,
+        statsRes,
+        monthlyCasesRes,
+        fyDataRes,
+        totalUsersCountRes,
+        inactiveUsersDataRes,
+        liveOnlineCountRes,
+        razorpayTransactionsRes,
+        auditLogsRes,
+        storageFilesRes,
+        enhancedProfilesRes,
+        rechargesDataRes,
+        incomesDataRes,
+        refundsDataRes
+      ] = await Promise.all([
+        supabase.from('mis_records').select('*').gte('created_date', startDate.toISOString()),
+        supabase.from('estimates').select('payment_status, user_id, amount, reference_no, customer_name, case_type, created_at, user_payment'),
+        supabase.rpc('get_monthly_case_count'),
+        supabase.rpc('get_revenue_by_fy', { start_date: startDate.toISOString(), end_date: new Date().toISOString() }),
+        supabase.rpc('get_total_users'),
+        supabase.rpc('get_inactive_users', { days_limit: inactiveDays }),
+        supabase.from('user_status').select('*', { count: 'exact', head: true }).eq('is_online', true),
+        supabase.rpc('get_razorpay_transactions'),
+        supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(10),
+        supabase.storage.from('documents').list(),
+        supabase.rpc('get_profiles_with_estimates_count'),
+        supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false }),
+        supabase.from('admin_incomes').select('*').order('created_at', { ascending: false }),
+        supabase.from('wallet_refund_requests').select('*').order('created_at', { ascending: false })
+      ]);
+
+      let sortedProfiles = enhancedProfilesRes.data || [];
+      sortedProfiles.sort((a: any, b: any) => {
+        const nameA = (a.full_name || '').toLowerCase();
+        const nameB = (b.full_name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+
+      setDashboardData({
+        records: recordsRes.data || [],
+        stats: statsRes.data || [],
+        monthlyCases: monthlyCasesRes.data || [],
+        fyData: fyDataRes.data || [],
+        totalUsers: totalUsersCountRes.data ?? 0,
+        inactiveUsers: inactiveUsersDataRes.data || [],
+        liveOnlineCount: liveOnlineCountRes.count ?? 0,
+        razorpayTransactions: razorpayTransactionsRes.data || [],
+        auditLogs: auditLogsRes.data || [],
+        storageFiles: storageFilesRes.data || [],
+        allProfiles: sortedProfiles,
+      });
+
+      setRechargeRequests(rechargesDataRes.data || []);
+      setIncomes(incomesDataRes.data || []);
+      setRefundRequests(refundsDataRes.data || []);
+      setQueryLatency(Date.now() - startTime);
+    } catch (err) {
+      console.error("Error fetching admin dashboard data:", err);
+    }
+  };
+
   useEffect(() => {
     if (!mounted) return;
-
-    async function fetchDashboardData() {
-      const startTime = Date.now();
-      let startDate = new Date(); 
-      
-      if (filter === 'day') startDate.setDate(startDate.getDate() - 1);
-      else if (filter === 'week') startDate.setDate(startDate.getDate() - 7);
-      else if (filter === 'month') startDate.setMonth(startDate.getMonth() - 1);
-      else if (filter === 'year') startDate.setFullYear(startDate.getFullYear() - 1);
-      else if (filter === 'fy') startDate.setMonth(3, 1); 
-      else startDate.setFullYear(2020);
-
-      try {
-        const [
-          recordsRes,
-          statsRes,
-          monthlyCasesRes,
-          fyDataRes,
-          totalUsersCountRes,
-          inactiveUsersDataRes,
-          liveOnlineCountRes,
-          razorpayTransactionsRes,
-          auditLogsRes,
-          storageFilesRes,
-          enhancedProfilesRes,
-          rechargesDataRes,
-          incomesDataRes
-        ] = await Promise.all([
-          supabase.from('mis_records').select('*').gte('created_date', startDate.toISOString()),
-          supabase.from('estimates').select('payment_status, user_id, amount, reference_no, customer_name, case_type, created_at, user_payment'),
-          supabase.rpc('get_monthly_case_count'),
-          supabase.rpc('get_revenue_by_fy', { start_date: startDate.toISOString(), end_date: new Date().toISOString() }),
-          supabase.rpc('get_total_users'),
-          supabase.rpc('get_inactive_users', { days_limit: inactiveDays }),
-          supabase.from('user_status').select('*', { count: 'exact', head: true }).eq('is_online', true),
-          supabase.rpc('get_razorpay_transactions'),
-          supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(10),
-          supabase.storage.from('documents').list(),
-          supabase.rpc('get_profiles_with_estimates_count'),
-          supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false }),
-          supabase.from('admin_incomes').select('*').order('created_at', { ascending: false })
-        ]);
-
-        let sortedProfiles = enhancedProfilesRes.data || [];
-        sortedProfiles.sort((a: any, b: any) => {
-          const nameA = (a.full_name || '').toLowerCase();
-          const nameB = (b.full_name || '').toLowerCase();
-          return nameA.localeCompare(nameB);
-        });
-
-        setDashboardData({
-          records: recordsRes.data || [],
-          stats: statsRes.data || [],
-          monthlyCases: monthlyCasesRes.data || [],
-          fyData: fyDataRes.data || [],
-          totalUsers: totalUsersCountRes.data ?? 0,
-          inactiveUsers: inactiveUsersDataRes.data || [],
-          liveOnlineCount: liveOnlineCountRes.count ?? 0,
-          razorpayTransactions: razorpayTransactionsRes.data || [],
-          auditLogs: auditLogsRes.data || [],
-          storageFiles: storageFilesRes.data || [],
-          allProfiles: sortedProfiles,
-        });
-
-        setRechargeRequests(rechargesDataRes.data || []);
-        setIncomes(incomesDataRes.data || []);
-        setQueryLatency(Date.now() - startTime);
-      } catch (err) {
-        console.error("Error fetching admin dashboard data:", err);
-      }
-    }
-
     fetchDashboardData();
   }, [mounted, filter, inactiveDays]);
 
-  // --- DYNAMIC GATEWAY REVENUE CALCULATIONS & EXCEL EXPORT ---
   const gatewayTxns = dashboardData.razorpayTransactions || [];
   
   const filteredGatewayTxns = gatewayTxns.filter((tx: any) => {
@@ -600,8 +512,31 @@ export default function AdminDashboardPage(props: {
         {/* --- PUSH NOTIFICATION MANAGER WIDGET --- */}
         <PushNotificationManager />
 
-        {/* --- ADMIN BROADCAST PANEL (Yahan add kar diya gaya hai) --- */}
-        <AdminBroadcastPanel />
+        {/* --- MODULAR WIDGETS --- */}
+        <AdminBroadcastWidget />
+        <AdminCreateUserWidget onUserCreated={fetchDashboardData} />
+        <AdminPendingApprovalsWidget onActionComplete={fetchDashboardData} />
+        <AdminRefundRequestsWidget refundRequests={refundRequests} onUpdate={fetchDashboardData} />
+
+        {/* --- PREMIUM BILLING REPORT WIDGET --- */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="font-bold text-slate-800 text-base">Premium Subscribers Billing & Passbook</h3>
+              <p className="text-xs text-slate-500">Monitor active Premium Plan members and track cumulative debited usage bills.</p>
+            </div>
+            <button 
+              onClick={() => toggleSection('premiumBilling')}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+            >
+              {hiddenSections.premiumBilling ? 'Show [+]' : 'Hide [-]'}
+            </button>
+          </div>
+
+          {!hiddenSections.premiumBilling && (
+            <PremiumBillingWidget />
+          )}
+        </div>
 
         {/* --- ADVANCED GATEWAY REVENUE INSPECTOR WITH DYNAMIC FILTERS & EXCEL DOWNLOAD --- */}
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
@@ -1068,143 +1003,223 @@ export default function AdminDashboardPage(props: {
           )}
         </div>
 
-        {/* RBAC Table */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">User Role, Wallet & Estimates Tracking (RBAC)</h3>
-              <p className="text-xs text-slate-500">Alphabetical list (A-Z). Inspect user wallet balance, estimates, and payment history to resolve disputes.</p>
-            </div>
-            
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-              <div className="w-full sm:w-64">
-                <input 
-                  type="text"
-                  placeholder="🔍 Search name, email or mobile..."
-                  value={userTableSearch}
-                  onChange={(e) => setUserTableSearch(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                />
-              </div>
-              <button 
-                onClick={() => toggleSection('rbac')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
-              >
-                {hiddenSections.rbac ? 'Show [+]' : 'Hide [-]'}
-              </button>
-            </div>
-          </div>
+        {/* RBAC Table with Date & Month Filters */}
+<div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+  <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+    <div>
+      <h3 className="font-bold text-slate-800 text-base">User Role, Wallet & Estimates Tracking (RBAC)</h3>
+      <p className="text-xs text-slate-500">Filter user activity by date or month to calculate precise fee dues and estimate counts.</p>
+    </div>
+    
+    {/* Date & Month Filters Bar */}
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+        <span className="text-[10px] font-bold text-slate-500 uppercase">From:</span>
+        <input 
+          type="date" 
+          value={modalSelectedDate && modalFilterType === 'date' ? modalSelectedDate : ''} 
+          onChange={(e) => { setModalSelectedDate(e.target.value); setModalFilterType('date'); }}
+          className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
+        />
+      </div>
 
-          {!hiddenSections.rbac && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
-                  <tr>
-                    <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
-                    <th className="p-3">Mobile No.</th>
-                    <th className="p-3 text-center">Wallet Balance</th>
-                    <th className="p-3 text-center">Total Estimates</th>
-                    <th className="p-3">Total Revenue (Fee)</th>
-                    <th className="p-3">Assigned Role</th>
-                    <th className="p-3">Account Status</th>
-                    <th className="p-3 rounded-r-xl text-right">Quick Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredProfiles.length > 0 ? (
-                    filteredProfiles.map((p: any) => {
-                      const userId = p.id;
-                      const userRevenue = p.total_revenue || 0;
-                      const estCount = p.estimates_count || 0;
-                      const userWalletBalance = Number(p.wallet_balance || 0);
+      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+        <span className="text-[10px] font-bold text-slate-500 uppercase">Month:</span>
+        <input 
+          type="month" 
+          value={modalSelectedMonth} 
+          onChange={(e) => { setModalSelectedMonth(e.target.value); setModalFilterType('month'); }}
+          className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
+        />
+      </div>
 
-                      return (
-                        <tr key={userId} className="hover:bg-slate-50/50 transition">
-                          <td className="p-3">
-                            <div className="font-bold text-slate-900">{p.full_name || 'N/A'}</div>
-                            <div className="text-xs text-slate-500">{p.email || 'No Email'}</div>
-                          </td>
+      {(modalSelectedDate || modalSelectedMonth || userTableSearch) && (
+        <button 
+          onClick={() => { setModalSelectedDate(''); setModalSelectedMonth(''); setUserTableSearch(''); setModalFilterType('all'); }}
+          className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-100 transition"
+        >
+          Reset Filters
+        </button>
+      )}
+    </div>
+  </div>
 
-                          <td className="p-3 text-slate-700 font-medium">
-                            {p.mobile || 'N/A'}
-                          </td>
+  <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-2">
+    <div className="w-full sm:w-72">
+      <input 
+        type="text"
+        placeholder="🔍 Search name, email or mobile..."
+        value={userTableSearch}
+        onChange={(e) => setUserTableSearch(e.target.value)}
+        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+      />
+    </div>
+    <button 
+      onClick={() => toggleSection('rbac')}
+      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
+    >
+      {hiddenSections.rbac ? 'Show [+]' : 'Hide [-]'}
+    </button>
+  </div>
 
-                          <td className="p-3 text-center">
-                            <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl font-black text-xs border border-emerald-200">
-                              ₹ {userWalletBalance.toLocaleString('en-IN')}
-                            </span>
-                          </td>
+  {!hiddenSections.rbac && (
+    <div className="overflow-x-auto pt-2">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
+          <tr>
+            <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
+            <th className="p-3">Mobile No.</th>
+            <th className="p-3 text-center">Wallet Balance</th>
+            <th className="p-3 text-center">Total Estimates</th>
+            <th className="p-3">Total Revenue (Fee)</th>
+            <th className="p-3">Assigned Role</th>
+            <th className="p-3">Account Status</th>
+            <th className="p-3 rounded-r-xl text-right">Quick Action</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {(() => {
+            // Step 1: Compute filtered profiles and their specific values
+            const processedProfiles = filteredProfiles.map((p: any) => {
+              let estCount = p.estimates_count || 0;
+              let userRevenue = p.total_revenue || 0;
 
-                          <td className="p-3 text-center">
-                            <button 
-                              onClick={() => handleOpenUserEstimates(p)}
-                              className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-black text-xs transition shadow-sm border border-blue-200 inline-flex items-center gap-1.5"
-                            >
-                              <span>📊 {estCount} {estCount === 1 ? 'Estimate' : 'Estimates'}</span>
-                            </button>
-                          </td>
+              if (modalSelectedDate || modalSelectedMonth) {
+                const matchingEstimates = (p.estimates_list || []).filter((est: any) => {
+                  if (!est.created_at) return false;
+                  const estDate = new Date(est.created_at);
+                  if (modalFilterType === 'date' && modalSelectedDate) {
+                    return estDate.toISOString().split('T')[0] === modalSelectedDate;
+                  }
+                  if (modalFilterType === 'month' && modalSelectedMonth) {
+                    const estMonthStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, '0')}`;
+                    return estMonthStr === modalSelectedMonth;
+                  }
+                  return true;
+                });
+                estCount = matchingEstimates.length;
+                userRevenue = estCount * 21;
+              }
 
-                          <td className="p-3 font-semibold text-emerald-600">
-                            ₹ {Number(userRevenue).toLocaleString('en-IN')}
-                          </td>
+              return { ...p, calculatedEstCount: estCount, calculatedRevenue: userRevenue };
+            }).filter((p: any) => {
+              if (!modalSelectedDate && !modalSelectedMonth) return true;
+              return p.calculatedEstCount > 0;
+            });
 
-                          <td className="p-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 'bg-slate-100 text-slate-600'}`}>
-                              {p.role || 'user'}
-                            </span>
-                          </td>
+            // Store references for footer calculation
+            (window as any).__tempFilteredProfiles = processedProfiles;
 
-                          <td className="p-3">
-                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.status === 'suspended' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                              {p.status || 'Active'}
-                            </span>
-                          </td>
+            if (processedProfiles.length === 0) {
+              return (
+                <tr>
+                  <td colSpan={8} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
+                </tr>
+              );
+            }
 
-                          <td className="p-3 text-right">
-                            <form action="/api/admin/update-role" method="POST" className="inline-flex gap-2">
-                              <input type="hidden" name="user_id" value={p.user_id || p.id} />
-                              <button type="submit" name="action" value="toggle_role" className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
-                                Toggle Role
-                              </button>
-                              <button type="submit" name="action" value="toggle_status" className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-lg transition">
-                                {p.status === 'suspended' ? 'Activate' : 'Suspend'}
-                              </button>
-                            </form>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={8} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search.</td>
-                    </tr>
-                  )}
-                </tbody>
-                <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold text-slate-900 text-xs">
-                  <tr>
-                    <td colSpan={2} className="p-3">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span>
-                        <span className="text-slate-500 font-medium">
-                          Active: <strong className="text-emerald-600">{activeUsersCount}</strong> | Suspended: <strong className="text-rose-600">{suspendedUsersCount}</strong>
-                        </span>
-                      </div>
-                    </td>
-                    <td className="p-3 text-center text-emerald-700 bg-emerald-50/50 rounded-lg align-middle">
-                      ₹ {totalUserWalletsAmount.toLocaleString('en-IN')}
-                    </td>
-                    <td className="p-3 text-center text-blue-700 align-middle">
-                      {totalUserEstimatesCount} Estimates
-                    </td>
-                    <td colSpan={4} className="p-3 text-emerald-700 align-middle">
-                      ₹ {totalUserRevenueSum.toLocaleString('en-IN')}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-        </div>
+            return processedProfiles.map((p: any) => {
+              const userId = p.id;
+              const userWalletBalance = Number(p.wallet_balance || 0);
+
+              return (
+                <tr key={userId} className="hover:bg-slate-50/50 transition">
+                  <td className="p-3">
+                    <div className="font-bold text-slate-900">{p.full_name || 'N/A'}</div>
+                    <div className="text-xs text-slate-500">{p.email || 'No Email'}</div>
+                  </td>
+
+                  <td className="p-3 text-slate-700 font-medium">
+                    {p.mobile || 'N/A'}
+                  </td>
+
+                  <td className="p-3 text-center">
+                    <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl font-black text-xs border border-emerald-200">
+                      ₹ {userWalletBalance.toLocaleString('en-IN')}
+                    </span>
+                  </td>
+
+                  <td className="p-3 text-center">
+                    <button 
+                      onClick={() => handleOpenUserEstimates(p)}
+                      className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-black text-xs transition shadow-sm border border-blue-200 inline-flex items-center gap-1.5"
+                    >
+                      <span>📊 {p.calculatedEstCount} {p.calculatedEstCount === 1 ? 'Estimate' : 'Estimates'}</span>
+                    </button>
+                  </td>
+
+                  <td className="p-3 font-semibold text-emerald-600">
+                    ₹ {Number(p.calculatedRevenue).toLocaleString('en-IN')}
+                  </td>
+
+                  <td className="p-3">
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                      p.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 
+                      p.role === 'premium' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 
+                      'bg-slate-100 text-slate-600'
+                    }`}>
+                      {p.role || 'user'}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.status === 'suspended' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                      {p.status || 'Active'}
+                    </span>
+                  </td>
+
+                  <td className="p-3 text-right">
+                    <form action="/api/admin/update-role" method="POST" className="inline-flex gap-2">
+                      <input type="hidden" name="user_id" value={p.user_id || p.id} />
+                      <button type="submit" name="action" value="toggle_role" className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
+                        Toggle Role
+                      </button>
+                      <button type="submit" name="action" value="toggle_status" className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-lg transition">
+                        {p.status === 'suspended' ? 'Activate' : 'Suspend'}
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              );
+            });
+          })()}
+        </tbody>
+        <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold text-slate-900 text-xs">
+          {(() => {
+            const currentList = (window as any).__tempFilteredProfiles || [];
+            const filteredActiveCount = currentList.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
+            const filteredSuspendedCount = currentList.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
+            const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance || 0), 0);
+            const filteredEstCountSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedEstCount || 0), 0);
+            const filteredRevenueSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedRevenue || 0), 0);
+
+            return (
+              <tr>
+                <td colSpan={2} className="p-3">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span>
+                    <span className="text-slate-500 font-medium">
+                      Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong>
+                    </span>
+                  </div>
+                </td>
+                <td className="p-3 text-center text-emerald-700 bg-emerald-50/50 rounded-lg align-middle">
+                  ₹ {filteredWalletSum.toLocaleString('en-IN')}
+                </td>
+                <td className="p-3 text-center text-blue-700 align-middle">
+                  {filteredEstCountSum} Estimates
+                </td>
+                <td colSpan={4} className="p-3 text-emerald-700 align-middle">
+                  ₹ {filteredRevenueSum.toLocaleString('en-IN')}
+                </td>
+              </tr>
+            );
+          })()}
+        </tfoot>
+      </table>
+    </div>
+  )}
+</div>
 
         {/* --- USER ESTIMATES MODAL --- */}
         {selectedUserForEstimates && (
@@ -1214,7 +1229,7 @@ export default function AdminDashboardPage(props: {
               <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
                 <div>
                   <h3 className="text-lg font-black tracking-tight">Payment & Estimate Dispute Tracking: {selectedUserForEstimates.full_name}</h3>
-                  <p className="text-xs text-slate-300 mt-0.5">Email: {selectedUserForEstimates.email} | Current Wallet Balance: <span className="text-emerald-400 font-bold">₹ {Number(selectedUserForEstimates.wallet_balance || 0).toLocaleString('en-IN')}</span></p>
+                  <p className="text-xs text-slate-300 mt-0.5">Email: {selectedUserForEstimates.email} | Mobile: <span className="text-blue-400 font-bold">{selectedUserForEstimates.mobile || 'N/A'}</span> | Current Wallet Balance: <span className="text-emerald-400 font-bold">₹ {Number(selectedUserForEstimates.wallet_balance || 0).toLocaleString('en-IN')}</span></p>
                 </div>
                 <button 
                   onClick={() => setSelectedUserForEstimates(null)}
@@ -1265,6 +1280,58 @@ export default function AdminDashboardPage(props: {
                       className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   )}
+
+                  <button
+                    onClick={() => {
+                      if (filteredModalEstimates.length === 0) {
+                        alert('No records found to download.');
+                        return;
+                      }
+
+                      let csvContent = "\uFEFFReference No,Date & Time,Customer Name,Case Type,Payment Mode,Deducted Amount\r\n";
+
+                      filteredModalEstimates.forEach((est: any) => {
+                        const refNo = `"${(est.reference_no || est.ref_no || 'N/A').replace(/"/g, '""')}"`;
+                        const dateTime = `"${est.created_at ? new Date(est.created_at).toLocaleString('en-IN').replace(/"/g, '""') : 'N/A'}"`;
+                        const customerName = `"${(est.customer_name || 'N/A').replace(/"/g, '""')}"`;
+                        const caseType = `"${(est.case_type || est.estimate_type || 'N/A').replace(/"/g, '""')}"`;
+                        const paymentModeVal = est.razorpay_payment_id || est.payment_id || est.payment_mode || 'WALLET DEDUCTION';
+                        const paymentMode = `"${paymentModeVal.replace(/"/g, '""')}"`;
+                        const amount = Number(est.user_payment || est.amount || 21);
+
+                        const row = [refNo, dateTime, customerName, caseType, paymentMode, amount].join(",");
+                        csvContent += row + "\r\n";
+                      });
+
+                      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                      const url = URL.createObjectURL(blob);
+                      const link = document.createElement("a");
+                      link.setAttribute("href", url);
+                      link.setAttribute("download", `MIS_Report_${(selectedUserForEstimates.full_name || 'user').replace(/\s+/g, '_')}_${Date.now()}.csv`);
+                      document.body.appendChild(link);
+                      link.click();
+                      document.body.removeChild(link);
+                    }}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                  >
+                    <span>📊 Download MIS Excel</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const userMobile = selectedUserForEstimates.mobile;
+                      if (!userMobile) {
+                        alert('User mobile number is not registered in system.');
+                        return;
+                      }
+                      const message = `Hello ${selectedUserForEstimates.full_name},\n\nHere is your MIS Case & Fee Summary:\nTotal Cases: ${filteredModalEstimates.length}\nTotal Fee/Amount: ₹${totalFilteredModalAmount.toLocaleString('en-IN')}\n\nThank you,\nL&T Consultant Services`;
+                      const encodedMsg = encodeURIComponent(message);
+                      window.open(`https://wa.me/${userMobile.replace(/[^0-9]/g, '')}?text=${encodedMsg}`, '_blank');
+                    }}
+                    className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                  >
+                    <span>💬 Send WhatsApp Details</span>
+                  </button>
                 </div>
               </div>
 
@@ -1293,8 +1360,14 @@ export default function AdminDashboardPage(props: {
                                 {est.case_type || est.estimate_type || 'N/A'}
                               </span>
                             </td>
-                            <td className="p-3 font-mono text-slate-600">
-                              {est.payment_mode || est.razorpay_payment_id || 'WALLET DEDUCTION'}
+                            <td className="p-3 font-mono">
+                              {est.razorpay_payment_id || est.payment_id || est.payment_mode ? (
+                                <span className="text-blue-600 font-bold">
+                                  {est.razorpay_payment_id || est.payment_id || est.payment_mode}
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 font-medium">WALLET DEDUCTION</span>
+                              )}
                             </td>
                             <td className="p-3 text-right font-black text-emerald-600">
                               ₹ {Number(est.user_payment || est.amount || 21).toLocaleString('en-IN')}

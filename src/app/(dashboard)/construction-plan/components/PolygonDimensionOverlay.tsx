@@ -1,5 +1,10 @@
 import React from "react";
-import { Point2D } from "../utils/roadGeometry";
+
+// Point2D interface defined locally to avoid missing module errors
+export interface Point2D {
+  x: number;
+  y: number;
+}
 
 interface PolygonDimensionOverlayProps {
   points: Point2D[];

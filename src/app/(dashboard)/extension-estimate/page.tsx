@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import * as XLSX from 'xlsx';
 import DocumentScanner from "../../../components/DocumentScanner";
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
@@ -167,7 +166,9 @@ export default function ExtensionEstimatePage() {
   };
 
   const updateFloorArea = (floor: string, type: 'proposed' | 'existing', l: number, w: number) => {
-    const calculatedSubArea = parseFloat((l * w).toFixed(2));
+    const validL = Math.max(0, l);
+    const validW = Math.max(0, w);
+    const calculatedSubArea = parseFloat((validL * validW).toFixed(2));
     const plotNum = parseFloat(plotArea) || 0;
 
     const currentFloorObj = floorData[floor] || {
@@ -179,12 +180,12 @@ export default function ExtensionEstimatePage() {
     const otherArea = currentFloorObj[otherType]?.area || 0;
     const combinedFloorArea = calculatedSubArea + otherArea;
 
+    // Live warning only (will not block typing or updating values)
     if (plotNum > 0 && combinedFloorArea > plotNum) {
-      alert(`Validation Error: Total area for ${floor} cannot exceed Plot Area (${plotNum})!`);
-      return;
+      console.warn(`Validation Warning: Total area for ${floor} (${combinedFloorArea} SQ.FT) exceeds Plot Area (${plotNum} SQ.FT)!`);
     }
 
-    const updatedSubArea = { ...currentFloorObj[type], length: l, width: w, area: calculatedSubArea };
+    const updatedSubArea = { length: validL, width: validW, area: calculatedSubArea };
 
     setFloorData({
       ...floorData,
@@ -206,14 +207,31 @@ export default function ExtensionEstimatePage() {
       return;
     }
 
-    if (Object.keys(floorData).length === 0) {
-      alert("Validation Error: Please fill at least one floor dimension.");
+    if (Object.keys(floorData).length === 0 || selectedFloors.length === 0) {
+      alert("Validation Error: Please select and fill at least one floor dimension.");
       return;
     }
 
     if (!plotArea || Number(plotArea) <= 0) {
       alert("Validation Error: Please enter a valid Plot Area.");
       return;
+    }
+
+    // STRICT VALIDATION ON GENERATE: Block generation if any floor area exceeds Plot Area
+    const plotNum = parseFloat(plotArea) || 0;
+    for (const f of selectedFloors) {
+      const data = floorData[f];
+      if (data) {
+        const mode = floorModes[f] || "BOTH";
+        let floorTotal = 0;
+        if (mode === "PROPOSED" || mode === "BOTH") floorTotal += data.proposed?.area || 0;
+        if (mode === "EXISTING" || mode === "BOTH") floorTotal += data.existing?.area || 0;
+
+        if (floorTotal > plotNum) {
+          alert(`Validation Error: ${f} total area (${floorTotal} SQ.FT) exceeds Plot Area (${plotNum} SQ.FT). Cannot generate estimate.`);
+          return;
+        }
+      }
     }
     
     navigateToPreview();
@@ -233,7 +251,12 @@ export default function ExtensionEstimatePage() {
     setFloorModes({ "GROUND FLOOR": "BOTH" });
     setTempFloorModes({ "GROUND FLOOR": "BOTH" });
     window.location.reload();
-  };  
+  }; 
+
+  const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
+  const isCustomerFilled = isClientFilled && customerName.trim() !== "";
+  const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
+  const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
   return (
     <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">
@@ -241,7 +264,6 @@ export default function ExtensionEstimatePage() {
         <h1 className="text-2xl font-bold text-center w-full pl-32">
           EXTENSION & RENOVATION ESTIMATE INPUT FORM
         </h1>
-        {/* स्मार्ट डॉक्यूमेंट स्कैनर कंपोनेंट यहाँ जुड़ गया है */}
         <DocumentScanner 
           onScanComplete={({ customerName, propertyAddress, plotArea }) => {
             if (customerName) setCustomerName(customerName);
@@ -282,34 +304,42 @@ export default function ExtensionEstimatePage() {
       <div className="mb-4 space-y-4">
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
-          <textarea value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={1} />
+          <textarea 
+            value={customerName} 
+            disabled={!isClientFilled}
+            onChange={(e) => setCustomerName(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={1} 
+            placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
+          />
         </div>
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
-          <textarea value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={2} />
+          <textarea 
+            value={propertyAddress} 
+            disabled={!isCustomerFilled}
+            onChange={(e) => setPropertyAddress(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={2} 
+            placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-10 gap-4 mb-2 items-center border-t border-black pt-4">
+      <div className={`grid grid-cols-10 gap-4 mb-2 items-center border-t border-black pt-4 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-3">
           <label className="font-bold block text-[12pt]">PLOT AREA</label>
           <div className="relative flex items-center">
             <input 
               type="text" 
               placeholder="0.00" 
+              disabled={!isAddressFilled}
               value={plotArea} 
               onChange={(e) => {
                 const val = e.target.value.replace(/[^0-9.]/g, '');
-                const plotNum = parseFloat(val) || 0;
-
-                for (const [f, data] of Object.entries(floorData)) {
-                  const floorTotal = (data.proposed?.area || 0) + (data.existing?.area || 0);
-                  if (plotNum > 0 && floorTotal > plotNum) {
-                    alert(`Validation Error: ${f} total area (${floorTotal}) cannot exceed new Plot Area (${plotNum})!`);
-                    return;
-                  }
-                }
-                setPlotArea(val);
+                const parts = val.split('.');
+                const formattedVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : val;
+                setPlotArea(formattedVal);
               }} 
               className="w-full border border-black p-1 uppercase text-center text-xl pr-16" 
             />
@@ -325,17 +355,21 @@ export default function ExtensionEstimatePage() {
               <span className="bg-orange-100 px-3 py-1 border border-black text-orange-900">EXISTING</span>
             </div>
           </div>
-          <button onClick={() => { 
-            setTempSelectedFloors(selectedFloors); 
-            setTempFloorModes(floorModes);
-            setIsFloorModalOpen(true); 
-          }} className="border border-black px-10 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 text-black w-full text-center">
+          <button 
+            disabled={!isPlotFilled}
+            onClick={() => { 
+              setTempSelectedFloors(selectedFloors); 
+              setTempFloorModes(floorModes);
+              setIsFloorModalOpen(true); 
+            }} 
+            className={`border border-black px-10 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 text-black w-full text-center ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
+          >
             + ADD / CHOOSE FLOOR
           </button>
         </div>
       </div>
 
-      <div className="mt-4 border border-black overflow-hidden space-y-4 p-4 bg-gray-50">
+      <div className={`mt-4 border border-black overflow-hidden space-y-4 p-4 bg-gray-50 ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="bg-[#1e293b] text-white py-2 px-3 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA DETAILS (PROPOSED & EXISTING)</div>
         
         {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
@@ -362,8 +396,8 @@ export default function ExtensionEstimatePage() {
                     <div className="grid grid-cols-12 items-center border border-black bg-white">
                       <span className="col-span-3 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black bg-purple-50">PROPOSED</span>
                       <div className="col-span-5 grid grid-cols-2 gap-0 border-r border-black">
-                        <input type="number" step="0.01" placeholder="WIDTH" value={floorObj?.proposed?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', floorObj?.proposed?.length || 0, parseFloat(e.target.value) || 0)} />
-                        <input type="number" step="0.01" placeholder="LENGTH" value={floorObj?.proposed?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', parseFloat(e.target.value) || 0, floorObj?.proposed?.width || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.proposed?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', floorObj?.proposed?.length || 0, parseFloat(e.target.value) || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.proposed?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', parseFloat(e.target.value) || 0, floorObj?.proposed?.width || 0)} />
                       </div>
                       <input type="text" readOnly value={`${floorObj?.proposed?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[12pt] bg-gray-100 text-black border-none" />
                     </div>
@@ -373,8 +407,8 @@ export default function ExtensionEstimatePage() {
                     <div className="grid grid-cols-12 items-center border border-black bg-white">
                       <span className="col-span-3 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black bg-orange-50">EXISTING</span>
                       <div className="col-span-5 grid grid-cols-2 gap-0 border-r border-black">
-                        <input type="number" step="0.01" placeholder="WIDTH" value={floorObj?.existing?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', floorObj?.existing?.length || 0, parseFloat(e.target.value) || 0)} />
-                        <input type="number" step="0.01" placeholder="LENGTH" value={floorObj?.existing?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', parseFloat(e.target.value) || 0, floorObj?.existing?.width || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.existing?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', floorObj?.existing?.length || 0, parseFloat(e.target.value) || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.existing?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', parseFloat(e.target.value) || 0, floorObj?.existing?.width || 0)} />
                       </div>
                       <input type="text" readOnly value={`${floorObj?.existing?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[12pt] bg-gray-100 text-black border-none" />
                     </div>
@@ -385,7 +419,7 @@ export default function ExtensionEstimatePage() {
           })}
       </div>
 
-      <div className="grid grid-cols-5 gap-4 mb-4 mt-6 items-center">
+      <div className={`grid grid-cols-5 gap-4 mb-4 mt-6 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AREA</label>
           <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 text-center bg-gray-100 font-bold text-[12pt]" />
@@ -393,12 +427,36 @@ export default function ExtensionEstimatePage() {
         <div className="text-center font-bold text-lg">X</div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">RATE / SQ.FT</label>
-          <input type="number" step="0.01" value={rate || ""} onChange={(e) => { const r = parseFloat(e.target.value) || 0; setRate(r); setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); }} className="w-full text-center border border-black p-1 text-[12pt]" placeholder="0" />
+          <input 
+            type="number" 
+            step="0.01" 
+            value={rate || ""} 
+            onChange={(e) => { 
+              const r = parseFloat(e.target.value) || 0; 
+              setRate(r); 
+              setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); 
+            }} 
+            className="w-full text-center border border-black p-1 text-[12pt]" 
+            placeholder="0" 
+          />
         </div>
         <div className="text-center font-bold text-lg">=</div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AMOUNT</label>
-          <input type="text" readOnly value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} className="w-full border border-black p-1 text-center bg-gray-100 font-bold text-[12pt]" />
+          <input 
+            type="text" 
+            value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
+            onChange={(e) => {
+              const rawVal = e.target.value.replace(/[^0-9.]/g, '');
+              const amt = parseFloat(rawVal) || 0;
+              setAmount(amt);
+              if (totalBuiltUpArea > 0) {
+                const calculatedRate = parseFloat((amt / totalBuiltUpArea).toFixed(2));
+                setRate(calculatedRate);
+              }
+            }} 
+            className="w-full border border-black p-1 text-center bg-gray-100 font-bold text-[12pt]" 
+          />
         </div>
       </div>
 

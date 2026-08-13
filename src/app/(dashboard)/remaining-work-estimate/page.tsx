@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -16,11 +17,13 @@ const GROUND_ONLY_ITEMS = [
   "pcc_foundation", 
   "anti_termite", 
   "rcc_foundation", 
-  "plinth_beam"
+  "plinth_beam",
+  "deep_boring_desc",
+  "water_tank_desc",
+  "boundary_wall_gate"
 ];
 
 const AVAILABLE_CORE_ITEMS = [
-  // Structural & Masonry Items
   { id: "preliminary", label: "Preliminary Work" },
   { id: "earthwork", label: "Earthwork & Excavation" },
   { id: "pcc_foundation", label: "PCC Foundation" },
@@ -40,8 +43,6 @@ const AVAILABLE_CORE_ITEMS = [
   { id: "external_plaster", label: "External Plaster" },
   { id: "parapet_wall", label: "Parapet Wall" },
   { id: "terrace_coba", label: "Terrace Coba Waterproofing" },
-  
-  // Finishing & Specialized Items
   { id: "door_frame_desc", label: "Door Frames & Shutters Work" },
   { id: "paint_putty_desc", label: "Paint, Putty & Wall Finish" },
   { id: "ms_steel_desc", label: "MS Steel & Grill Work" },
@@ -75,12 +76,10 @@ export default function RemainingWorkEstimateInputPage() {
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
   
-  // Item selection states (Global or General fallback)
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<string[]>(AVAILABLE_CORE_ITEMS.map(i => i.id));
   const [tempSelectedItems, setTempSelectedItems] = useState<string[]>(selectedItems);
 
-  // Floor-wise Remaining Work Item mapping state: Record<floorName, itemIds[]>
   const [floorWiseItems, setFloorWiseItems] = useState<Record<string, string[]>>({
     "GROUND FLOOR": AVAILABLE_CORE_ITEMS.map(i => i.id)
   });
@@ -93,6 +92,7 @@ export default function RemainingWorkEstimateInputPage() {
   const [feeMode, setFeeMode] = useState("AUTO");
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
+  const [totalBuiltUpArea, setTotalBuiltUpArea] = useState(0);
   const [, setCurrentRefNo] = useState("");
 
   useEffect(() => {
@@ -106,7 +106,10 @@ export default function RemainingWorkEstimateInputPage() {
         setPlotArea(parsed.plot_area?.toString() || "");
         setSelectedClientName(parsed.client_name || parsed.selected_client_name || "");
         setRepresentative(parsed.representative || "");
-        setRate(Number(parsed.rate_per_sqft) || 0);
+        
+        const loadedRate = Number(parsed.rate_per_sqft) || 0;
+        setRate(loadedRate);
+
         setFeeMode(parsed.fee_mode || "AUTO");
         if (parsed.fee_amount) setManualFee(parsed.fee_amount);
         if (parsed.floor_details) {
@@ -115,7 +118,8 @@ export default function RemainingWorkEstimateInputPage() {
           const totalArea = Object.values(parsed.floor_details).reduce(
             (sum: number, f: any) => sum + Number(f.area || 0), 0
           );
-          setAmount(Number(totalArea) * Number(parsed.rate_per_sqft || 0));
+          setTotalBuiltUpArea(Number(totalArea));
+          setAmount(Number(totalArea) * loadedRate);
         }
         if (parsed.selected_items && Array.isArray(parsed.selected_items)) {
           setSelectedItems(parsed.selected_items);
@@ -175,20 +179,46 @@ export default function RemainingWorkEstimateInputPage() {
     }
   };
 
-  const updateArea = (floor: string, l: number, w: number) => {
-    const newArea = parseFloat((l * w).toFixed(2));
-    const plotAreaNum = parseFloat(plotArea) || 0;
-    if (plotAreaNum > 0 && newArea > plotAreaNum) {
-      alert(`Validation Error: Area exceeds plot area.`);
-      return;
-    }
-    const updatedFloorData = { ...floorData, [floor]: { length: l, width: w, area: newArea } };
-    setFloorData(updatedFloorData);
-    const newTotal = Object.values(updatedFloorData).reduce((sum, f) => sum + (f.area || 0), 0);
-    setAmount(parseFloat((newTotal * rate).toFixed(2)));
+  const handlePlotAreaChange = (val: string) => {
+    const cleanVal = val.replace(/[^0-9.]/g, '');
+    const parts = cleanVal.split('.');
+    const formattedVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanVal;
+    setPlotArea(formattedVal);
   };
 
-  const totalBuiltUpArea = Object.values(floorData).reduce((sum, f) => sum + (f.area || 0), 0);
+  const updateArea = (floor: string, l: number, w: number) => {
+    const validLength = Math.max(0, l);
+    const validWidth = Math.max(0, w);
+    const newArea = parseFloat((validLength * validWidth).toFixed(2));
+    
+    const currentPlotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
+    if (currentPlotAreaNum > 0 && newArea > currentPlotAreaNum) {
+      alert(`Validation Warning: Floor "${floor}" area (${newArea} SQ.FT) cannot exceed Plot Area (${currentPlotAreaNum} SQ.FT)!`);
+      return;
+    }
+
+    const updatedFloorData = { ...floorData, [floor]: { length: validLength, width: validWidth, area: newArea } };
+    setFloorData(updatedFloorData);
+  };
+
+  // Fixed useEffect dependency array warning
+  useEffect(() => {
+    let newTotal = 0;
+    const currentPlotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
+
+    Object.entries(floorData).forEach(([f, data]) => {
+      if (selectedFloors.includes(f)) {
+        const floorArea = data?.area || 0;
+        if (currentPlotAreaNum > 0 && floorArea > currentPlotAreaNum) {
+          return;
+        }
+        newTotal += floorArea;
+      }
+    });
+    setTotalBuiltUpArea(newTotal);
+    setAmount(parseFloat((newTotal * rate).toFixed(2)));
+  }, [floorData, selectedFloors, rate, plotArea]);
+
   const residentialFloors = selectedFloors.filter((f) => f !== "BASEMENT" && f !== "TOWER");
   const floorCount = residentialFloors.length;
   const hasTower = selectedFloors.includes("TOWER");
@@ -264,7 +294,6 @@ export default function RemainingWorkEstimateInputPage() {
 
     const storedData = JSON.parse(localStorage.getItem("estimateData") || localStorage.getItem("estimatePreview") || "{}");
     const plotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
-    const manualTotalBuiltUp = Object.values(floorData).reduce((sum, f) => sum + (f.area || 0), 0);
     
     if (!customerName.trim() || !propertyAddress.trim() || !plotArea || rate <= 0 || Object.keys(floorData).length === 0) {
       alert("Validation Error: Please fill in all required fields and ensure floor dimensions are provided.");
@@ -273,8 +302,8 @@ export default function RemainingWorkEstimateInputPage() {
     
     for (const floor of selectedFloors) {
       const floorArea = floorData[floor]?.area || 0;
-      if (floorArea > plotAreaNum) {
-        alert(`Validation Error: The area for ${floor} (${floorArea} SQ.FT) exceeds the plot area (${plotAreaNum} SQ.FT).`);
+      if (plotAreaNum > 0 && floorArea > plotAreaNum) {
+        alert(`Validation Error: Floor "${floor}" area (${floorArea} SQ.FT) exceeds Plot Area (${plotAreaNum} SQ.FT). Cannot generate estimate.`);
         return;
       }
     }
@@ -297,6 +326,13 @@ export default function RemainingWorkEstimateInputPage() {
     const finalRefNo = needsNewRef ? "REF-" + Date.now() : storedData.ref_no;
     setCurrentRefNo(finalRefNo);
 
+    const cleanedFloorDetails: any = {};
+    selectedFloors.forEach(f => {
+      if (floorData[f]) {
+        cleanedFloorDetails[f] = floorData[f];
+      }
+    });
+
     const estimateData = {
       ref_no: finalRefNo,
       id: storedData.id || null,
@@ -308,8 +344,8 @@ export default function RemainingWorkEstimateInputPage() {
       selected_floors: selectedFloors,
       selected_items: selectedItems,
       floor_wise_items: floorWiseItems,
-      floor_details: floorData,
-      total_builtup_area: manualTotalBuiltUp,
+      floor_details: cleanedFloorDetails,
+      total_builtup_area: totalBuiltUpArea,
       rate_per_sqft: rate,
       construction_cost: amount,
       total_value: amount,
@@ -342,24 +378,49 @@ export default function RemainingWorkEstimateInputPage() {
     setSelectedClientName("");
     setRepresentative("");
     setSelectedFloors(DEFAULT_FLOORS);
+    setTotalBuiltUpArea(0);
     setSelectedItems(AVAILABLE_CORE_ITEMS.map(i => i.id));
     setFloorWiseItems({ "GROUND FLOOR": AVAILABLE_CORE_ITEMS.map(i => i.id) });
+    window.location.reload();
   };
+
+  const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
+  const isCustomerFilled = isClientFilled && customerName.trim() !== "";
+  const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
+  const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
   return (
     <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">
-      <h1 className="text-2xl font-bold text-center border-2 border-black bg-gray-100 p-1 mb-2">REMAINING WORK ESTIMATE INPUT FORM</h1>
+      <div className="flex justify-between items-center border-2 border-black bg-gray-100 p-1 mb-2">
+        <div className="w-24"></div>
+        <h1 className="text-2xl font-bold text-center flex-1">REMAINING WORK ESTIMATE INPUT FORM</h1>
+        <div>
+          <label className="bg-black text-white px-3 py-1 font-bold text-[10pt] uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
+            📁 UPLOAD DOC / AI SCAN
+            <input 
+              type="file" 
+              className="hidden" 
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  alert(`Document "${file.name}" uploaded successfully! (AI Auto-Extraction will be connected here soon.)`);
+                }
+              }} 
+            />
+          </label>
+        </div>
+      </div>
       
-      <div className="grid grid-cols-7 gap-4 mb-4 border-b border-black pb-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-4 gap-4 mb-4 border-b border-black pb-4">
+        <div className="col-span-1">
           <label className="font-bold block text-[12pt]">CASE TYPE</label>
-          <select className="w-full border border-black p-1 uppercase text-center">
+          <select className="w-full border border-black p-1 uppercase text-center h-[38px]" disabled>
             <option>REMAINING WORK</option>
           </select>
         </div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">FEE</label>
-          <select className="w-full border border-black p-1 uppercase text-center" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
+          <select className="w-full border border-black p-1 uppercase text-center h-[38px]" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
             <option value="AUTO">AUTO</option>
             <option value="MANUAL">MANUAL</option>
           </select>
@@ -367,15 +428,14 @@ export default function RemainingWorkEstimateInputPage() {
             <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1 mt-1 text-center" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
-        
-        <div className="col-span-2">
+        <div className="col-span-1">
           <label className="font-bold block text-[12pt]">CLIENT NAME</label>
-          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH CLIENT..." />
+          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center h-[38px]" placeholder="SEARCH CLIENT..." />
           <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
         </div>
-        <div className="col-span-2">
+        <div className="col-span-1">
           <label className="font-bold block text-[12pt]">REPRESENTATIVE</label>
-          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH REP..." />
+          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center h-[38px]" placeholder="SEARCH REP..." />
           <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
         </div>
       </div>
@@ -383,47 +443,86 @@ export default function RemainingWorkEstimateInputPage() {
       <div className="mb-4 space-y-4">
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
-          <textarea value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={1} />
+          <textarea 
+            value={customerName} 
+            disabled={!isClientFilled}
+            onChange={(e) => setCustomerName(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={1} 
+            placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
+          />
         </div>
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
-          <textarea value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={2} />
+          <textarea 
+            value={propertyAddress} 
+            disabled={!isCustomerFilled}
+            onChange={(e) => setPropertyAddress(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={2} 
+            placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-10 gap-4 mb-1 items-center border-t border-black pt-2">
+      <div className={`grid grid-cols-10 gap-4 mb-1 items-center border-t border-black pt-2 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-3">
           <label className="font-bold block text-[12pt]">PLOT AREA</label>
           <div className="relative flex items-center">
-            <input type="text" placeholder="0.00" value={plotArea ? Number(plotArea).toLocaleString('en-IN') : ""} onChange={(e) => { const val = e.target.value.replace(/[^0-9.]/g, ''); setPlotArea(val); }} className="w-full border border-black p-1 uppercase text-center text-xl" />
+            <input type="text" placeholder="0.00" disabled={!isAddressFilled} value={plotArea ? plotArea : ""} onChange={(e) => handlePlotAreaChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center text-xl h-[38px]" />
             <span className="absolute right-2 text-black font-bold text-[10pt] pointer-events-none">SQ. FT</span>
           </div>
         </div>
         <div className="col-span-4">
           <label className="font-bold block text-[12pt]">SELECT FLOORS: ({selectedFloors.length} SELECTED)</label>
-          <button onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className="border border-black px-6 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 w-full">+ CHOOSE FLOORS</button>
+          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className={`border border-black px-6 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 w-full h-[38px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE FLOORS</button>
         </div>
         <div className="col-span-3">
           <label className="font-bold block text-[12pt]">GLOBAL WORK ITEMS</label>
-          <button onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className="border border-black px-6 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 w-full">+ CHOOSE GLOBAL ITEMS</button>
+          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className={`border border-black px-6 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 w-full h-[38px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE GLOBAL ITEMS</button>
         </div>
       </div>
 
-      <div className="mt-4 border border-black rounded-none overflow-hidden">
+      <div className={`mt-4 border border-black rounded-none overflow-hidden ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA & FLOOR-WISE REMAINING WORK DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
             .filter(f => selectedFloors.includes(f))
             .map((f) => {
               const currentFloorItems = floorWiseItems[f] || AVAILABLE_CORE_ITEMS.map(i => i.id);
+              const currentArea = floorData[f]?.area || 0;
+              const plotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
+              const isExceeding = plotAreaNum > 0 && currentArea > plotAreaNum;
+
               return (
-                <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white p-2">
+                <div key={f} className={`grid grid-cols-12 items-center border-b border-black bg-white p-2 ${isExceeding ? 'bg-red-50' : ''}`}>
                   <span className="col-span-3 font-bold text-black uppercase text-[12pt] text-center border-r border-black">{f}</span>
-                  <div className="col-span-3 grid grid-cols-2 gap-0 border-r border-black px-1">
-                    <input type="number" step="0.01" placeholder="W" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none text-sm" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
-                    <input type="number" step="0.01" placeholder="L" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none text-sm border-l border-gray-200" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+                  <div className={`col-span-3 grid grid-cols-2 gap-0 border-r px-1 ${isExceeding ? 'border-red-500 bg-red-100' : 'border-black'}`}>
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      placeholder="W" 
+                      value={floorData[f]?.width || ""} 
+                      className={`w-full text-center bg-transparent outline-none text-lg font-bold ${isExceeding ? 'text-red-700' : 'text-black'}`} 
+                      onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} 
+                    />
+                    <input 
+                      type="number" 
+                      step="0.01" 
+                      min="0" 
+                      placeholder="L" 
+                      value={floorData[f]?.length || ""} 
+                      className={`w-full text-center bg-transparent outline-none text-lg font-bold border-l ${isExceeding ? 'border-red-300 text-red-700' : 'border-gray-300 text-black'}`} 
+                      onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} 
+                    />
                   </div>
-                  <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-2 p-1 text-center font-bold text-black text-[11pt] bg-transparent border-r border-black" />
+                  <input 
+                    type="text" 
+                    readOnly 
+                    value={`${currentArea} SQ.FT`} 
+                    className={`col-span-2 p-1 text-center font-bold text-[11pt] bg-transparent border-r border-black ${isExceeding ? 'text-red-600 font-extrabold' : 'text-black'}`} 
+                  />
                   <div className="col-span-4 flex items-center justify-between px-2">
                     <span className="text-[10pt] font-semibold text-gray-700">{currentFloorItems.length} items chosen</span>
                     <button 
@@ -442,7 +541,7 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-5 mb-3 mt-4 items-center">
+      <div className={`grid grid-cols-5 mb-3 mt-4 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AREA</label>
           <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" />
@@ -455,7 +554,20 @@ export default function RemainingWorkEstimateInputPage() {
         <div className="text-center font-bold text-lg">=</div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AMOUNT</label>
-          <input type="text" readOnly value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" />
+          <input 
+            type="text" 
+            value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
+            onChange={(e) => {
+              const rawVal = e.target.value.replace(/[^0-9.]/g, '');
+              const amt = parseFloat(rawVal) || 0;
+              setAmount(amt);
+              if (totalBuiltUpArea > 0) {
+                const calculatedRate = parseFloat((amt / totalBuiltUpArea).toFixed(2));
+                setRate(calculatedRate);
+              }
+            }} 
+            className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" 
+          />
         </div>
       </div>
 
@@ -464,7 +576,6 @@ export default function RemainingWorkEstimateInputPage() {
         <button onClick={handleClear} className="bg-red-600 text-white px-6 py-2 font-bold uppercase">Clear Data</button>
       </div>
 
-      {/* Floor Selection Modal */}
       {isFloorModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 border border-black w-[400px] uppercase text-[9pt]">
@@ -484,14 +595,31 @@ export default function RemainingWorkEstimateInputPage() {
                 const newSelected = [...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b));
                 setSelectedFloors(newSelected);
 
-                // Auto initialize default items for newly added floors (excluding ground-only items for upper floors)
+                setFloorData(prev => {
+                  const updatedData = { ...prev };
+                  Object.keys(updatedData).forEach(f => {
+                    if (!newSelected.includes(f)) {
+                      delete updatedData[f];
+                    }
+                  });
+                  return updatedData;
+                });
+
                 setFloorWiseItems(prev => {
                   const updated = { ...prev };
+                  Object.keys(updated).forEach(f => {
+                    if (!newSelected.includes(f)) {
+                      delete updated[f];
+                    }
+                  });
                   newSelected.forEach(f => {
                     if (!updated[f]) {
                       const isGroundOrBasement = f === "GROUND FLOOR" || f === "BASEMENT";
                       const defaultItemsForFloor = AVAILABLE_CORE_ITEMS
-                        .filter(item => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id))
+                        .filter(item => {
+                          if (!isGroundOrBasement && GROUND_ONLY_ITEMS.includes(item.id)) return false;
+                          return true;
+                        })
                         .map(i => i.id);
                       updated[f] = defaultItemsForFloor;
                     }
@@ -506,7 +634,6 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       )}
 
-      {/* Global Item Checklist Modal for Remaining Work */}
       {isItemModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
@@ -531,7 +658,10 @@ export default function RemainingWorkEstimateInputPage() {
                   const updated = { ...prev };
                   selectedFloors.forEach(f => {
                     const isGroundOrBasement = f === "GROUND FLOOR" || f === "BASEMENT";
-                    updated[f] = tempSelectedItems.filter(id => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(id));
+                    updated[f] = tempSelectedItems.filter(id => {
+                      if (!isGroundOrBasement && GROUND_ONLY_ITEMS.includes(id)) return false;
+                      return true;
+                    });
                   });
                   return updated;
                 });
@@ -542,7 +672,6 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       )}
 
-      {/* Floor-wise Item Configuration Modal */}
       {activeItemFloor && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
@@ -551,7 +680,10 @@ export default function RemainingWorkEstimateInputPage() {
               <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => {
                 const isGroundOrBasement = activeItemFloor === "GROUND FLOOR" || activeItemFloor === "BASEMENT";
                 const allowed = AVAILABLE_CORE_ITEMS
-                  .filter(item => isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id))
+                  .filter(item => {
+                    if (!isGroundOrBasement && GROUND_ONLY_ITEMS.includes(item.id)) return false;
+                    return true;
+                  })
                   .map(i => i.id);
                 setTempFloorWiseItems(allowed);
               }}>Select All</button>
@@ -561,7 +693,8 @@ export default function RemainingWorkEstimateInputPage() {
               {AVAILABLE_CORE_ITEMS
                 .filter(item => {
                   const isGroundOrBasement = activeItemFloor === "GROUND FLOOR" || activeItemFloor === "BASEMENT";
-                  return isGroundOrBasement || !GROUND_ONLY_ITEMS.includes(item.id);
+                  if (!isGroundOrBasement && GROUND_ONLY_ITEMS.includes(item.id)) return false;
+                  return true;
                 })
                 .map((item) => (
                   <label key={item.id} className="flex items-center gap-3 cursor-pointer p-2 border-b">

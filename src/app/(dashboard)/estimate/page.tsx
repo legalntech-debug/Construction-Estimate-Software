@@ -54,7 +54,10 @@ export default function EstimatePage() {
         if (parsed.fee_amount) setManualFee(parsed.fee_amount);
         if (parsed.floor_details) {
           setFloorData(parsed.floor_details);
-          setSelectedFloors(Object.keys(parsed.floor_details));
+          const savedFloors = Object.keys(parsed.floor_details);
+          if (savedFloors.length > 0) {
+            setSelectedFloors(savedFloors);
+          }
           const totalArea = Object.values(parsed.floor_details).reduce(
             (sum: number, f: any) => sum + Number(f.area || 0), 0
           );
@@ -67,32 +70,32 @@ export default function EstimatePage() {
   }, []);
 
   useEffect(() => {
-  const fetchData = async () => {
-    const { data: clientsTable, error } = await supabase
-      .from('clients')
-      .select('client_name, representative_name');
-    
-    if (error) {
-      console.error("Error fetching clients:", error);
-      return;
-    }
+    const fetchData = async () => {
+      const { data: clientsTable, error } = await supabase
+        .from('clients')
+        .select('client_name, representative_name');
+      
+      if (error) {
+        console.error("Error fetching clients:", error);
+        return;
+      }
 
-    const combined = clientsTable || [];
-    setClients(combined);
+      const combined = clientsTable || [];
+      setClients(combined);
 
-    const representatives = combined
-      .map((c) => c.representative_name)
-      .filter((name): name is string => typeof name === 'string' && name.trim() !== "");
+      const representatives = combined
+        .map((c) => c.representative_name)
+        .filter((name): name is string => typeof name === 'string' && name.trim() !== "");
 
-    const uniqueReps = Array.from(new Set(representatives)) as string[];
+      const uniqueReps = Array.from(new Set(representatives)) as string[];
 
-    setAllRepresentatives(uniqueReps);
-    setFilteredReps(uniqueReps);
-  };
-  fetchData();
-}, []);
+      setAllRepresentatives(uniqueReps);
+      setFilteredReps(uniqueReps);
+    };
+    fetchData();
+  }, []);
 
- const handleClientChange = (name: string) => {
+  const handleClientChange = (name: string) => {
     setSelectedClientName(name);
     
     const matches: string[] = clients
@@ -112,20 +115,44 @@ export default function EstimatePage() {
     }
   };
 
+  const handlePlotAreaChange = (val: string) => {
+    const cleanVal = val.replace(/[^0-9.]/g, '');
+    const parts = cleanVal.split('.');
+    const formattedVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleanVal;
+
+    setPlotArea(formattedVal);
+
+    const newPlotNum = parseFloat(formattedVal) || 0;
+    if (newPlotNum > 0) {
+      for (const floor of selectedFloors) {
+        const floorArea = floorData[floor]?.area || 0;
+        if (floorArea > newPlotNum) {
+          alert(`Validation Error: Floor "${floor}" area (${floorArea} SQ.FT) cannot exceed the Plot Area (${newPlotNum} SQ.FT).`);
+        }
+      }
+    }
+  };
+
   const updateArea = (floor: string, l: number, w: number) => {
-    const newArea = parseFloat((l * w).toFixed(2));
+    const validLength = Math.max(0, l);
+    const validWidth = Math.max(0, w);
+    
+    const newArea = parseFloat((validLength * validWidth).toFixed(2));
     const plotAreaNum = parseFloat(plotArea) || 0;
+    
     if (plotAreaNum > 0 && newArea > plotAreaNum) {
-      alert(`Validation Error: Area exceeds plot area.`);
+      alert(`Validation Error: Floor area (${newArea} SQ.FT) cannot exceed the Plot Area (${plotAreaNum} SQ.FT).`);
       return;
     }
-    const updatedFloorData = { ...floorData, [floor]: { length: l, width: w, area: newArea } };
+    
+    const updatedFloorData = { ...floorData, [floor]: { length: validLength, width: validWidth, area: newArea } };
     setFloorData(updatedFloorData);
-    const newTotal = Object.values(updatedFloorData).reduce((sum, f) => sum + (f.area || 0), 0);
+    
+    const newTotal = selectedFloors.reduce((sum, f) => sum + Number(updatedFloorData[f]?.area || 0), 0);
     setAmount(parseFloat((newTotal * rate).toFixed(2)));
   };
 
-  const totalBuiltUpArea = Object.values(floorData).reduce((sum, f) => sum + (f.area || 0), 0);
+  const totalBuiltUpArea = selectedFloors.reduce((sum, f) => sum + Number(floorData[f]?.area || 0), 0);
 
   const residentialFloors = selectedFloors.filter((f) => f !== "BASEMENT" && f !== "TOWER");
   const floorCount = residentialFloors.length;
@@ -201,24 +228,39 @@ export default function EstimatePage() {
     }
 
     const storedData = JSON.parse(localStorage.getItem("estimateData") || localStorage.getItem("estimatePreview") || "{}");
-
     const plotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
-    const manualTotalBuiltUp = Object.values(floorData).reduce((sum, f) => sum + (f.area || 0), 0);
     
-    if (!customerName.trim() || !propertyAddress.trim() || !plotArea || rate <= 0 || Object.keys(floorData).length === 0) {
-      alert("Validation Error: Please fill in all required fields and ensure floor dimensions are provided.");
+    if (!customerName.trim() || !propertyAddress.trim() || !plotArea || rate <= 0) {
+      alert("Validation Error: Please fill in all required fields and ensure rate is provided.");
       return;
     }
-    
+
     for (const floor of selectedFloors) {
-      const floorArea = floorData[floor]?.area || 0;
+      const fData = floorData[floor];
+      const floorArea = fData?.area || 0;
+      const fLength = fData?.length || 0;
+      const fWidth = fData?.width || 0;
+
+      if (fLength <= 0 || fWidth <= 0 || floorArea <= 0) {
+        alert(`Validation Error: Floor "${floor}" has missing or zero dimensions. Please fill valid values or unselect this floor.`);
+        return;
+      }
       if (floorArea > plotAreaNum) {
         alert(`Validation Error: The area for ${floor} (${floorArea} SQ.FT) exceeds the plot area (${plotAreaNum} SQ.FT).`);
         return;
       }
     }
 
-    // 1. Get User
+    const filteredFloorDetails: Record<string, { length: number; width: number; area: number }> = {};
+    selectedFloors.forEach((floor) => {
+      if (floorData[floor]?.area > 0) {
+        filteredFloorDetails[floor] = floorData[floor];
+      }
+    });
+
+    const manualTotalBuiltUp = Object.values(filteredFloorDetails).reduce((sum, f) => sum + (f.area || 0), 0);
+    const finalCalculatedAmount = parseFloat((manualTotalBuiltUp * rate).toFixed(2));
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       alert("Please login to generate estimate.");
@@ -231,7 +273,6 @@ export default function EstimatePage() {
     const plotMaster = await getPlotMasterData();
     const finalFee = feeMode === "AUTO" ? registeredFee : manualFee;
 
-    // 2. Strict Comparison
     const isSame = 
       String(storedData.customer_name || "").trim() === String(customerName || "").trim() &&
       String(storedData.property_address || "").trim() === String(propertyAddress || "").trim() &&
@@ -239,9 +280,8 @@ export default function EstimatePage() {
       Number(storedData.rate_per_sqft || 0) === Number(rate || 0) &&
       String(storedData.client_name || "").trim() === String(selectedClientName || "").trim() &&
       String(storedData.representative || "").trim() === String(representative || "").trim() &&
-      JSON.stringify(storedData.floor_details || {}) === JSON.stringify(floorData || {});
+      JSON.stringify(storedData.floor_details || {}) === JSON.stringify(filteredFloorDetails || {});
 
-    // Reference Number handle karein
     const oldName = storedData.customer_name || "";
     const oldAddress = storedData.property_address || "";
     const nameSimilarity = getSimilarity(customerName, oldName);
@@ -251,7 +291,6 @@ export default function EstimatePage() {
     const finalRefNo = needsNewRef ? "REF-" + Date.now() : storedData.ref_no;
     setCurrentRefNo(finalRefNo);
 
-    // 3. Agar data change hua hai tabhi history aur edit limit check chalega
     if (!isSame) {
       if (storedData.ref_no) {
         const { count } = await supabase
@@ -276,7 +315,7 @@ export default function EstimatePage() {
           customer_name: customerName,
           property_address: propertyAddress,
           plot_area: plotArea,
-          floor_details: floorData,
+          floor_details: filteredFloorDetails,
           fee: finalFee
         }),
         created_at: new Date().toISOString()
@@ -294,6 +333,23 @@ export default function EstimatePage() {
       if (updateError) console.error("Error updating fee:", updateError.message);
     }
 
+    const residentialActiveFloors = selectedFloors.filter((f) => f !== "BASEMENT" && f !== "TOWER");
+    const activeFloorCount = residentialActiveFloors.length;
+    const activeHasTower = selectedFloors.includes("TOWER");
+    const lastResFloor = residentialActiveFloors[residentialActiveFloors.length - 1];
+    const activeLastFloorLength = filteredFloorDetails[lastResFloor]?.length || 0;
+    const activeLastFloorWidth = filteredFloorDetails[lastResFloor]?.width || 0;
+    const activeStaircaseCount = activeFloorCount;
+
+    let activeDoorCount = 0;
+    if (manualTotalBuiltUp <= 600) { activeDoorCount = 4 * activeFloorCount; }
+    else if (manualTotalBuiltUp <= 1000) { activeDoorCount = 5 * activeFloorCount; }
+    else if (manualTotalBuiltUp <= 1500) { activeDoorCount = 6 * activeFloorCount; }
+    else if (manualTotalBuiltUp <= 2000) { activeDoorCount = 8 * activeFloorCount; }
+    else { activeDoorCount = 8 + Math.ceil((manualTotalBuiltUp - 2000) / 500); }
+    if (activeHasTower) { activeDoorCount += 1; }
+    const activeWindowCount = activeDoorCount * 2;
+
     const estimateData = {
       ref_no: finalRefNo,
       id: storedData.id || null,
@@ -303,22 +359,22 @@ export default function EstimatePage() {
       property_address: propertyAddress,
       plot_area: plotArea,
       selected_floors: selectedFloors,
-      floor_details: floorData,
+      floor_details: filteredFloorDetails,
       total_builtup_area: manualTotalBuiltUp,
       rate_per_sqft: rate,
-      construction_cost: amount,
-      total_value: amount,
+      construction_cost: finalCalculatedAmount,
+      total_value: finalCalculatedAmount,
       fee_amount: finalFee,
       fee_mode: feeMode,
       estimate_type: "NEW CONSTRUCTION",
       plotMaster,
-      floor_count: floorCount,
-      has_tower: hasTower,
-      last_floor_length: lastFloorLength,
-      last_floor_width: lastFloorWidth,
-      staircase_count: staircaseCount,
-      door_count: doorCount,
-      window_count: windowCount,
+      floor_count: activeFloorCount,
+      has_tower: activeHasTower,
+      last_floor_length: activeLastFloorLength,
+      last_floor_width: activeLastFloorWidth,
+      staircase_count: activeStaircaseCount,
+      door_count: activeDoorCount,
+      window_count: activeWindowCount,
     };
     
     localStorage.setItem("estimatePreview", JSON.stringify(estimateData));
@@ -339,9 +395,33 @@ export default function EstimatePage() {
     setSelectedFloors(DEFAULT_FLOORS);
   };
 
+  // Step-by-step validation checks
+  const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
+  const isCustomerFilled = isClientFilled && customerName.trim() !== "";
+  const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
+  const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
+
   return (
     <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">
-      <h1 className="text-2xl font-bold text-center border-2 border-black bg-gray-100 p-1 mb-2">CONSTRUCTION ESTIMATE INPUT FORM</h1>
+      <div className="flex justify-between items-center border-2 border-black bg-gray-100 p-1 mb-2">
+        <div className="w-24"></div>
+        <h1 className="text-2xl font-bold text-center flex-1">CONSTRUCTION ESTIMATE INPUT FORM</h1>
+        <div>
+          <label className="bg-black text-white px-3 py-1 font-bold text-[10pt] uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
+            📁 UPLOAD DOC / AI SCAN
+            <input 
+              type="file" 
+              className="hidden" 
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                  alert(`Document "${file.name}" uploaded successfully! (AI Auto-Extraction will be connected here soon.)`);
+                }
+              }} 
+            />
+          </label>
+        </div>
+      </div>
       
       <div className="grid grid-cols-7 gap-4 mb-4 border-b border-black pb-4">
         <div className="col-span-2">
@@ -376,29 +456,56 @@ export default function EstimatePage() {
       <div className="mb-4 space-y-4">
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
-          <textarea value={customerName} onChange={(e) => setCustomerName(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={1} />
+          <textarea 
+            value={customerName} 
+            disabled={!isClientFilled}
+            onChange={(e) => setCustomerName(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={1} 
+            placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
+          />
         </div>
         <div className="grid grid-cols-12 items-center gap-4">
           <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
-          <textarea value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} className="col-span-9 border border-black p-2 uppercase text-left text-lg" rows={2} />
+          <textarea 
+            value={propertyAddress} 
+            disabled={!isCustomerFilled}
+            onChange={(e) => setPropertyAddress(e.target.value)} 
+            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            rows={2} 
+            placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-10 gap-4 mb-1 items-center border-t border-black pt-2">
+      <div className={`grid grid-cols-10 gap-4 mb-1 items-center border-t border-black pt-2 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-2">
           <label className="font-bold block text-[12pt]">PLOT AREA</label>
           <div className="relative flex items-center">
-            <input type="text" placeholder="0.00" value={plotArea ? Number(plotArea).toLocaleString('en-IN') : ""} onChange={(e) => { const val = e.target.value.replace(/[^0-9.]/g, ''); setPlotArea(val); }} className="w-full border border-black p-1 uppercase text-center text-xl" />
+            <input 
+              type="text" 
+              placeholder="0.00" 
+              disabled={!isAddressFilled}
+              value={plotArea} 
+              onChange={(e) => handlePlotAreaChange(e.target.value)} 
+              className="w-full border border-black p-1 uppercase text-center text-xl" 
+            />
             <span className="absolute right-2 text-black font-bold text-[10pt] pointer-events-none">SQ. FT</span>
           </div>
         </div>
         <div className="col-span-7">
           <label className="font-bold block text-[12pt]">SELECT FLOORS: ({selectedFloors.length} SELECTED)</label>
-          <button onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className="border border-black px-10 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200">+ ADD / CHOOSE FLOOR</button>
+          <button 
+            disabled={!isPlotFilled}
+            onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} 
+            className={`border border-black px-10 py-1 font-bold text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
+          >
+            + ADD / CHOOSE FLOOR
+          </button>
         </div>
       </div>
 
-      <div className="mt-4 border border-black rounded-none overflow-hidden">
+      <div className={`mt-4 border border-black rounded-none overflow-hidden ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
@@ -407,8 +514,8 @@ export default function EstimatePage() {
               <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white">
                 <span className="col-span-4 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black">{f}</span>
                 <div className="col-span-4 grid grid-cols-2 gap-0 border-r border-black">
-                  <input type="number" step="0.01" placeholder="W (FEET)" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
-                  <input type="number" step="0.01" placeholder="L (FEET)" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="W (FEET)" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none p-2" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="L (FEET)" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none p-2" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
                 </div>
                 <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-black text-[12pt] bg-transparent" />
               </div>
@@ -416,7 +523,7 @@ export default function EstimatePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-5 mb-3 mt-4 items-center">
+      <div className={`grid grid-cols-5 mb-3 mt-4 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AREA</label>
           <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" />
@@ -424,12 +531,39 @@ export default function EstimatePage() {
         <div className="text-center font-bold text-lg">X</div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">RATE / SQ.FT</label>
-          <input type="number" step="0.01" placeholder="RATE / SQ.FT" value={rate || ""} onChange={(e) => { const r = parseFloat(e.target.value) || 0; setRate(r); setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); }} className="w-full text-center border border-black p-1 uppercase" />
+          <input 
+            type="number" 
+            step="0.01" 
+            placeholder="RATE / SQ.FT" 
+            value={rate || ""} 
+            onChange={(e) => { 
+              const r = parseFloat(e.target.value) || 0; 
+              setRate(r); 
+              if (totalBuiltUpArea > 0) {
+                setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); 
+              }
+            }} 
+            className="w-full text-center border border-black p-1 uppercase" 
+          />
         </div>
         <div className="text-center font-bold text-lg">=</div>
         <div className="col-span-1">
           <label className="font-bold block text-[12pt]">TOTAL AMOUNT</label>
-          <input type="text" readOnly value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" />
+          <input 
+            type="text" 
+            placeholder="TOTAL AMOUNT"
+            value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
+            onChange={(e) => {
+              const rawVal = e.target.value.replace(/[^0-9.]/g, '');
+              const amt = parseFloat(rawVal) || 0;
+              setAmount(amt);
+              if (totalBuiltUpArea > 0) {
+                const calculatedRate = parseFloat((amt / totalBuiltUpArea).toFixed(2));
+                setRate(calculatedRate);
+              }
+            }} 
+            className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" 
+          />
         </div>
       </div>
 
@@ -454,7 +588,12 @@ export default function EstimatePage() {
               <button className="border border-black px-4 py-2" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
               <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => {
                 const floorSequence = ["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"];
-                setSelectedFloors([...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b)));
+                const sortedSelected = [...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b));
+                setSelectedFloors(sortedSelected);
+
+                const newTotal = sortedSelected.reduce((sum, f) => sum + Number(floorData[f]?.area || 0), 0);
+                setAmount(parseFloat((newTotal * rate).toFixed(2)));
+
                 setIsFloorModalOpen(false);
               }}>ADD SELECTED</button>
             </div>

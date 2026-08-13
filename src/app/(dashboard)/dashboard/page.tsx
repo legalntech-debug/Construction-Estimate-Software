@@ -727,8 +727,8 @@ export default function DashboardPage() {
 
       {/* WALLET RECHARGE MODAL */}
       {isRechargeModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-100 space-y-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-slate-800 text-base uppercase">Recharge Wallet</h3>
               <button 
@@ -739,10 +739,28 @@ export default function DashboardPage() {
               </button>
             </div>
 
+            {/* QR CODE DISPLAY SECTION */}
+            <div className="flex flex-col items-center justify-center bg-slate-50 p-4 rounded-xl border border-slate-200 text-center space-y-2">
+              <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wide">Scan QR Code to Pay via Any UPI App</p>
+              
+              {/* Yahan apni QR code image ka path dein (e.g., /qr-code.jpg) */}
+              <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200">
+                <img 
+                  src="/qr-code.jpg" 
+                  alt="UPI QR Code" 
+                  className="w-44 h-44 object-contain mx-auto rounded-lg"
+                />
+              </div>
+              
+              <p className="text-[11px] text-slate-500 font-medium">
+                UPI ID: <strong className="text-slate-800 font-mono">your-9669562719-3@axl</strong> (or 9669562719-3@axl)
+              </p>
+            </div>
+
             <form onSubmit={handleRequestRecharge} className="space-y-4 text-xs">
               <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-blue-800">
                 <p className="font-bold">Instructions:</p>
-                <p className="mt-1">Transfer funds via UPI/Bank Transfer, enter the amount and UTR / Transaction Reference ID below, and submit for Admin approval.</p>
+                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below for Admin approval.Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at 7987561396 for quick Admin approval.</p>
               </div>
 
               <div>
@@ -761,7 +779,7 @@ export default function DashboardPage() {
                 <label className="block font-bold text-slate-700 mb-1 uppercase">UTR No / UPI Transaction Reference</label>
                 <input 
                   type="text"
-                  placeholder="Enter UTR or UPI Ref ID"
+                  placeholder="Enter 12-digit UTR or UPI Ref ID"
                   value={rechargeUTR}
                   onChange={(e) => setRechargeUTR(e.target.value)}
                   className="w-full border rounded-xl p-2.5 font-bold text-sm focus:outline-none focus:border-blue-600"

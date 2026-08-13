@@ -28,7 +28,6 @@ export default function Sidebar() {
     const checkUserSession = async () => {
       const { data: { session } } = await supabaseClient.auth.getSession();
       if (session) {
-        // Fetch Role via RPC or check email/metadata if needed
         const { data: roleData } = await supabaseClient.rpc('get_user_role', { target_user_id: session.user.id });
         if (roleData?.toLowerCase() === 'admin' || session.user.email === 'legalntech@gmail.com') {
           setIsAdmin(true);
@@ -36,7 +35,6 @@ export default function Sidebar() {
           setIsAdmin(false);
         }
 
-        // Fetch exact columns from profiles table
         const { data: profileData, error } = await supabaseClient
           .from('profiles')
           .select('plan_type, wallet_balance, created_at, role')
@@ -68,28 +66,12 @@ export default function Sidebar() {
     return <aside className="bg-blue-950 text-white w-72 h-screen no-print"></aside>;
   }
 
-  // --- LOCKING & EXEMPTION CONDITIONS ---
-  const currentDate = new Date('2026-08-13T03:53:20'); // Current system time context
-  const targetLockDate = new Date('2026-08-20T00:00:00');
-  const isAfterLockDate = currentDate > targetLockDate;
-
-  // 21-day grace period calculation
-  const accountCreationDate = createdAt ? new Date(createdAt) : new Date('2026-07-01');
-  const daysSinceCreation = (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
-  const isWithinGracePeriod = daysSinceCreation <= 21;
-
-  const isWalletLow = walletBalance < 100; // Since wallet is -445, this is true
+  // --- LOCKING & EXEMPTION CONDITIONS (Yahan rakhein) ---
+  const isWalletLow = walletBalance < 100;
   const isPremium = userPlan.toUpperCase().includes('PREMIUM');
 
-  // Sidebar Restriction Rule:
-  // - Admin is NOT restricted
-  // - Premium users are NOT restricted
-  // - Within 21 days is NOT restricted
-  // - After 20 Aug 2026, if wallet < 100, RESTRICTED!
-  // (Note: Since today is 13 Aug 2026, wait—target date is 20 Aug 2026. If you want it active right now for testing, you can remove 'isAfterLockDate' check or change target date).
-  
-  // Let's make sure it locks if wallet < 100 and grace period is over:
-  const isSidebarRestricted = !isAdmin && !isPremium && !isWithinGracePeriod && isWalletLow;
+  // Admin aur Premium users kabhi restricted nahi honge
+  const isSidebarRestricted = !isAdmin && !isPremium && isWalletLow;
 
   const ledgerLabel = isPremium ? 'Billing & Account Ledger' : 'Account Ledger';
 
@@ -168,12 +150,10 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* --- ALLOWED OPTIONS WHEN WALLET < 100 --- */}
-        
-        {/* 7. MIS (ALWAYS ACCESSIBLE) */}
+        {/* 7. MIS */}
         <Link href="/mis" className="block px-6 py-2 hover:bg-blue-800 bg-blue-900/40">📊 {!collapsed && 'MIS'}</Link>
         
-        {/* 8. REOPEN CASE (ALWAYS ACCESSIBLE) */}
+        {/* 8. REOPEN CASE */}
         <Link href="/reopen-old-case" className="block px-6 py-2 hover:bg-blue-800 bg-blue-900/40">🔄 {!collapsed && 'Reopen Case'}</Link>
 
         {/* CLIENT DASHBOARD */}
@@ -196,7 +176,7 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* 9. BILLING & ACCOUNT LEDGER (ALWAYS ACCESSIBLE) */}
+        {/* 9. BILLING & ACCOUNT LEDGER */}
         <Link href="/wallet-ledger" className="flex items-center gap-3 px-6 py-2 hover:bg-blue-800 text-emerald-400 bg-emerald-950/30 border-y border-emerald-900/50">
           <Banknote size={18} /> {!collapsed && <span>{ledgerLabel}</span>}
         </Link>

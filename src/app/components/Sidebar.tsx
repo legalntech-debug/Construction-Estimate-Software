@@ -66,7 +66,7 @@ export default function Sidebar() {
     return <aside className="bg-blue-950 text-white w-72 h-screen no-print"></aside>;
   }
 
-  // --- LOCKING & EXEMPTION CONDITIONS (Yahan rakhein) ---
+  // --- LOCKING & EXEMPTION CONDITIONS ---
   const isWalletLow = walletBalance < 100;
   const isPremium = userPlan.toUpperCase().includes('PREMIUM');
 
@@ -89,15 +89,15 @@ export default function Sidebar() {
       {/* Navigation */}
       <nav className="p-3 space-y-1 text-sm font-bold uppercase">
         
-        {/* 1. DASHBOARD */}
+        {/* 1. DASHBOARD (ALWAYS UNLOCKED SO USER CAN RECHARGE) */}
         <Link 
-          href={isSidebarRestricted ? '#' : '/dashboard'} 
+          href="/dashboard" 
           className={`flex items-center gap-3 px-4 py-2 mx-2 rounded-lg transition ${
-            pathname === '/dashboard' ? 'bg-blue-600 text-white' : 'text-white bg-blue-600'
-          } ${isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}`}
+            pathname === '/dashboard' ? 'bg-blue-600 text-white' : 'text-white bg-blue-600 hover:bg-blue-700'
+          }`}
         >
           <LayoutDashboard size={18} />
-          {!collapsed && <span>DASHBOARD {isSidebarRestricted && '🔒'}</span>}
+          {!collapsed && <span>DASHBOARD</span>}
         </Link>
 
         {/* 2. PLAN */}

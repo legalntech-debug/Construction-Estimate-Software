@@ -1003,7 +1003,7 @@ export default function AdminDashboardPage(props: {
           )}
         </div>
 
-        {/* RBAC Table with Date & Month Filters */}
+      {/* RBAC Table Code */}
 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
   <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
     <div>
@@ -1070,6 +1070,7 @@ export default function AdminDashboardPage(props: {
             <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
             <th className="p-3">Mobile No.</th>
             <th className="p-3 text-center">Wallet Balance</th>
+            <th className="p-3 text-center">Lock Status</th>
             <th className="p-3 text-center">Total Estimates</th>
             <th className="p-3">Total Revenue (Fee)</th>
             <th className="p-3">Assigned Role</th>
@@ -1079,7 +1080,6 @@ export default function AdminDashboardPage(props: {
         </thead>
         <tbody className="divide-y divide-slate-100">
           {(() => {
-            // Step 1: Compute filtered profiles and their specific values
             const processedProfiles = filteredProfiles.map((p: any) => {
               let estCount = p.estimates_count || 0;
               let userRevenue = p.total_revenue || 0;
@@ -1107,20 +1107,27 @@ export default function AdminDashboardPage(props: {
               return p.calculatedEstCount > 0;
             });
 
-            // Store references for footer calculation
             (window as any).__tempFilteredProfiles = processedProfiles;
 
             if (processedProfiles.length === 0) {
               return (
                 <tr>
-                  <td colSpan={8} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
+                  <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
                 </tr>
               );
             }
 
             return processedProfiles.map((p: any) => {
               const userId = p.id;
-              const userWalletBalance = Number(p.wallet_balance || 0);
+              const userWalletBalance = Number(p.wallet_balance ?? 0);
+              const userPlan = (p.plan_type || '').toUpperCase();
+              
+              // Check explicitly if user is Admin or has a Premium plan
+              const isAdminUser = p.role === 'admin' || (p.email || '').toLowerCase() === 'legalntech@gmail.com';
+              const isPremium = userPlan.includes('PREMIUM');
+
+              // Strict Lock Condition: Admin aur Premium ko chhod kar agar balance < 100 hai toh Locked!
+              const isUserLocked = !isAdminUser && !isPremium && userWalletBalance < 100;
 
               return (
                 <tr key={userId} className="hover:bg-slate-50/50 transition">
@@ -1134,9 +1141,32 @@ export default function AdminDashboardPage(props: {
                   </td>
 
                   <td className="p-3 text-center">
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-700 rounded-xl font-black text-xs border border-emerald-200">
-                      ₹ {userWalletBalance.toLocaleString('en-IN')}
+                    <span className={`px-3 py-1 rounded-xl font-black text-xs border ${
+                      userWalletBalance < 0 
+                        ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                        : userWalletBalance === 0 
+                        ? 'bg-amber-50 text-amber-700 border-amber-200' 
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {userWalletBalance < 0 ? `- ₹ ${Math.abs(userWalletBalance).toLocaleString('en-IN')}` : `₹ ${userWalletBalance.toLocaleString('en-IN')}`}
                     </span>
+                  </td>
+
+                  {/* --- LOCK STATUS COLUMN --- */}
+                  <td className="p-3 text-center">
+                    {isAdminUser ? (
+                      <span className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg text-[10px] font-extrabold uppercase">Admin</span>
+                    ) : isPremium ? (
+                      <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-extrabold uppercase">Exempt</span>
+                    ) : isUserLocked ? (
+                      <span className="px-2.5 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">
+                        🔒 Locked
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-extrabold uppercase">
+                        🟢 Active
+                      </span>
+                    )}
                   </td>
 
                   <td className="p-3 text-center">
@@ -1189,30 +1219,12 @@ export default function AdminDashboardPage(props: {
             const currentList = (window as any).__tempFilteredProfiles || [];
             const filteredActiveCount = currentList.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
             const filteredSuspendedCount = currentList.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
-            const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance || 0), 0);
+            const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance ?? 0), 0);
             const filteredEstCountSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedEstCount || 0), 0);
             const filteredRevenueSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedRevenue || 0), 0);
 
             return (
-              <tr>
-                <td colSpan={2} className="p-3">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span>
-                    <span className="text-slate-500 font-medium">
-                      Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong>
-                    </span>
-                  </div>
-                </td>
-                <td className="p-3 text-center text-emerald-700 bg-emerald-50/50 rounded-lg align-middle">
-                  ₹ {filteredWalletSum.toLocaleString('en-IN')}
-                </td>
-                <td className="p-3 text-center text-blue-700 align-middle">
-                  {filteredEstCountSum} Estimates
-                </td>
-                <td colSpan={4} className="p-3 text-emerald-700 align-middle">
-                  ₹ {filteredRevenueSum.toLocaleString('en-IN')}
-                </td>
-              </tr>
+              <tr><td colSpan={2} className="p-3"><div className="flex flex-col gap-1"><span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span><span className="text-slate-500 font-medium">Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong></span></div></td><td className={`p-3 text-center rounded-lg align-middle border ${filteredWalletSum < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : filteredWalletSum === 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{filteredWalletSum < 0 ? `- ₹ ${Math.abs(filteredWalletSum).toLocaleString('en-IN')}` : `₹ ${filteredWalletSum.toLocaleString('en-IN')}`}</td><td className="p-3"></td><td className="p-3 text-center text-blue-700 align-middle">{filteredEstCountSum} Estimates</td><td colSpan={4} className="p-3 text-emerald-700 align-middle">₹ {filteredRevenueSum.toLocaleString('en-IN')}</td></tr>
             );
           })()}
         </tfoot>

@@ -4,8 +4,11 @@
 // ============================================================
 
 export type PlotShape =
+  | "RECTANGLE"
   | "RECTANGULAR"
   | "SQUARE"
+  | "IRREGULAR"
+  | "L-SHAPE"
   | "IRREGULAR / L-SHAPE"
   | "TRAPEZOIDAL"
   | "POLYGON";
@@ -37,11 +40,22 @@ export interface PlotDimensions {
   b?: number;
   c?: number;
   d?: number;
+  e?: number;
+  f?: number;
+
+  A?: number;
+  B?: number;
+  C?: number;
+  D?: number;
+  E?: number;
+  F?: number;
 
   north?: number;
   south?: number;
   east?: number;
   west?: number;
+  
+  [key: string]: number | undefined;
 }
 
 export interface RoomItem {

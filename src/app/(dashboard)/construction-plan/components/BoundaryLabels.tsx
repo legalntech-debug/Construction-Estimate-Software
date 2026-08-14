@@ -18,7 +18,7 @@ interface BoundaryLabelsProps {
   minX: number;
   maxX: number;
   roadFacingOption?: string;
-  northAngle?: number; // North symbol rotation angle in degrees
+  northAngle?: number;
 }
 
 export default function BoundaryLabels({
@@ -39,7 +39,7 @@ export default function BoundaryLabels({
   minX,
   maxX,
   roadFacingOption = "1 SIDE ROAD (SOUTH)",
-  northAngle = 0, // Default rotation 0 (North pointing up)
+  northAngle = 0,
 }: BoundaryLabelsProps) {
   const angleTop = Math.atan2(pTopRight.y - pTopLeft.y, pTopRight.x - pTopLeft.x) * (180 / Math.PI);
   const topWidth = pTopRight.x - pTopLeft.x;
@@ -78,127 +78,123 @@ export default function BoundaryLabels({
     <g style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "sans-serif" }}>
       {/* TOP BOUNDARY & DIMENSION */}
       <g>
-        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x + nx * (distDim - overshoot)} y2={pTopLeft.y + ny * (distDim - overshoot)} stroke="black" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + nx * (distDim - overshoot)} y2={pTopRight.y + ny * (distDim - overshoot)} stroke="black" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x + nx * (distDim - overshoot)} y2={pTopLeft.y + ny * (distDim - overshoot)} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + nx * (distDim - overshoot)} y2={pTopRight.y + ny * (distDim - overshoot)} stroke="white" strokeWidth="1" strokeDasharray="2" />
         
-        <text x={midX + nx * (distDim - 34)} y={midY + ny * (distDim - 34)} textAnchor="middle" dominantBaseline="middle" fill="black" transform={`rotate(${angleTop}, ${midX + nx * (distDim - 45)}, ${midY + ny * (distDim - 45)})`} style={{ fontSize: "14px", fontWeight: "900" }}>
+        <text x={midX + nx * (distDim - 34)} y={midY + ny * (distDim - 34)} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${angleTop}, ${midX + nx * (distDim - 45)}, ${midY + ny * (distDim - 45)})`} style={{ fontSize: "14px", fontWeight: "900" }}>
           {wrapText(topBoundary, 25).map((line, idx) => (
             <tspan key={idx} x={midX + nx * (distDim - 45)} dy={idx === 0 ? 0 : 16}>{line}</tspan>
           ))}
         </text>
 
         <g transform={`translate(${midX + nx * distDim}, ${midY + ny * distDim}) rotate(${angleTop})`}>
-          <polygon points={`${-topWidth / 2},0 ${-topWidth / 2 + 7},-3.5 ${-topWidth / 2 + 7},3.5`} fill="black" />
-          <line x1={-topWidth / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="black" strokeWidth="1" />
+          <polygon points={`${-topWidth / 2},0 ${-topWidth / 2 + 7},-3.5 ${-topWidth / 2 + 7},3.5`} fill="white" />
+          <line x1={-topWidth / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="white" strokeWidth="1" />
 
-          <polygon points={`${topWidth / 2},0 ${topWidth / 2 - 7},-3.5 ${topWidth / 2 - 7},3.5`} fill="black" />
-          <line x1={boxHalfWidth} y1="0" x2={topWidth / 2} y2="0" stroke="black" strokeWidth="1" />
+          <polygon points={`${topWidth / 2},0 ${topWidth / 2 - 7},-3.5 ${topWidth / 2 - 7},3.5`} fill="white" />
+          <line x1={boxHalfWidth} y1="0" x2={topWidth / 2} y2="0" stroke="white" strokeWidth="1" />
 
-          <rect x={-boxHalfWidth} y="-10" width={boxHalfWidth * 2} height="18" fill="none" />
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="black">{dimB}&apos;</text>
+          {/* Background rect removed, only clean text */}
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimB}&apos;</text>
         </g>
       </g>
 
       {/* BOTTOM BOUNDARY / DIMENSION (SIDE A) */}
       <g>
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x} y2={pBottomLeft.y + 30 + overshoot} stroke="black" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x} y2={pBottomRight.y + 30 + overshoot} stroke="black" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x} y2={pBottomLeft.y + 30 + overshoot} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x} y2={pBottomRight.y + 30 + overshoot} stroke="white" strokeWidth="1" strokeDasharray="2" />
         
-        <text x={centerX} y={pBottomLeft.y + 50} textAnchor="middle" dominantBaseline="middle" fill="black" style={{ fontSize: "14px", fontWeight: "900" }}>
+        <text x={centerX} y={pBottomLeft.y + 50} textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "14px", fontWeight: "900" }}>
           {wrapText(bottomBoundary, 30).map((line, idx) => (
             <tspan key={idx} x={centerX} dy={idx === 0 ? 0 : 16}>{line}</tspan>
           ))}
         </text>
 
-        <polygon points={`${pBottomLeft.x},${pBottomLeft.y + 22} ${pBottomLeft.x + 7},${pBottomLeft.y + 18.5} ${pBottomLeft.x + 7},${pBottomLeft.y + 25.5}`} fill="black" />
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y + 22} x2={centerX - boxHalfWidth} y2={pBottomLeft.y + 22} stroke="black" strokeWidth="1" />
+        <polygon points={`${pBottomLeft.x},${pBottomLeft.y + 22} ${pBottomLeft.x + 7},${pBottomLeft.y + 18.5} ${pBottomLeft.x + 7},${pBottomLeft.y + 25.5}`} fill="white" />
+        <line x1={pBottomLeft.x} y1={pBottomLeft.y + 22} x2={centerX - boxHalfWidth} y2={pBottomLeft.y + 22} stroke="white" strokeWidth="1" />
 
-        <polygon points={`${pBottomRight.x},${pBottomLeft.y + 22} ${pBottomRight.x - 7},${pBottomLeft.y + 18.5} ${pBottomRight.x - 7},${pBottomLeft.y + 25.5}`} fill="black" />
-        <line x1={centerX + boxHalfWidth} y1={pBottomLeft.y + 22} x2={pBottomRight.x} y2={pBottomLeft.y + 22} stroke="black" strokeWidth="1" />
+        <polygon points={`${pBottomRight.x},${pBottomLeft.y + 22} ${pBottomRight.x - 7},${pBottomLeft.y + 18.5} ${pBottomRight.x - 7},${pBottomLeft.y + 25.5}`} fill="white" />
+        <line x1={centerX + boxHalfWidth} y1={pBottomLeft.y + 22} x2={pBottomRight.x} y2={pBottomLeft.y + 22} stroke="white" strokeWidth="1" />
 
-        <rect x={centerX - boxHalfWidth} y={pBottomLeft.y + 13} width={boxHalfWidth * 2} height="18" fill="none" />
-        <text x={centerX} y={pBottomLeft.y + 22} textAnchor="middle" dominantBaseline="middle" fill="black">{dimA}&apos;</text>
+        {/* Background rect removed, only clean text */}
+        <text x={centerX} y={pBottomLeft.y + 22} textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimA}&apos;</text>
       </g>
 
       {/* RIGHT BOUNDARY & DIMENSION */}
       <g>
-        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + 22 + overshoot} y2={pTopRight.y} stroke="black" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x + 22 + overshoot} y2={pBottomRight.y} stroke="black" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + 22 + overshoot} y2={pTopRight.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x + 22 + overshoot} y2={pBottomRight.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
         
-        <polygon points={`${pTopRight.x + 22},${pTopRight.y} ${pTopRight.x + 18.5},${pTopRight.y + 7} ${pTopRight.x + 25.5},${pTopRight.y + 7}`} fill="black" />
-        <line x1={pTopRight.x + 22} y1={pTopRight.y} x2={pTopRight.x + 22} y2={centerY - boxHalfWidth} stroke="black" strokeWidth="1" />
+        <polygon points={`${pTopRight.x + 22},${pTopRight.y} ${pTopRight.x + 18.5},${pTopRight.y + 7} ${pTopRight.x + 25.5},${pTopRight.y + 7}`} fill="white" />
+        <line x1={pTopRight.x + 22} y1={pTopRight.y} x2={pTopRight.x + 22} y2={centerY - boxHalfWidth} stroke="white" strokeWidth="1" />
 
-        <polygon points={`${pTopRight.x + 22},${pBottomRight.y} ${pTopRight.x + 18.5},${pBottomRight.y - 7} ${pTopRight.x + 25.5},${pBottomRight.y - 7}`} fill="black" />
-        <line x1={pTopRight.x + 22} y1={centerY + boxHalfWidth} x2={pTopRight.x + 22} y2={pBottomRight.y} stroke="black" strokeWidth="1" />
+        <polygon points={`${pTopRight.x + 22},${pBottomRight.y} ${pTopRight.x + 18.5},${pBottomRight.y - 7} ${pTopRight.x + 25.5},${pBottomRight.y - 7}`} fill="white" />
+        <line x1={pTopRight.x + 22} y1={centerY + boxHalfWidth} x2={pTopRight.x + 22} y2={pBottomRight.y} stroke="white" strokeWidth="1" />
 
-        <text x={maxX + 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="black" transform={`rotate(90, ${maxX + 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
+        <text x={maxX + 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(90, ${maxX + 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
           {wrapText(rightBoundary, 25).map((line, idx) => (
             <tspan key={idx} x={maxX + 75} dy={idx === 0 ? 0 : 16}>{line}</tspan>
           ))}
         </text>
 
         <g transform={`translate(${maxX + 22}, ${centerY}) rotate(90)`}>
-          <rect x={-boxHalfWidth} y="-9" width={boxHalfWidth * 2} height="18" fill="none" />
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="black">{dimD}&apos;</text>
+          {/* Background rect removed, only clean text */}
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimD}&apos;</text>
         </g>
       </g>
 
       {/* LEFT BOUNDARY & DIMENSION */}
       <g>
-        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x - 22 - overshoot} y2={pTopLeft.y} stroke="black" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x - 22 - overshoot} y2={pBottomLeft.y} stroke="black" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x - 22 - overshoot} y2={pTopLeft.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x - 22 - overshoot} y2={pBottomLeft.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
         
-        <polygon points={`${pTopLeft.x - 22},${pTopLeft.y} ${pTopLeft.x - 25.5},${pTopLeft.y + 7} ${pTopLeft.x - 18.5},${pTopLeft.y + 7}`} fill="black" />
-        <line x1={pTopLeft.x - 22} y1={pTopLeft.y} x2={pTopLeft.x - 22} y2={centerY - boxHalfWidth} stroke="black" strokeWidth="1" />
+        <polygon points={`${pTopLeft.x - 22},${pTopLeft.y} ${pTopLeft.x - 25.5},${pTopLeft.y + 7} ${pTopLeft.x - 18.5},${pTopLeft.y + 7}`} fill="white" />
+        <line x1={pTopLeft.x - 22} y1={pTopLeft.y} x2={pTopLeft.x - 22} y2={centerY - boxHalfWidth} stroke="white" strokeWidth="1" />
 
-        <polygon points={`${pTopLeft.x - 22},${pBottomLeft.y} ${pTopLeft.x - 25.5},${pBottomLeft.y - 7} ${pTopLeft.x - 18.5},${pBottomLeft.y - 7}`} fill="black" />
-        <line x1={pTopLeft.x - 22} y1={centerY + boxHalfWidth} x2={pTopLeft.x - 22} y2={pBottomLeft.y} stroke="black" strokeWidth="1" />
+        <polygon points={`${pTopLeft.x - 22},${pBottomLeft.y} ${pTopLeft.x - 25.5},${pBottomLeft.y - 7} ${pTopLeft.x - 18.5},${pBottomLeft.y - 7}`} fill="white" />
+        <line x1={pTopLeft.x - 22} y1={centerY + boxHalfWidth} x2={pTopLeft.x - 22} y2={pBottomLeft.y} stroke="white" strokeWidth="1" />
 
-        <text x={minX - 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="black" transform={`rotate(-90, ${minX - 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
+        <text x={minX - 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(-90, ${minX - 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
           {wrapText(leftBoundary, 25).map((line, idx) => (
             <tspan key={idx} x={minX - 75} dy={idx === 0 ? 0 : 16}>{line}</tspan>
           ))}
         </text>
 
         <g transform={`translate(${minX - 22}, ${centerY}) rotate(-90)`}>
-          <rect x={-boxHalfWidth} y="-9" width={boxHalfWidth * 2} height="18" fill="none" />
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="black">{dimC}&apos;</text>
+          {/* Background rect removed, only clean text */}
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimC}&apos;</text>
         </g>
       </g>
 
- {/* ROAD KE NICHE "SITE LAYOUT" BOX (Aligned to the road's left corner) */}
+      {/* ROAD KE NICHE "SITE LAYOUT" BOX (Border Removed) */}
       <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + 115})`}>
-        <rect x="0" y="-15" width="140" height="30" fill="white" stroke="black" strokeWidth="1" />
-        <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="black" style={{ fontSize: "18px", fontWeight: "bold" }}>
+        {/* Rect background & border removed */}
+        <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "18px", fontWeight: "bold" }}>
           SITE LAYOUT
         </text>
       </g>
 
-      {/* PLOT KE TOP-RIGHT SIDE ME ROTATABLE NORTH SYMBOL (Corrected Reversed Angles) */}
+      {/* PLOT KE TOP-RIGHT SIDE ME ROTATABLE NORTH SYMBOL */}
       {(() => {
         let rotation = 0; 
-        
         const opt = (roadFacingOption || "").toUpperCase();
 
-        // Reversed angle mapping to match exact geographical orientation
         if (opt.includes("SOUTH")) {
-          rotation = 0;    // North points UP (0°)
+          rotation = 0;    
         } else if (opt.includes("NORTH")) {
-          rotation = 180;  // North points DOWN (180°)
+          rotation = 180;  
         } else if (opt.includes("EAST")) {
-          rotation = 90;   // North points LEFT (90°)
+          rotation = 90;   
         } else if (opt.includes("WEST")) {
-          rotation = 270;  // North points RIGHT (270°)
+          rotation = 270;  
         }
-
-        console.log("Road Facing:", opt, "-> Corrected North Rotation Angle:", rotation);
 
         return (
           <g transform={`translate(${maxX + 180}, ${pTopRight.y + 30}) rotate(${rotation})`}>
-            <circle cx="0" cy="0" r="50" fill="white" stroke="black" strokeWidth="2" />
-            <polygon points="0,-40 -40,20 0,8" fill="black" />
-            <polygon points="0,-40 40,20 0,8" fill="#2c7ac9" stroke="black" strokeWidth="1" />
-            <text x="0" y="-70" textAnchor="middle" dominantBaseline="middle" fill="black" transform={`rotate(${-rotation}, 0, -70)`} style={{ fontSize: "40px", fontWeight: "bold" }}>
+            <circle cx="0" cy="0" r="50" fill="#121212" stroke="white" strokeWidth="2" />
+            <polygon points="0,-40 -40,20 0,8" fill="white" />
+            <polygon points="0,-40 40,20 0,8" fill="#2c7ac9" stroke="white" strokeWidth="1" />
+            <text x="0" y="-70" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-rotation}, 0, -70)`} style={{ fontSize: "40px", fontWeight: "bold" }}>
               N
             </text>
           </g>

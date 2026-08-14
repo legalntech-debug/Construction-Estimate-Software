@@ -26,7 +26,7 @@ export default function PlotPolygonRenderer({
     .join(" ");
 
   const hatchId = "diagonalHatch";
-  const hatchSpacing = 8 * cadZoom;
+  const hatchSpacing = 8 * (cadZoom || 1);
 
   return (
     <g>
@@ -43,33 +43,35 @@ export default function PlotPolygonRenderer({
             y1="0"
             x2="0"
             y2={hatchSpacing}
-            stroke="black"
-            strokeWidth={1 * cadZoom}
-            opacity="0.4"
+            stroke="#ffffff"
+            strokeWidth={0.8 * (cadZoom || 1)}
+            opacity="0.25"
           />
         </pattern>
       </defs>
 
-      {/* Main Plot Polygon (Bright Solid Yellow/Gold Border) */}
+      {/* Main Plot Polygon (Engineering Thin Sharp Border) */}
       {plotPoints && (
         <polygon
           points={plotPoints}
-          fill="none"
+          fill="rgba(255, 255, 255, 0.02)" 
           stroke="#E6B800" 
-          strokeWidth={isSelected ? Math.max(3, 5 * cadZoom) : Math.max(2, 3.5 * cadZoom)}
+          strokeWidth={isSelected ? 1.8 : 1.2} /* <-- Yahan stroke width ko thin kar diya gaya hai */
+          strokeLinejoin="round"
           className="cursor-pointer transition-all"
           onClick={(e) => handlePolygonClick(e, "plot")}
         />
       )}
 
-      {/* Proposed Site Polygon (With Hatching inside) */}
+      {/* Proposed Site Polygon */}
       {proposedPoints && (
         <polygon
           points={proposedPoints}
           fill={`url(#${hatchId})`}
-          stroke="#333333"
-          strokeWidth={1.5 * cadZoom}
-          strokeDasharray="4 4"
+          stroke="#00ffff"
+          strokeWidth={1}
+          strokeDasharray="3 3"
+          strokeLinejoin="round"
           className="cursor-pointer transition-all"
           onClick={(e) => handlePolygonClick(e, "proposed")}
         />

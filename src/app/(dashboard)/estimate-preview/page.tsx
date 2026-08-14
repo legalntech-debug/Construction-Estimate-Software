@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -93,7 +93,9 @@ export default function EstimatePreviewPage() {
   const [finalFee, setFinalFee] = useState(150); // Agar aapne ise dynamically fetch kiya hai, toh wo variable use karein
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/..."); // Aapka unique Ref ID
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
-    
+  // Smart Change Tracking Ref
+  const initialEstimateRef = useRef<any>(null);
+
   const checkEstimatePaymentStatus = async (currentRefNo: string) => {
     if (!currentRefNo) return;
 
@@ -191,43 +193,47 @@ const handleRazorpayPayment = () => handlePayment();
 
 const handleSaveAndPrint = async () => {
   if (isSaving) return;
-  setIsSaving(true);
-  try {
-    // Check karein ki kya ye pehle se saved hai (id ya ref_no ke basis par)
-    // Agar estimate ke paas ID nahi hai, TABHI insert karein
-    if (!estimate?.id && estimate?.ref_no) {
-      // Pehle check kar lete hain kya ye ref_no already database mein hai?
-      const { data: existingData } = await supabase
-        .from('estimates')
-        .select('id')
-        .eq('ref_no', estimate.ref_no)
-        .maybeSingle();
 
-      if (!existingData) {
-        // Agar database mein sach mein nahi hai, tabhi naya insert karein
-        const { error } = await supabase.from('estimates').insert([
-          {
-            ref_no: estimate.ref_no,
-            customer_name: estimate.customer_name,
-            property_address: estimate.property_address,
-            total_builtup_area: estimate.total_builtup_area,
-            construction_cost: estimate.construction_cost || estimate.total_value,
-          }
-        ]);
+  const isNewRecord = !estimate?.id || !estimate?.ref_no || estimate.ref_no.startsWith("TEMP");
 
-        if (error) {
-          
-        }
-      }
+  if (!isNewRecord) {
+    // Agar initial reference set nahi hai, toh current screen ke data ko baseline maan lo
+    if (!initialEstimateRef.current) {
+      initialEstimateRef.current = JSON.stringify({
+        total_builtup_area: estimate.total_builtup_area,
+        rate_per_sqft: estimate.rate_per_sqft,
+        total_value: estimate.total_value || estimate.construction_cost,
+        customer_name: estimate.customer_name,
+        property_address: estimate.property_address
+      });
     }
-    
-    // Seedha print kholo bina naya number banaye
-    window.print();
-  } catch (error) {
-   
-  } finally {
-    setIsSaving(false);
+
+    const currentSnapshot = JSON.stringify({
+      total_builtup_area: estimate.total_builtup_area,
+      rate_per_sqft: estimate.rate_per_sqft,
+      total_value: estimate.total_value || estimate.construction_cost,
+      customer_name: estimate.customer_name,
+      property_address: estimate.property_address
+    });
+
+    // ❌ AGAR KOI CHANGE NAHI HUA: Toh bina database ko touch kiye seedha print karo
+    if (currentSnapshot === initialEstimateRef.current) {
+      window.print();
+      return;
+    }
   }
+
+  // ✅ AGAR NAYA RECORD HAI YA DATA MEIN CHANGE HUA HAI: Tabhi save/update chalega
+  await handleSaveAndFinalize();
+
+  // Save hone ke baad reference update kar do
+  initialEstimateRef.current = JSON.stringify({
+    total_builtup_area: estimate.total_builtup_area,
+    rate_per_sqft: estimate.rate_per_sqft,
+    total_value: estimate.total_value || estimate.construction_cost,
+    customer_name: estimate.customer_name,
+    property_address: estimate.property_address
+  });
 };
 
 // Razorpay Payment Handler

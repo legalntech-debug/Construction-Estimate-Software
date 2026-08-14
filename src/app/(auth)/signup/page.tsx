@@ -13,7 +13,10 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
-  const [isAgreed, setIsAgreed] = useState(false);
+  const [agreeTermsPolicy, setAgreeTermsPolicy] = useState(false); 
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [hasViewedTerms, setHasViewedTerms] = useState(false); // <--- New state to track if terms modal was opened
+
   const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
   "ARUNACHAL PRADESH": ["Tawang", "West Kameng", "East Kameng", "Papum Pare", "Kurung Kumey", "Kra Daadi", "Lower Subansiri", "Upper Subansiri", "West Siang", "East Siang", "Siang", "Upper Siang", "Lower Siang", "Lower Dibang Valley", "Dibang Valley", "Anjaw", "Lohang", "Namsai", "Changlang", "Tirap", "Longding"],
@@ -51,7 +54,7 @@ export default function SignupPage() {
     email: '',
     password: '',
     userType: 'INDIVIDUAL',
-    planType: 'BASIC PLAN', // Default Plan
+    planType: 'BASIC PLAN',
     firmName: '',
     city: '',
     state: '',
@@ -67,12 +70,10 @@ export default function SignupPage() {
     setMounted(true);
   }, []);
 
-  // Handlers and Automatic Uppercase logic
   const handleChange = (e: any) => {
     const { name, value } = e.target;
     
     if (name === 'mobile') {
-      // Allow only numbers and restrict to a maximum of 10 digits
       const numericValue = value.replace(/\D/g, '').slice(0, 10);
       setForm({ ...form, mobile: numericValue });
     } else if (name === 'userType') {
@@ -93,7 +94,6 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
 
-    // STRICT MOBILE VALIDATION: Check if the mobile number is exactly 10 digits
     if (!/^\d{10}$/.test(form.mobile)) {
       setError("Please enter a valid 10-digit mobile number!");
       setLoading(false);
@@ -102,7 +102,6 @@ export default function SignupPage() {
 
     const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 1. Save OTP in Supabase
     const { error: otpError } = await supabase.from('otps').insert([{ email: form.email, otp_code: generatedOtp }]);
     
     if (otpError) {
@@ -111,15 +110,14 @@ export default function SignupPage() {
       return;
     }
 
-    // 2. Send email via EmailJS
     emailjs.send(
-      'service_g8hpevj',        // Service ID
-      'template_4sqme4r',       // Template ID
+      'service_g8hpevj',
+      'template_4sqme4r',
       {
-        to_email: form.email,    // User email
-        otp_code: generatedOtp,  // OTP to send
+        to_email: form.email,
+        otp_code: generatedOtp,
       }, 
-      'grxZ-VWExc0FNxr5n'        // Public Key
+      'grxZ-VWExc0FNxr5n'
     )
     .then(() => {
       alert("OTP has been sent to your email!");
@@ -137,7 +135,6 @@ export default function SignupPage() {
     setLoading(true);
     setError('');
 
-    // 1. Verify from Database
     const { data, error: dbError } = await supabase
       .from('otps')
       .select('otp_code')
@@ -152,7 +149,6 @@ export default function SignupPage() {
       return;
     }
 
-    // 2. Auth Signup
     const { error: authError } = await supabase.auth.signUp({
       email: form.email,
       password: form.password,
@@ -172,8 +168,6 @@ export default function SignupPage() {
     }
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
-
-    // 3. Insert Data into Profiles Table (Updated with Premium Approval Check)
     const isPremium = form.planType === 'PREMIUM PLAN';
 
     const { error: profileError } = await supabase.from('profiles').insert([
@@ -188,7 +182,7 @@ export default function SignupPage() {
         city: form.city,
         state: form.state,
         user_code: generatedUserId,
-        status: isPremium ? 'PENDING' : 'active', // <--- Ye naya check add kiya hai
+        status: isPremium ? 'PENDING' : 'active',
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
       },
@@ -268,64 +262,60 @@ export default function SignupPage() {
 
           {/* STEP 1 */}
           {step === 1 && (
-  <form onSubmit={sendOtp} className="space-y-3">
-    <input name="fullName" required placeholder="FULL NAME" value={form.fullName} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase" />
-    <input name="mobile" required type="tel" maxLength={10} placeholder="MOBILE NUMBER" value={form.mobile} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
-    <input name="email" required type="email" placeholder="EMAIL ADDRESS" value={form.email} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
-    <input name="password" required type="password" placeholder="PASSWORD" value={form.password} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+            <form onSubmit={sendOtp} className="space-y-3">
+              <input name="fullName" required placeholder="FULL NAME" value={form.fullName} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase" />
+              <input name="mobile" required type="tel" maxLength={10} placeholder="MOBILE NUMBER" value={form.mobile} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+              <input name="email" required type="email" placeholder="EMAIL ADDRESS" value={form.email} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+              <input name="password" required type="password" placeholder="PASSWORD" value={form.password} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
 
-    {/* STATE & CITY SEARCHABLE DROPDOWN (STATE FIRST) */}
-<div className="grid grid-cols-2 gap-2">
-  
-  {/* 1. STATE INPUT WITH ALL STATES DROPDOWN */}
-  <div>
-    <input
-      type="text"
-      name="state"
-      required
-      placeholder="STATE"
-      value={form.state}
-      onChange={handleChange}
-      list="all-states-list"
-      className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
-    />
-    <datalist id="all-states-list">
-      {Object.keys(INDIAN_STATES_AND_DISTRICTS).map((stateName) => (
-        <option key={stateName} value={stateName} />
-      ))}
-    </datalist>
-  </div>
+              {/* STATE & CITY SEARCHABLE DROPDOWN (STATE FIRST) */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <input
+                    type="text"
+                    name="state"
+                    required
+                    placeholder="STATE"
+                    value={form.state}
+                    onChange={handleChange}
+                    list="all-states-list"
+                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
+                  />
+                  <datalist id="all-states-list">
+                    {Object.keys(INDIAN_STATES_AND_DISTRICTS).map((stateName) => (
+                      <option key={stateName} value={stateName} />
+                    ))}
+                  </datalist>
+                </div>
 
-  {/* 2. CITY / DISTRICT INPUT WITH AUTO-SUGGESTION */}
-  <div>
-    <input
-      type="text"
-      name="city"
-      required
-      placeholder="CITY / DISTRICT"
-      value={form.city}
-      onChange={handleChange}
-      list="all-districts-list"
-      className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
-    />
-    <datalist id="all-districts-list">
-      {form.state && INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()] ? (
-        INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()].map((district) => (
-          <option key={`${district}-${form.state}`} value={district} />
-        ))
-      ) : (
-        Object.entries(INDIAN_STATES_AND_DISTRICTS).flatMap(([stateName, districts]) =>
-          districts.map((district) => (
-            <option key={`${district}-${stateName}`} value={district} />
-          ))
-        )
-      )}
-    </datalist>
-  </div>
+                <div>
+                  <input
+                    type="text"
+                    name="city"
+                    required
+                    placeholder="CITY / DISTRICT"
+                    value={form.city}
+                    onChange={handleChange}
+                    list="all-districts-list"
+                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
+                  />
+                  <datalist id="all-districts-list">
+                    {form.state && INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()] ? (
+                      INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()].map((district) => (
+                        <option key={`${district}-${form.state}`} value={district} />
+                      ))
+                    ) : (
+                      Object.entries(INDIAN_STATES_AND_DISTRICTS).flatMap(([stateName, districts]) =>
+                        districts.map((district) => (
+                          <option key={`${district}-${stateName}`} value={district} />
+                        ))
+                      )
+                    )}
+                  </datalist>
+                </div>
+              </div>
 
-</div>
-
-    {/* USER CATEGORY DROPDOWN */}
+{/* USER CATEGORY DROPDOWN */}
     <div className="space-y-1">
       <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Select User Category</label>
       <select name="userType" value={form.userType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
@@ -338,14 +328,16 @@ export default function SignupPage() {
       </select>
     </div>
 
-    {/* DYNAMIC FIRM NAME */}
+    {/* DYNAMIC FIRM / BANK NAME */}
     {form.userType !== 'INDIVIDUAL' && (
       <div className="space-y-1">
-        <label className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">Registered Firm Name *</label>
+        <label className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">
+          {form.userType === 'BANKER' ? 'Current Bank Name *' : 'Registered Firm Name *'}
+        </label>
         <input
           name="firmName"
           required
-          placeholder="ENTER YOUR FIRM NAME"
+          placeholder={form.userType === 'BANKER' ? 'ENTER CURRENT BANK NAME' : 'ENTER YOUR FIRM NAME'}
           value={form.firmName}
           onChange={handleChange}
           className="w-full border-2 border-blue-100 p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold uppercase bg-blue-50/30"
@@ -353,43 +345,67 @@ export default function SignupPage() {
       </div>
     )}
 
-    {/* ENGINE PLAN DROPDOWN */}
-    <div className="space-y-1">
-      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Choose Engine Plan</label>
-      <select name="planType" value={form.planType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
-        <option value="BASIC PLAN">BASIC PLAN</option>
-        {form.userType !== 'INDIVIDUAL' && (
-          <option value="PREMIUM PLAN">PREMIUM PLAN</option>
-        )}
-      </select>
-    </div>
+              {/* ENGINE PLAN DROPDOWN */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Choose Engine Plan</label>
+                <select name="planType" value={form.planType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
+                  <option value="BASIC PLAN">BASIC PLAN</option>
+                  {form.userType !== 'INDIVIDUAL' && (
+                    <option value="PREMIUM PLAN">PREMIUM PLAN</option>
+                  )}
+                </select>
+              </div>
 
-    {/* LEGAL COMPLIANCE CHECKBOX - UPDATED FOR READABILITY */}
-<div className="space-y-1 mt-2">
-  <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Legal Compliance</label>
-  <div className="flex items-start gap-3 p-3 bg-blue-50 rounded border border-blue-200 shadow-inner">
-    <input 
-      type="checkbox" 
-      id="terms" 
-      checked={isAgreed} 
-      onChange={(e) => setIsAgreed(e.target.checked)} 
-      className="mt-1.5 h-4 w-4 shrink-0"
-    />
-    <label htmlFor="terms" className="text-[11px] text-slate-800 font-medium leading-relaxed cursor-pointer">
-      I agree to the <b>Legal n Tech Consultant Terms of Service & Strict No-Refund Policy</b>. I verify all details before payment and acknowledge that all software estimates are <b>strictly non-refundable</b>, meant for preliminary use only, carry <b>zero financial or professional liability</b>, and require independent professional verification.
-    </label>
-  </div>
-</div>
-    <button 
-      disabled={!isAgreed || loading} 
-      className={`w-full py-2.5 rounded font-bold transition uppercase tracking-wider text-sm mt-2 ${
-        !isAgreed ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-900 hover:bg-blue-800'
-      } text-white`}
-    >
-      {loading ? 'SENDING OTP...' : 'SEND OTP'}
-    </button>
-  </form>
-)}
+              {/* LEGAL COMPLIANCE & PLATFORM RULES WITH MODAL POPUP BUTTON */}
+              <div className="space-y-2 mt-2 pt-2 border-t border-slate-200">
+                <label className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">
+                  Platform Terms & Operational Guidelines *
+                </label>
+
+                <div className="flex items-center justify-between p-2.5 bg-blue-50/50 rounded-xl border border-blue-200">
+                  <span className="text-[11px] font-bold text-slate-700">
+                    {hasViewedTerms ? "✅ Terms Viewed & Verified" : "⚠️ Please read terms to unlock checkbox"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasViewedTerms(true); // Unlock checkbox when modal is opened
+                      setShowTermsModal(true);
+                    }}
+                    className="px-3 py-1 bg-blue-900 hover:bg-blue-800 text-white text-[11px] font-bold rounded shadow transition uppercase cursor-pointer"
+                  >
+                    View Terms
+                  </button>
+                </div>
+
+                <div className="flex items-start gap-2.5 pt-1">
+                  <input 
+                    type="checkbox" 
+                    id="termsPolicy" 
+                    required
+                    disabled={!hasViewedTerms} // <--- Disabled until terms are viewed
+                    checked={agreeTermsPolicy} 
+                    onChange={(e) => setAgreeTermsPolicy(e.target.checked)} 
+                    className={`mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-900 focus:ring-blue-800 ${!hasViewedTerms ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  />
+                  <label htmlFor="termsPolicy" className={`text-[11px] font-bold leading-tight ${!hasViewedTerms ? 'text-gray-400 cursor-not-allowed' : 'text-slate-900 cursor-pointer'}`}>
+                    I have read, understood, and unconditionally agree to all the Platform Terms, Wallet Balance Rules, and Operational Guidelines stated above.
+                  </label>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                onClick={sendOtp}
+                disabled={!agreeTermsPolicy || loading} 
+                className={`w-full py-2.5 rounded font-bold transition uppercase tracking-wider text-sm mt-2 ${
+                  !agreeTermsPolicy ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-900 hover:bg-blue-800 cursor-pointer'
+                } text-white`}
+              >
+                {loading ? 'SENDING OTP...' : 'SEND OTP'}
+              </button>
+            </form>
+          )}
 
           {/* STEP 2 */}
           {step === 2 && (
@@ -422,13 +438,11 @@ export default function SignupPage() {
                 {form.planType === 'PREMIUM PLAN' ? 'REGISTRATION SUBMITTED FOR APPROVAL' : 'ACCOUNT CREATED SUCCESSFULLY'}
               </h2>
 
-              {/* WARNING BOX FOR PREMIUM PLAN PENDING APPROVAL */}
               {form.planType === 'PREMIUM PLAN' && (
                 <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-xl font-medium text-left">
                   ⚠️ You have selected the <b>Premium Plan</b>. Your account status is currently set to <b>Pending Admin Approval</b>. You will be able to log in once the admin reviews and authorizes your profile.
                 </div>
               )}
-              {/* --------------------------------------------- */}
 
               <div className="bg-gray-100 p-4 rounded-xl mt-3 text-left text-xs font-mono border border-gray-200 space-y-1">
                 <p><b>SYSTEM ID :</b> <span className="text-blue-900 font-bold">{credentials.userId}</span></p>
@@ -457,7 +471,6 @@ export default function SignupPage() {
           </h2>
 
           <div className="space-y-4 text-sm font-semibold">
-            {/* OFFER ITEM 1 */}
             <div className="bg-white/10 p-3 rounded-lg border border-yellow-400/30 flex flex-col gap-1">
               <div className="flex justify-between items-center text-yellow-300 font-black">
                 <span>🚀 ESTIMATE ENGINE OFFER</span>
@@ -466,7 +479,6 @@ export default function SignupPage() {
               <p className="text-xs text-slate-200 font-normal">Get instant construction & technical estimates at an unbeatable launching price of just ₹21!</p>
             </div>
 
-            {/* OFFER ITEM 2 */}
             <div className="bg-white/10 p-3 rounded-lg border border-yellow-400/30 flex flex-col gap-1">
               <div className="flex justify-between items-center text-green-400 font-black">
                 <span>📄 FREE DRAFTING SERVICES</span>
@@ -475,7 +487,6 @@ export default function SignupPage() {
               <p className="text-xs text-slate-200 font-normal">Complimentary document drafting included with your selected plans during the launch period.</p>
             </div>
 
-            {/* UPCOMING SERVICES */}
             <div className="pt-2 border-t border-white/10">
               <p className="text-[11px] font-black text-yellow-300 uppercase tracking-widest mb-2">Upcoming Services Pipeline:</p>
               <div className="grid grid-cols-2 gap-2 text-xs text-slate-300 font-medium">
@@ -489,6 +500,79 @@ export default function SignupPage() {
         </div>
 
       </div>
+
+      {/* TERMS & CONDITIONS POPUP MODAL WINDOW */}
+      {showTermsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white text-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="bg-blue-900 text-white p-4 flex justify-between items-center">
+              <h3 className="font-black text-sm uppercase tracking-wider">Platform Terms & Operational Guidelines</h3>
+              <button 
+                onClick={() => setShowTermsModal(false)}
+                className="text-white hover:text-red-400 font-bold text-lg px-2 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-4 overflow-y-auto space-y-3 text-xs text-slate-700 leading-relaxed">
+              <p className="font-bold text-slate-900">Welcome to Our Platform</p>
+              <p>Please read these terms and conditions carefully before proceeding to login. By accessing and using our platform, you agree to abide by the following operational rules and guidelines:</p>
+
+              <div className="space-y-1">
+                <p className="font-bold text-blue-900 uppercase">1. Wallet Balance & Account Status</p>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li><b>Minimum Balance Requirement:</b> Users must maintain a minimum wallet balance of <b>₹100</b> at all times to ensure uninterrupted access to all platform features and services.</li>
+                  <li><b>Low Balance Restrictions:</b> If your wallet balance falls below ₹100, certain active features will be restricted. However, you will still retain access to view and print your previously generated estimates and review your old cases.</li>
+                  <li><b>Account Deactivation Policy:</b> If the wallet balance remains below the required minimum and no activity or top-up is recorded for <b>60 days</b>, the account will be temporarily suspended, and estimates older than 60 days will no longer be accessible for opening or editing.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1">
+                <p className="font-bold text-blue-900 uppercase">2. Service & Estimate Guidelines</p>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li><b>Activity Requirement:</b> Generate at least <b>1 estimate every 2 months</b> to keep your account fully active and operational. Failure to meet this requirement may lead to account suspension.</li>
+                  <li><b>Editing Limits:</b> For every standard service package (including estimates, drafting, mapping, and other allied services), users are permitted a maximum of <b>3 free edits</b>.</li>
+                  <li><b>Additional Revisions:</b> Any modifications or edits requested after exhausting the initial 3 revisions will incur standard additional charges for a new request.</li>
+                  <li><b>Name & Address Correction Policy:</b> Only <b>minor typographical or spelling corrections</b> are permitted in the Name and Address fields. Substantial changes to identity details are not allowed once submitted.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1 pt-2 border-t border-gray-200">
+                <p className="font-bold text-slate-900 uppercase">Support & Assistance</p>
+                <p>If you encounter any technical issues, platform errors, or require clarification regarding your wallet balance or account status, please feel free to contact our Administrator Support Team at:</p>
+                <p className="font-bold text-blue-900">Helpline / WhatsApp: 7987561396</p>
+              </div>
+            </div>
+
+            {/* Modal Footer with Action Buttons */}
+            <div className="p-3 bg-gray-100 border-t border-gray-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAgreeTermsPolicy(true);
+                  setShowTermsModal(false);
+                }}
+                className="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded font-bold text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                Agree & Close
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTermsModal(false)}
+                className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded font-bold text-xs uppercase tracking-wider transition cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

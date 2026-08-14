@@ -3,6 +3,7 @@
 import React from "react";
 import { PlotDimensions, PlotShape } from "@/lib/constructionPlan/types";
 
+
 interface PlotConfigSectionProps {
   measurementUnit: "FEET" | "METERS";
   setMeasurementUnit: (val: "FEET" | "METERS") => void;
@@ -85,10 +86,31 @@ export default function PlotConfigSection({
   const areDimensionsFilled = isShapeSelected && plotArea > 0;
   const areDetailsCompleted = areDimensionsFilled && Boolean(coverageType);
 
+  // Check if rectangle is selected
+  // Line 91 ko yeh kar dein:
+const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
+
+  const onResetClick = () => {
+    const confirmed = window.confirm("Are you sure you want to reset?");
+    if (confirmed) {
+      handleResetDimensions();
+      updateDimensionPart("A", "ft", 0);
+      updateDimensionPart("B", "ft", 0);
+      updateDimensionPart("C", "ft", 0);
+      updateDimensionPart("D", "ft", 0);
+    }
+  };
+
   return (
     <div className="border border-black mb-4 bg-white">
-      <div className="bg-slate-900 text-white p-2 text-center font-black text-xl flex justify-between items-center px-4">
-        <span>PLOT GEOMETRY & CAD SETUP</span>
+      <div className="bg-slate-900 text-white p-2 font-black text-xl flex justify-between items-center px-4">
+        <div className="flex gap-2 invisible opacity-0 pointer-events-none">
+          <button type="button" className="px-3 py-1 text-xs">UNDO</button>
+          <button type="button" className="px-3 py-1 text-xs">RESET</button>
+        </div>
+        
+        <span className="text-center flex-1">PLOT GEOMETRY & CAD SETUP</span>
+
         <div className="flex gap-2">
           <button
             type="button"
@@ -100,7 +122,7 @@ export default function PlotConfigSection({
           </button>
           <button
             type="button"
-            onClick={handleResetDimensions}
+            onClick={onResetClick}
             disabled={!areDimensionsFilled}
             className="bg-red-600 text-white px-3 py-1 text-xs font-black rounded hover:bg-red-700 disabled:opacity-40 cursor-pointer"
           >
@@ -221,14 +243,9 @@ export default function PlotConfigSection({
               <div 
                 className="relative bg-[#05070b] border border-cyan-900/50 w-full flex-1 min-h-[300px] flex items-center justify-center shadow-inner my-1 select-none overflow-hidden"
                 onWheel={(e) => {
-                  e.preventDefault();
                   e.stopPropagation();
                   const zoomDelta = e.deltaY < 0 ? 0.15 : -0.15;
                   setBlueprintZoom((z) => Math.min(Math.max(z + zoomDelta, 0.5), 3.0));
-                }}
-                onMouseEnter={(e) => {
-                  const preventDefaultScroll = (event: WheelEvent) => event.preventDefault();
-                  e.currentTarget.addEventListener('wheel', preventDefaultScroll, { passive: false });
                 }}
               >
                 <div 
@@ -292,40 +309,62 @@ export default function PlotConfigSection({
             <div className="space-y-3 bg-gray-50 p-3 border border-black flex-1 overflow-y-auto">
               {[
                 { key: "A", label: "SIDE A", sub: "MAIN FRONT WIDTH (ROAD SIDE)" },
-                { key: "B", label: "SIDE B", sub: "REAR WIDTH" },
+                ...(isRectangle ? [] : [{ key: "B", label: "SIDE B", sub: "REAR WIDTH" }]),
                 { key: "C", label: "SIDE C", sub: "RIGHT DEPTH" },
-                { key: "D", label: "SIDE D", sub: "LEFT DEPTH" },
+                ...(isRectangle ? [] : [{ key: "D", label: "SIDE D", sub: "LEFT DEPTH" }]),
               ].map((item) => (
                 <div key={item.key} className="border border-black p-2 bg-white">
                   <div className="flex justify-between items-center mb-1">
                     <span className="font-black text-xs">{item.label}</span>
                     <span className="text-[10px] text-gray-500 font-bold">{item.sub}</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
+
+                  {measurementUnit === "FEET" ? (
+                    // --- FEET & INCHES VIEW ---
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex items-center">
+                        <input
+                          type="number"
+                          min={0}
+                          value={dimDetails[item.key]?.ft || 0}
+                          onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
+                          className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
+                        />
+                        <span className="ml-1 text-xs font-bold">FT</span>
+                      </div>
+                      <div className="flex items-center">
+                        <input
+                          type="number"
+                          min={0}
+                          max={11}
+                          value={dimDetails[item.key]?.in || 0}
+                          onChange={(e) => updateDimensionPart(item.key as any, "in", Number(e.target.value))}
+                          className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
+                        />
+                        <span className="ml-1 text-xs font-bold">IN</span>
+                      </div>
+                    </div>
+                  ) : (
+                    // --- METERS VIEW (Single Input Box) ---
                     <div className="flex items-center">
                       <input
                         type="number"
                         min={0}
-                        value={dimDetails[item.key]?.ft || 0}
+                        step="0.01"
+                        value={plotDimensions[item.key] || 0}
                         onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
                         className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
                       />
-                      <span className="ml-1 text-xs font-bold">FT</span>
+                      <span className="ml-1 text-xs font-bold">M</span>
                     </div>
-                    <div className="flex items-center">
-                      <input
-                        type="number"
-                        min={0}
-                        max={11}
-                        value={dimDetails[item.key]?.in || 0}
-                        onChange={(e) => updateDimensionPart(item.key as any, "in", Number(e.target.value))}
-                        className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
-                      />
-                      <span className="ml-1 text-xs font-bold">IN</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               ))}
+              {isRectangle && (
+                <div className="p-2 bg-blue-50 border border-blue-300 text-[11px] font-bold text-blue-800 text-center">
+                  💡 Rectangle mode: Side B & D are automatically synced with A & C. Open CAD view to adjust details if needed.
+                </div>
+              )}
             </div>
           )}
         </div>

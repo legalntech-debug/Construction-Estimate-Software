@@ -243,7 +243,7 @@ export default function RenovationEstimatePage() {
   const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
   const isCustomerFilled = isClientFilled && customerName.trim() !== "";
   const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
-  const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
+  const isPlotFilled = isAddressFilled && String(plotArea || "").trim() !== "";
 
   return (
     <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">

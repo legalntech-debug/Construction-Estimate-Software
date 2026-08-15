@@ -45,7 +45,6 @@ export default function BoundaryLabels({
   roadWidth = 15,
   measurementUnit = "FEET",
 }: BoundaryLabelsProps) {
-  // Format dimension helper for Feet-Inches or Meters
   const formatDim = (val: number) => {
     if (measurementUnit === "METERS") {
       return `${Number(val || 0).toFixed(2)}m`;
@@ -81,7 +80,6 @@ export default function BoundaryLabels({
   const currentRoadHeight = roadWidth * scale;
   const siteLayoutYOffset = 115 + (currentRoadHeight - (15 * scale));
 
-  // Universal helper function to render side dimensions and boundary texts parallel to any slanted/angled side
   const renderSideDimension = (
     p1: { x: number; y: number },
     p2: { x: number; y: number },
@@ -93,18 +91,13 @@ export default function BoundaryLabels({
     const midX = (p1.x + p2.x) / 2;
     const midY = (p1.y + p2.y) / 2;
 
-    // Tangent unit vector along the line
-    const tx = (p2.x - p1.x) / L;
-    const ty = (p2.y - p1.y) / L;
-
-    // Perpendicular normal vector pointing strictly outward from the plot center
-    let perpX = -ty;
-    let perpY = tx;
+    let perpX = -(p2.y - p1.y) / L;
+    let perpY = (p2.x - p1.x) / L;
     const dx = midX - centerX;
     const dy = midY - centerY;
     if (perpX * dx + perpY * dy < 0) {
-      perpX = ty;
-      perpY = -tx;
+      perpX = -perpX;
+      perpY = -perpY;
     }
 
     const dist = 22; 
@@ -120,11 +113,9 @@ export default function BoundaryLabels({
 
     return (
       <g>
-        {/* Extension dashed lines */}
         <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
         <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
 
-        {/* Boundary Name Text (Parallel to side angle) */}
         <text 
           x={textPosX} 
           y={textPosY} 
@@ -139,7 +130,6 @@ export default function BoundaryLabels({
           ))}
         </text>
 
-        {/* Dimension Line, Arrows and Value Box */}
         <g transform={`translate(${midX + perpX * dist}, ${midY + perpY * dist}) rotate(${angle})`}>
           <polygon points={`${-L / 2},0 ${-L / 2 + 7},-3.5 ${-L / 2 + 7},3.5`} fill="white" />
           <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="white" strokeWidth="1" />
@@ -157,26 +147,18 @@ export default function BoundaryLabels({
 
   return (
     <g style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "sans-serif" }}>
-      {/* TOP BOUNDARY & DIMENSION (SIDE B) */}
       {renderSideDimension(pTopLeft, pTopRight, topBoundary, dimB)}
-
-      {/* BOTTOM BOUNDARY & DIMENSION (SIDE A) */}
       {renderSideDimension(pBottomLeft, pBottomRight, bottomBoundary, dimA)}
-
-      {/* RIGHT BOUNDARY & DIMENSION (SIDE D) */}
       {renderSideDimension(pTopRight, pBottomRight, rightBoundary, dimD)}
-
-      {/* LEFT BOUNDARY & DIMENSION (SIDE C) */}
       {renderSideDimension(pTopLeft, pBottomLeft, leftBoundary, dimC)}
 
-      {/* DYNAMIC ROAD WIDTH KE SATH MOVE HONE WALA "SITE LAYOUT" TEXT */}
       <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + siteLayoutYOffset})`}>
         <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "18px", fontWeight: "bold" }}>
           SITE LAYOUT
         </text>
       </g>
 
-      {/* PLOT KE TOP-RIGHT SIDE ME ROTATABLE NORTH SYMBOL */}
+      {/* COMPASS (NORTH SYMBOL) REDUCED FURTHER BY 20% & WITH RIGHT ROAD OFFSET */}
       {(() => {
         let rotation = 0; 
         const opt = (roadFacingOption || "").toUpperCase();
@@ -191,12 +173,38 @@ export default function BoundaryLabels({
           rotation = 270;  
         }
 
+        const isFourSide = opt.includes("4 SIDE");
+        const isThreeSide = opt.includes("3 SIDE");
+
+        const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
+        const foundDirs: { dir: string; index: number }[] = [];
+        allDirs.forEach((dir) => {
+          const idx = opt.indexOf(dir);
+          if (idx !== -1) {
+            foundDirs.push({ dir, index: idx });
+          }
+        });
+
+        let mainRoad = "SOUTH";
+        if (foundDirs.length > 0) mainRoad = foundDirs[0].dir;
+
+        const compassMap: Record<string, { top: string; left: string; right: string }> = {
+          NORTH: { top: "SOUTH", left: "WEST", right: "EAST" },
+          SOUTH: { top: "NORTH", left: "EAST", right: "WEST" },
+          EAST: { top: "WEST", left: "SOUTH", right: "NORTH" },
+          WEST: { top: "EAST", left: "NORTH", right: "SOUTH" },
+        };
+        const currentCompass = compassMap[mainRoad] || compassMap["SOUTH"];
+        const hasRightRoad = isFourSide || isThreeSide || foundDirs.some(f => f.dir === currentCompass.right);
+
+        const extraRightOffset = hasRightRoad ? currentRoadHeight : 0;
+
         return (
-          <g transform={`translate(${maxX + 180}, ${pTopRight.y + 30}) rotate(${rotation})`}>
-            <circle cx="0" cy="0" r="50" fill="#121212" stroke="white" strokeWidth="2" />
-            <polygon points="0,-40 -40,20 0,8" fill="white" />
-            <polygon points="0,-40 40,20 0,8" fill="#2c7ac9" stroke="white" strokeWidth="1" />
-            <text x="0" y="-70" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-rotation}, 0, -70)`} style={{ fontSize: "40px", fontWeight: "bold" }}>
+          <g transform={`translate(${maxX + 130 + extraRightOffset}, ${pTopRight.y + 30}) rotate(${rotation})`}>
+            <circle cx="0" cy="0" r="28" fill="#121212" stroke="white" strokeWidth="1.2" />
+            <polygon points="0,-22 -22,11 0,5" fill="white" />
+            <polygon points="0,-22 22,11 0,5" fill="#2c7ac9" stroke="white" strokeWidth="0.8" />
+            <text x="0" y="-39" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-rotation}, 0, -39)`} style={{ fontSize: "22px", fontWeight: "bold" }}>
               N
             </text>
           </g>

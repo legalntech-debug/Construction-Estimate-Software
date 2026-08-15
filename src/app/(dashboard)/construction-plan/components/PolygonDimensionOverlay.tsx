@@ -39,7 +39,7 @@ export default function PolygonDimensionOverlay({
   };
 
   return (
-    <g fontFamily="sans-serif" fill="#111">
+    <g fontFamily="sans-serif" fill="#ffffff">
       {points.map((a, index) => {
         const b = points[(index + 1) % points.length];
         const lengthFeet = distance(a, b) / scale;
@@ -50,9 +50,6 @@ export default function PolygonDimensionOverlay({
         const len = Math.hypot(dx, dy);
         if (!len) return null;
 
-        // Determine the outward normal from polygon winding. This is reliable
-        // even on concave L-shape notch edges; using the polygon centre alone
-        // can flip those labels to the wrong side.
         let nx = signedArea > 0 ? dy / len : -dy / len;
         let ny = signedArea > 0 ? -dx / len : dx / len;
 
@@ -69,15 +66,17 @@ export default function PolygonDimensionOverlay({
               y1={a.y + ny * 12}
               x2={b.x + nx * 12}
               y2={b.y + ny * 12}
-              stroke="#111"
+              stroke="#ffffff"
               strokeWidth="1"
               strokeDasharray="3 2"
             />
+            {/* Background rect removed, text color set to white */}
             <text
               x={tx}
               y={ty}
               textAnchor="middle"
               dominantBaseline="middle"
+              fill="#ffffff"
               fontSize="12"
               fontWeight="900"
               transform={`rotate(${angle}, ${tx}, ${ty})`}
@@ -95,12 +94,12 @@ export default function PolygonDimensionOverlay({
             y="-16"
             width="290"
             height="32"
-            fill="white"
-            stroke="#111"
+            fill="#121212"
+            stroke="#ffffff"
             strokeWidth="1"
           />
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fontSize="11" fontWeight="900">
-            {lShape ? "L-SHAPE — EDIT A/C/E/F DIMENSIONS" : `ROAD / FRONT: ${roadFacingOption}`}
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize="11" fontWeight="900">
+            {lShape ? "L-SHAPE — EDIT A/C/E/F DIMENSIONS" : `ROAD / FRONT: ${roadFacingOption}`.toUpperCase()}
           </text>
         </g>
       )}

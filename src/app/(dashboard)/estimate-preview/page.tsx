@@ -1765,9 +1765,9 @@ return (
             {/* QR Code Left Mein */}
             <div className="flex flex-col items-center">
               <QRCodeSVG 
-  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
-  size={60} 
-  level="H" 
+  value={`https://construction-estimate-software.vercel.app/verify-estimate?ref=${estimate?.ref_no}`} 
+  size={120} 
+  level="M" 
 />
               <p className="text-[8px] mt-1 text-gray-500 font-bold text-center">SCAN TO VERIFY</p>
             </div>

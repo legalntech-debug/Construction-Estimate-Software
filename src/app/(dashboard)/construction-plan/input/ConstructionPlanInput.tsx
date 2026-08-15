@@ -55,6 +55,70 @@ export default function ConstructionPlanInput() {
   const [isCombinedCadModalOpen, setIsCombinedCadModalOpen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(0.85);
 
+  const [measurementUnit, setMeasurementUnit] = useState<"FEET" | "METERS">("FEET");
+  const [roadFacingOption, setRoadFacingOption] = useState("");
+  const [coverageType, setCoverageType] = useState("100_PERCENT");
+  const [selectedFloors, setSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
+  const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
+  const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
+  const [isCadModalOpen, setIsCadModalOpen] = useState(false);
+  
+  const [blueprintZoom, setBlueprintZoom] = useState(1.0);
+  const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
+  
+  // Initial dimensions set to 0 (No hardcoding)
+  const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
+    A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
+  });
+  
+  const [dimDetails, setDimDetails] = useState<Record<string, { ft: number; in: number }>>({
+    A: { ft: 0, in: 0 },
+    B: { ft: 0, in: 0 },
+    C: { ft: 0, in: 0 },
+    D: { ft: 0, in: 0 },
+  });
+
+  const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
+
+  // Long-term fix: Automatically reset setbackInputs when coverageType is 100_PERCENT
+  useEffect(() => {
+    if (coverageType === "100_PERCENT") {
+      setSetbackInputs({ front: 0, rear: 0, left: 0, right: 0 });
+    }
+  }, [coverageType]);
+
+  // Long-term fix: If plotShape is SQUARE, sync all sides (A, B, C, D) to be equal
+  useEffect(() => {
+    if (plotShape === "SQUARE") {
+      const sideA = dimDetails.A || { ft: 0, in: 0 };
+      const totalFeetA = Number(sideA.ft || 0) + Number(sideA.in || 0) / 12;
+      
+      setDimDetails(prev => ({
+        ...prev,
+        B: sideA,
+        C: sideA,
+        D: sideA
+      }));
+      setPlotDimensions(prev => ({
+        ...prev,
+        A: totalFeetA,
+        B: totalFeetA,
+        C: totalFeetA,
+        D: totalFeetA
+      }));
+    }
+  }, [plotShape]);
+  
+  const [boundaryNorth, setBoundaryNorth] = useState("");
+  const [boundarySouth, setBoundarySouth] = useState("");
+  const [boundaryEast, setBoundaryEast] = useState("");
+  const [boundaryWest, setBoundaryWest] = useState("");
+
+  // Corrected Plot Area calculation handling Feet and Inches properly
+  const totalLengthFt = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0) + Number(dimDetails.A?.in ?? 0) / 12;
+  const totalWidthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
+  const plotArea = totalLengthFt * totalWidthFt;
+
   // Fetch Clients
   useEffect(() => {
     const fetchData = async () => {
@@ -81,39 +145,6 @@ export default function ConstructionPlanInput() {
     fetchData();
   }, []);
 
-  const [measurementUnit, setMeasurementUnit] = useState<"FEET" | "METERS">("FEET");
-  const [roadFacingOption, setRoadFacingOption] = useState("");
-  const [coverageType, setCoverageType] = useState("100_PERCENT");
-  const [selectedFloors, setSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
-  const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
-  const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
-  const [isCadModalOpen, setIsCadModalOpen] = useState(false);
-  
-  const [blueprintZoom, setBlueprintZoom] = useState(1.0);
-  const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
-  
-  // Initial dimensions set to 0 (No hardcoding)
-  const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
-    A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
-  });
-  
-  const [dimDetails, setDimDetails] = useState<Record<string, { ft: number; in: number }>>({
-    A: { ft: 0, in: 0 },
-    B: { ft: 0, in: 0 },
-    C: { ft: 0, in: 0 },
-    D: { ft: 0, in: 0 },
-  });
-
-  const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
-  
-  const [boundaryNorth, setBoundaryNorth] = useState("");
-  const [boundarySouth, setBoundarySouth] = useState("");
-  const [boundaryEast, setBoundaryEast] = useState("");
-  const [boundaryWest, setBoundaryWest] = useState("");
-  
-
-  const plotArea = plotDimensions.A * plotDimensions.C;
-
   // Floor Manager States & Default Area Calculation
   const [floorData, setFloorData] = useState<Record<string, FloorData>>({
     "GROUND FLOOR": { length: 0, width: 0, area: plotArea }
@@ -128,8 +159,8 @@ export default function ConstructionPlanInput() {
 
   // Auto-calculate Ground Floor Built-Up Area
   useEffect(() => {
-    const totalLength = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0);
-    const totalWidth = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0);
+    const totalLength = totalLengthFt;
+    const totalWidth = totalWidthFt;
     
     const rules = calculateSetbacks(
       plotArea,
@@ -152,10 +183,8 @@ export default function ConstructionPlanInput() {
       updateFloorAreaDirect("GROUND FLOOR", Number(netArea.toFixed(2)));
     }
   }, [
-    dimDetails.A?.ft, 
-    dimDetails.C?.ft, 
-    plotDimensions.A, 
-    plotDimensions.C, 
+    totalLengthFt, 
+    totalWidthFt, 
     setbackInputs.front, 
     setbackInputs.rear, 
     setbackInputs.left, 
@@ -209,13 +238,36 @@ export default function ConstructionPlanInput() {
 
   const updateDimensionPart = (side: keyof PlotDimensions, field: "ft" | "in", val: number) => {
     setDimensionHistory(prev => [...prev, { ...plotDimensions }]);
-    setPlotDimensions(prev => ({ ...prev, [side]: val }));
-    if (field === "ft" || field === "in") {
-      setDimDetails(prev => ({
-        ...prev,
-        [side]: { ...(prev[side] || { ft: 0, in: 0 }), [field]: val }
-      }));
-    }
+    
+    setDimDetails(prev => {
+      const current = prev[side] || { ft: 0, in: 0 };
+      const updated = { ...current, [field]: val };
+      
+      const totalFeet = Number(updated.ft || 0) + Number(updated.in || 0) / 12;
+
+      if (plotShape === "SQUARE") {
+        const newDimDetails: Record<string, { ft: number; in: number }> = { ...prev };
+        const newPlotDims: PlotDimensions = { ...plotDimensions };
+
+        ['A', 'B', 'C', 'D'].forEach(s => {
+          newDimDetails[s] = updated;
+          newPlotDims[s as keyof PlotDimensions] = totalFeet;
+        });
+
+        setPlotDimensions(newPlotDims);
+        return newDimDetails;
+      } else {
+        setPlotDimensions(prevDims => ({
+          ...prevDims,
+          [side]: totalFeet
+        }));
+
+        return {
+          ...prev,
+          [side]: updated
+        };
+      }
+    });
   };
 
   const handleUndo = () => {
@@ -503,64 +555,63 @@ export default function ConstructionPlanInput() {
       </div>
 
       <CadModalView
-  isCadModalOpen={isCadModalOpen}
-  setIsCadModalOpen={setIsCadModalOpen}
-  plotShape={plotShape}
-  roadFacingOption={roadFacingOption}
-  cadZoom={cadZoom}
-  setCadZoom={setCadZoom}
-  cadTool={cadTool}
-  setCadCommand={setCadCommand}
-  orthMode={orthMode}
-  setOrthMode={setOrthMode}
-  osnapMode={osnapMode}
-  setOsnapMode={setOsnapMode}
-  undoLastCadAction={() => {}}
-  copySelectedCadObjects={() => {}}
-  rotateSelectedCadObjects={() => {}}
-  deleteSelectedCadObjects={() => {}}
-  cadRotation={cadRotation}
-  setCadRotation={setCadRotation}
-  cadText={cadText}
-  setCadText={setCadText}
-  cadContainerRef={cadContainerRef}
-  handleMouseDown={() => {}}
-  handleCadMouseMove={() => {}}
-  handleMouseUp={() => {}}
-  handleCadCanvasClick={() => {}}
-  handleCadDoubleClick={() => {}}
-  panOffset={panOffset}
-  plotDimensions={plotDimensions}
-  updateDimensionPart={updateDimensionPart}
-  measurementUnit={measurementUnit}
-  plotArea={plotArea}
-  isMultiDimShape={isMultiDimShape}
-  boundaryNorth={boundaryNorth}
-  setBoundaryNorth={setBoundaryNorth}
-  boundarySouth={boundarySouth}
-  setBoundarySouth={setBoundarySouth}
-  boundaryEast={boundaryEast}
-  setBoundaryEast={setBoundaryEast}
-  boundaryWest={boundaryWest}
-  setBoundaryWest={setBoundaryWest}
-  cadObjects={[]}
-  selectedCadObjectIds={[]}
-  toggleCadSelection={() => {}}
-  activeDrawingStart={null}
-  mouseCurrentPoint={null}
-  // Yahan totalFloors pass karein jo selectedFloors ki length ya count bataye:
-  totalFloors={selectedFloors.length}
-  selectedFloors={selectedFloors} //
-  // Yahan setbackInputs ka use karein:
-  frontMos={setbackInputs.front}
-  rearMos={setbackInputs.rear}
-  leftMos={setbackInputs.left}
-  rightMos={setbackInputs.right}
-  setFrontMos={(val) => setSetbackInputs(prev => ({ ...prev, front: val }))}
-  setRearMos={(val) => setSetbackInputs(prev => ({ ...prev, rear: val }))}
-  setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
-  setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
-/>
+        isCadModalOpen={isCadModalOpen}
+        setIsCadModalOpen={setIsCadModalOpen}
+        plotShape={plotShape}
+        roadFacingOption={roadFacingOption}
+        cadZoom={cadZoom}
+        setCadZoom={setCadZoom}
+        cadTool={cadTool}
+        setCadCommand={setCadCommand}
+        orthMode={orthMode}
+        setOrthMode={setOrthMode}
+        osnapMode={osnapMode}
+        setOsnapMode={setOsnapMode}
+        undoLastCadAction={() => {}}
+        copySelectedCadObjects={() => {}}
+        rotateSelectedCadObjects={() => {}}
+        deleteSelectedCadObjects={() => {}}
+        cadRotation={cadRotation}
+        setCadRotation={setCadRotation}
+        cadText={cadText}
+        setCadText={setCadText}
+        cadContainerRef={cadContainerRef}
+        handleMouseDown={() => {}}
+        handleCadMouseMove={() => {}}
+        handleMouseUp={() => {}}
+        handleCadCanvasClick={() => {}}
+        handleCadDoubleClick={() => {}}
+        panOffset={panOffset}
+        plotDimensions={plotDimensions}
+        updateDimensionPart={updateDimensionPart}
+        measurementUnit={measurementUnit}
+        plotArea={plotArea}
+        isMultiDimShape={isMultiDimShape}
+        boundaryNorth={boundaryNorth}
+        setBoundaryNorth={setBoundaryNorth}
+        boundarySouth={boundarySouth}
+        setBoundarySouth={setBoundarySouth}
+        boundaryEast={boundaryEast}
+        setBoundaryEast={setBoundaryEast}
+        boundaryWest={boundaryWest}
+        setBoundaryWest={setBoundaryWest}
+        cadObjects={[]}
+        selectedCadObjectIds={[]}
+        toggleCadSelection={() => {}}
+        activeDrawingStart={null}
+        mouseCurrentPoint={null}
+        totalFloors={selectedFloors.length}
+        selectedFloors={selectedFloors}
+        // Strict safe passing for MOS when 100% coverage
+        frontMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.front}
+        rearMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.rear}
+        leftMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.left}
+        rightMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.right}
+        setFrontMos={(val) => setSetbackInputs(prev => ({ ...prev, front: val }))}
+        setRearMos={(val) => setSetbackInputs(prev => ({ ...prev, rear: val }))}
+        setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
+        setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
+      />
 
       {/* COMBINED CAD MODAL VIEWER */}
       {isCombinedCadModalOpen && cadBlueprint && (

@@ -5,6 +5,9 @@ interface CadFloorElevationRendererProps {
   builtUpPoints: { x: number; y: number }[];
   scale: number;
   selectedFloors?: string[];
+  roadWidth?: number | string;
+  roadFacingOption?: string;
+  measurementUnit?: "FEET" | "METERS";
 }
 
 export default function CadFloorElevationRenderer({
@@ -12,18 +15,21 @@ export default function CadFloorElevationRenderer({
   builtUpPoints,
   scale,
   selectedFloors = [],
+  roadWidth = 20,
+  roadFacingOption = "1 SIDE ROAD (SOUTH)",
+  measurementUnit = "FEET",
 }: CadFloorElevationRendererProps) {
   if (!builtUpPoints || builtUpPoints.length < 4) return null;
 
   const parsedTotalFloors = Number(totalFloors) || selectedFloors.length || 1;
 
-  // 1. Precise Floor Ranking: Basement (0) -> Ground (1) -> First (2) -> Second (3) ... -> Tower (Last)
+  // Precise Floor Ranking
   const processedFloors = React.useMemo(() => {
     if (!selectedFloors || selectedFloors.length === 0) return [];
 
     const getFloorRank = (name: string) => {
       const upper = name.toUpperCase();
-      if (upper.includes("TOWER")) return 999; // Tower always goes to the very end
+      if (upper.includes("TOWER")) return 999;
       if (upper.includes("BASEMENT")) return 0;
       if (upper.includes("GROUND")) return 1;
       if (upper.includes("FIRST")) return 2;
@@ -54,18 +60,86 @@ export default function CadFloorElevationRenderer({
     return `FLOOR ${index + 1}`;
   };
 
+  const formatDim = (valPx: number) => {
+    const valFeet = valPx / scale;
+    if (measurementUnit === "METERS") {
+      return `${(valFeet * 0.3048).toFixed(2)}m`;
+    }
+    const totalInches = Math.round(valFeet * 12);
+    const feet = Math.floor(totalInches / 12);
+    const inches = totalInches % 12;
+    return `${feet}'-${inches}"`;
+  };
+
+  // Road detection: Only LEFT road should push the floor plans further left
+  const opt = (roadFacingOption || "").toUpperCase();
+  const hasLeftRoad = opt.includes("4 SIDE") || opt.includes("3 SIDE") || opt.includes("WEST") || opt.includes("LEFT");
+
+  const numericRoadWidth = Number(roadWidth) || 20;
+  const baseGap = 45 * scale; 
+  const roadOffset = hasLeftRoad ? (numericRoadWidth * scale * 0.8) : 0; // Fixed: removed hasRightRoad dependency
+  const plotGap = baseGap + roadOffset;
+
   const builtUpWidth = Math.abs(builtUpPoints[1].x - builtUpPoints[0].x);
   const builtUpHeight = Math.abs(builtUpPoints[3].y - builtUpPoints[0].y);
-  
-  const widthFeet = (builtUpWidth / scale).toFixed(0);
-  const heightFeet = (builtUpHeight / scale).toFixed(0);
+  const interFloorGap = 15 * scale;
+  const rowHeightGap = builtUpHeight + 25 * scale;
 
-  const plotGap = 30 * scale;
-  const interFloorGap = 5 * scale;
-  const rowHeightGap = builtUpHeight + 14 * scale; // Vertical row spacing
-
-  // Rule: Agar total selected floors 6 se zyada hain toh 1 row mein 4 floors, warna 3 floors
   const itemsPerRow = processedFloors.length > 6 ? 4 : 3;
+
+  // Helper to render parallel dimension for any side of the polygon
+  const renderSideDim = (
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    centerPt: { x: number; y: number }
+  ) => {
+    const L = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+
+    let perpX = -(p2.y - p1.y) / L;
+    let perpY = (p2.x - p1.x) / L;
+    const dx = midX - centerPt.x;
+    const dy = midY - centerPt.y;
+    if (perpX * dx + perpY * dy < 0) {
+      perpX = -perpX;
+      perpY = -perpY;
+    }
+
+    const dist = 14;
+    const overshoot = 4;
+    const boxHalfWidth = 24;
+
+    const ext1_end = { x: p1.x + perpX * (dist + overshoot), y: p1.y + perpY * (dist + overshoot) };
+    const ext2_end = { x: p2.x + perpX * (dist + overshoot), y: p2.y + perpY * (dist + overshoot) };
+
+    return (
+      <g>
+        <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke="yellow" strokeWidth="0.4" strokeDasharray="2" />
+        <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke="yellow" strokeWidth="0.4" strokeDasharray="2" />
+
+        <g transform={`translate(${midX + perpX * dist}, ${midY + perpY * dist}) rotate(${angle})`}>
+          <polygon points={`${-L / 2},0 ${-L / 2 + 5},-2.5 ${-L / 2 + 5},2.5`} fill="yellow" />
+          <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="yellow" strokeWidth="0.8" />
+
+          <polygon points={`${L / 2},0 ${L / 2 - 5},-2.5 ${L / 2 - 5},2.5`} fill="yellow" />
+          <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke="yellow" strokeWidth="0.8" />
+
+          <text 
+            x="0" 
+            y="1" 
+            textAnchor="middle" 
+            dominantBaseline="middle" 
+            fill="yellow" 
+            style={{ fontSize: "9px", fontWeight: "bold", paintOrder: "stroke", stroke: "#000000", strokeWidth: "3px" }}
+          >
+            {formatDim(L)}
+          </text>
+        </g>
+      </g>
+    );
+  };
 
   return (
     <g>
@@ -73,34 +147,34 @@ export default function CadFloorElevationRenderer({
         <pattern id="wallHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1="0" y1="0" x2="0" y2="6" stroke="#666666" strokeWidth="0.6" />
         </pattern>
-        <marker id="cadArrowOpen" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-          <path d="M1,1 L7,4 L1,7" fill="none" stroke="yellow" strokeWidth="1.2" />
-        </marker>
-        <marker id="cadArrowOpenRev" markerWidth="8" markerHeight="8" refX="1" refY="4" orient="auto">
-          <path d="M7,1 L1,4 L7,7" fill="none" stroke="yellow" strokeWidth="1.2" />
-        </marker>
       </defs>
 
       {Array.from({ length: parsedTotalFloors }).map((_, index) => {
-        const rowIndex = Math.floor(index / itemsPerRow);
-        
-        // Snake Layout: Even rows right-to-left, Odd rows left-to-right taaki second floor, first floor ke bilkul upar aaye
-        const colIndex = rowIndex % 2 === 0 
-          ? (itemsPerRow - 1) - (index % itemsPerRow) 
-          : (index % itemsPerRow);
+        let shiftX = 0;
+        let shiftY = 0;
 
-        const shiftX = plotGap + ((colIndex + 1) * builtUpWidth) + (colIndex * interFloorGap);
-        const shiftY = rowIndex * rowHeightGap;
+        if (parsedTotalFloors > 1) {
+          const rowIndex = Math.floor(index / itemsPerRow);
+          const colIndex = rowIndex % 2 === 0 
+            ? (itemsPerRow - 1) - (index % itemsPerRow) 
+            : (index % itemsPerRow);
+
+          shiftX = plotGap + (colIndex * (builtUpWidth + interFloorGap));
+          shiftY = rowIndex * rowHeightGap;
+        } else {
+          shiftX = plotGap;
+          shiftY = 0;
+        }
 
         const translatedPoints = builtUpPoints.map((p) => ({
           x: p.x - shiftX,
           y: p.y - shiftY,
         }));
 
-        const p0 = translatedPoints[0];
-        const p1 = translatedPoints[1];
-        const p2 = translatedPoints[2];
-        const p3 = translatedPoints[3];
+        const p0 = translatedPoints[0]; // Top-Left
+        const p1 = translatedPoints[1]; // Top-Right
+        const p2 = translatedPoints[2]; // Bottom-Right
+        const p3 = translatedPoints[3]; // Bottom-Left
 
         const wallPx = (8 / 12) * scale;
         const innerPoints = [
@@ -117,13 +191,10 @@ export default function CadFloorElevationRenderer({
 
         const tCenterX = translatedPoints.reduce((sum, p) => sum + p.x, 0) / translatedPoints.length;
         const tCenterY = translatedPoints.reduce((sum, p) => sum + p.y, 0) / translatedPoints.length;
-        
+        const centerPt = { x: tCenterX, y: tCenterY };
+
         const bottomY = Math.max(...translatedPoints.map(p => p.y));
-        const topY = Math.min(...translatedPoints.map(p => p.y));
-        const leftX = Math.min(...translatedPoints.map(p => p.x));
-        const rightX = Math.max(...translatedPoints.map(p => p.x));
-        
-        const labelY = bottomY + (5 * scale);
+        const labelY = bottomY + (12 * scale);
 
         const wallPathData = `
           M ${p0.x} ${p0.y} L ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y} Z 
@@ -148,27 +219,19 @@ export default function CadFloorElevationRenderer({
               PLANNING AREA
             </text>
 
-            {/* Width Dimension */}
-            <g>
-              <line x1={leftX} y1={topY - 4} x2={leftX} y2={topY - 14} stroke="yellow" strokeWidth="0.5" />
-              <line x1={rightX} y1={topY - 4} x2={rightX} y2={topY - 14} stroke="yellow" strokeWidth="0.5" />
-              <line x1={leftX} y1={topY - 9} x2={rightX} y2={topY - 9} stroke="yellow" strokeWidth="0.8" markerStart="url(#cadArrowOpenRev)" markerEnd="url(#cadArrowOpen)" />
-              <text x={tCenterX} y={topY - 9} fill="yellow" fontSize="11" fontWeight="bold" textAnchor="middle" dominantBaseline="middle" style={{ paintOrder: "stroke", stroke: "#000000", strokeWidth: "4px" }}>
-                {widthFeet}'-0"
-              </text>
-            </g>
+            {renderSideDim(p0, p1, centerPt)} 
+            {renderSideDim(p3, p2, centerPt)} 
+            {renderSideDim(p1, p2, centerPt)} 
+            {renderSideDim(p0, p3, centerPt)} 
 
-            {/* Height Dimension */}
-            <g>
-              <line x1={rightX + 4} y1={topY} x2={rightX + 16} y2={topY} stroke="yellow" strokeWidth="0.5" />
-              <line x1={rightX + 4} y1={bottomY} x2={rightX + 16} y2={bottomY} stroke="yellow" strokeWidth="0.5" />
-              <line x1={rightX + 10} y1={topY} x2={rightX + 10} y2={bottomY} stroke="yellow" strokeWidth="0.8" markerStart="url(#cadArrowOpenRev)" markerEnd="url(#cadArrowOpen)" />
-              <text x={rightX + 10} y={(topY + bottomY) / 2} fill="yellow" fontSize="11" fontWeight="bold" textAnchor="middle" dominantBaseline="middle" transform={`rotate(90, ${rightX + 10}, ${(topY + bottomY) / 2})`} style={{ paintOrder: "stroke", stroke: "#000000", strokeWidth: "4px" }}>
-                {heightFeet}'-0"
-              </text>
-            </g>
-
-            <text x={tCenterX} y={labelY} textAnchor="middle" dominantBaseline="middle" fill="#000000" style={{ fontWeight: "900", fontSize: "7.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#ffffff", strokeWidth: "3px" }}>
+            <text 
+              x={tCenterX} 
+              y={labelY} 
+              textAnchor="middle" 
+              dominantBaseline="middle" 
+              fill="#000000" 
+              style={{ fontWeight: "900", fontSize: "8.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#ffffff", strokeWidth: "3px" }}
+            >
               {getFloorName(index)}
             </text>
           </g>

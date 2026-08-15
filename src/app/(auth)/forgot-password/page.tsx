@@ -4,98 +4,68 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
-import emailjs from '@emailjs/browser';
 
 export default function ForgotPasswordPage() {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   
-  // Recovery States
-  const [identity, setIdentity] = useState(''); // Stores Email or Mobile
-  const [otpSent, setOtpSent] = useState(false);
-  const [otpValue, setOtpValue] = useState('');
-  const [isOtpVerified, setIsOtpVerified] = useState(false);
+  const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     setMounted(true);
+
+    // Supabase ka built-in recovery event listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // [START NEW FEATURE]
-  const handleSendOtp = async (e: React.FormEvent) => {
+  // Step 1: Send Native Reset Email via Supabase
+  const handleSendResetEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identity) return alert('Please enter your registered Email!');
-    
+    if (!email) return alert('Please enter your email!');
+
     setLoading(true);
-    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Save OTP to database
-    const { error: dbError } = await supabase.from('otps').insert([{ email: identity, otp_code: generatedOtp }]);
-
-    if (dbError) {
-      alert("Database error!");
-      setLoading(false);
-      return;
-    }
-
-    // Send email using EmailJS
-    emailjs.send(
-      'service_g8hpevj', 
-      'template_4sqme4r', 
-      { to_email: identity, otp_code: generatedOtp }, 
-      'grxZ-VWExc0FNxr5n'
-    )
-    .then(() => {
-      alert("OTP has been sent to your email!");
-      setOtpSent(true);
-      setLoading(false);
-    })
-    .catch(() => {
-      alert("Failed to send email!");
-      setLoading(false);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/forgot-password`,
     });
-  };
 
-  const handleVerifyOtp = async () => {
-    if (!otpValue) return alert("Please enter the OTP!");
-    setLoading(true);
-
-    const { data, error } = await supabase
-      .from('otps')
-      .select('otp_code')
-      .eq('email', identity)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-
-    // Check if OTP matches
-    if (error || data.otp_code !== otpValue) {
-      alert('Invalid OTP! Please try again.');
-    } else {
-      setIsOtpVerified(true);
-      alert('OTP Verified successfully!');
-    }
     setLoading(false);
+    if (error) {
+      alert(error.message);
+    } else {
+      setMessage('Password reset link has been sent to your email!');
+    }
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
+  // Step 2: Update Password using the established session
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) return alert('Passwords do not match!');
+    if (newPassword.length < 8) return alert('Password must be at least 8 characters long.');
 
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password: newPassword });
 
+    setLoading(false);
     if (error) {
       alert(error.message);
     } else {
-      alert('Password has been updated!');
+      alert('Password updated successfully!');
       router.push('/login');
     }
-    setLoading(false);
   };
-  // [END NEW FEATURE]
 
   if (!mounted) {
     return (
@@ -114,61 +84,39 @@ export default function ForgotPasswordPage() {
           <div className="text-4xl">🔑</div>
           <h2 className="text-2xl font-black text-blue-900 mt-2">PASSWORD RECOVERY</h2>
           <p className="text-xs text-gray-500 font-medium mt-1">
-            Securely recover your account without login
+            Securely recover your account via Supabase
           </p>
         </div>
 
-        {/* Step 1: Send OTP Form */}
-        {!otpSent && !isOtpVerified && (
-          <form onSubmit={handleSendOtp} className="space-y-4">
+        {/* Step 1: Send Reset Link Form */}
+        {!isRecoveryMode ? (
+          <form onSubmit={handleSendResetEmail} className="space-y-4">
             <div>
-              <label className="text-xs font-bold text-gray-700 uppercase block mb-1">Registered Email or Mobile No.</label>
+              <label className="text-xs font-bold text-gray-700 uppercase block mb-1">Registered Email</label>
               <input 
-                type="text" 
+                type="email" 
                 required
-                placeholder="ENTER REGISTERED EMAIL OR MOBILE" 
-                value={identity}
-                onChange={(e) => setIdentity(e.target.value)}
+                placeholder="ENTER YOUR REGISTERED EMAIL" 
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full border p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 text-slate-800"
               />
             </div>
-            <button type="submit" className="w-full bg-blue-900 hover:bg-blue-800 text-white font-bold py-3 rounded-xl transition text-xs tracking-wider uppercase">
-              Send Recovery OTP
+            {message && <p className="text-xs text-green-600 font-semibold text-center">{message}</p>}
+            <button 
+              type="submit" 
+              disabled={loading}
+              className="w-full bg-blue-900 hover:bg-blue-800 text-white font-bold py-3 rounded-xl transition text-xs tracking-wider uppercase"
+            >
+              {loading ? 'SENDING LINK...' : 'Send Recovery Link'}
             </button>
           </form>
-        )}
-
-        {/* Step 2: Verify OTP Input */}
-        {otpSent && !isOtpVerified && (
-          <div className="space-y-4 text-center">
-            <div className="text-left">
-              <label className="text-xs font-bold text-gray-700 uppercase block mb-1">Enter 6-Digit OTP</label>
-              <input 
-                type="text" 
-                maxLength={6}
-                placeholder="000000" 
-                value={otpValue}
-                onChange={(e) => setOtpValue(e.target.value)}
-                className="w-full border p-3 rounded-lg text-center font-bold text-xl tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-700 text-slate-800"
-              />
+        ) : (
+          /* Step 2: Set New Password Form */
+          <form onSubmit={handleUpdatePassword} className="space-y-4">
+            <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 font-medium text-center">
+              Session verified! Please set your new password below.
             </div>
-            <button 
-              type="button" 
-              onClick={handleVerifyOtp} 
-              disabled={loading}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl transition text-xs tracking-wider uppercase"
-            >
-              {loading ? 'VERIFYING...' : 'Verify Code'}
-            </button>
-            <button type="button" onClick={() => setOtpSent(false)} className="text-xs text-blue-700 font-semibold hover:underline">
-              ⬅ Change Email/Mobile
-            </button>
-          </div>
-        )}
-
-        {/* Step 3: Set New Password Form */}
-        {isOtpVerified && (
-          <form onSubmit={handleResetPassword} className="space-y-4">
             <div>
               <label className="text-xs font-bold text-gray-700 uppercase block mb-1">New Password (Min 8 chars)</label>
               <input 
@@ -191,7 +139,11 @@ export default function ForgotPasswordPage() {
                 className="w-full border p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-700 text-slate-800"
               />
             </div>
-            <button type="submit" disabled={loading} className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl transition text-xs tracking-wider uppercase">
+            <button 
+              type="submit" 
+              disabled={loading} 
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl transition text-xs tracking-wider uppercase"
+            >
               {loading ? 'RESETTING...' : 'Save & Update Password'}
             </button>
           </form>

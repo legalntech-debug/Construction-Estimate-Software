@@ -110,6 +110,7 @@ export default function ConstructionPlanInput() {
   const [boundarySouth, setBoundarySouth] = useState("");
   const [boundaryEast, setBoundaryEast] = useState("");
   const [boundaryWest, setBoundaryWest] = useState("");
+  
 
   const plotArea = plotDimensions.A * plotDimensions.C;
 
@@ -502,52 +503,64 @@ export default function ConstructionPlanInput() {
       </div>
 
       <CadModalView
-        isCadModalOpen={isCadModalOpen}
-        setIsCadModalOpen={setIsCadModalOpen}
-        plotShape={plotShape}
-        roadFacingOption={roadFacingOption}
-        cadZoom={cadZoom}
-        setCadZoom={setCadZoom}
-        cadTool={cadTool}
-        setCadCommand={setCadCommand}
-        orthMode={orthMode}
-        setOrthMode={setOrthMode}
-        osnapMode={osnapMode}
-        setOsnapMode={setOsnapMode}
-        undoLastCadAction={() => {}}
-        copySelectedCadObjects={() => {}}
-        rotateSelectedCadObjects={() => {}}
-        deleteSelectedCadObjects={() => {}}
-        cadRotation={cadRotation}
-        setCadRotation={setCadRotation}
-        cadText={cadText}
-        setCadText={setCadText}
-        cadContainerRef={cadContainerRef}
-        handleMouseDown={() => {}}
-        handleCadMouseMove={() => {}}
-        handleMouseUp={() => {}}
-        handleCadCanvasClick={() => {}}
-        handleCadDoubleClick={() => {}}
-        panOffset={panOffset}
-        plotDimensions={plotDimensions}
-        updateDimensionPart={updateDimensionPart}
-        measurementUnit={measurementUnit}
-        plotArea={plotArea}
-        isMultiDimShape={isMultiDimShape}
-        boundaryNorth={boundaryNorth}
-        setBoundaryNorth={setBoundaryNorth}
-        boundarySouth={boundarySouth}
-        setBoundarySouth={setBoundarySouth}
-        boundaryEast={boundaryEast}
-        setBoundaryEast={setBoundaryEast}
-        boundaryWest={boundaryWest}
-        setBoundaryWest={setBoundaryWest}
-        cadObjects={[]}
-        selectedCadObjectIds={[]}
-        toggleCadSelection={() => {}}
-        activeDrawingStart={null}
-        mouseCurrentPoint={null}
-      />
+  isCadModalOpen={isCadModalOpen}
+  setIsCadModalOpen={setIsCadModalOpen}
+  plotShape={plotShape}
+  roadFacingOption={roadFacingOption}
+  cadZoom={cadZoom}
+  setCadZoom={setCadZoom}
+  cadTool={cadTool}
+  setCadCommand={setCadCommand}
+  orthMode={orthMode}
+  setOrthMode={setOrthMode}
+  osnapMode={osnapMode}
+  setOsnapMode={setOsnapMode}
+  undoLastCadAction={() => {}}
+  copySelectedCadObjects={() => {}}
+  rotateSelectedCadObjects={() => {}}
+  deleteSelectedCadObjects={() => {}}
+  cadRotation={cadRotation}
+  setCadRotation={setCadRotation}
+  cadText={cadText}
+  setCadText={setCadText}
+  cadContainerRef={cadContainerRef}
+  handleMouseDown={() => {}}
+  handleCadMouseMove={() => {}}
+  handleMouseUp={() => {}}
+  handleCadCanvasClick={() => {}}
+  handleCadDoubleClick={() => {}}
+  panOffset={panOffset}
+  plotDimensions={plotDimensions}
+  updateDimensionPart={updateDimensionPart}
+  measurementUnit={measurementUnit}
+  plotArea={plotArea}
+  isMultiDimShape={isMultiDimShape}
+  boundaryNorth={boundaryNorth}
+  setBoundaryNorth={setBoundaryNorth}
+  boundarySouth={boundarySouth}
+  setBoundarySouth={setBoundarySouth}
+  boundaryEast={boundaryEast}
+  setBoundaryEast={setBoundaryEast}
+  boundaryWest={boundaryWest}
+  setBoundaryWest={setBoundaryWest}
+  cadObjects={[]}
+  selectedCadObjectIds={[]}
+  toggleCadSelection={() => {}}
+  activeDrawingStart={null}
+  mouseCurrentPoint={null}
+  // Yahan totalFloors pass karein jo selectedFloors ki length ya count bataye:
+  totalFloors={selectedFloors.length}
+  selectedFloors={selectedFloors} //
+  // Yahan setbackInputs ka use karein:
+  frontMos={setbackInputs.front}
+  rearMos={setbackInputs.rear}
+  leftMos={setbackInputs.left}
+  rightMos={setbackInputs.right}
+  setFrontMos={(val) => setSetbackInputs(prev => ({ ...prev, front: val }))}
+  setRearMos={(val) => setSetbackInputs(prev => ({ ...prev, rear: val }))}
+  setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
+  setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
+/>
 
       {/* COMBINED CAD MODAL VIEWER */}
       {isCombinedCadModalOpen && cadBlueprint && (

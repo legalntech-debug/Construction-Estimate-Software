@@ -209,7 +209,7 @@ useEffect(() => {
       </div>
 
       <nav className="flex justify-between items-center p-4 border-b border-gray-200">
-        <h1 className="text-xl font-bold text-blue-900 uppercase">L&T WITH AI 2.0 PORTAL</h1>
+        <h1 className="text-xl font-bold text-blue-900 uppercase">LnT WITH AI 2.0 PORTAL</h1>
         <div className="space-x-4">
           <Link href="/login" className="text-blue-900 font-bold hover:underline">Sign In</Link>
           <Link href="/signup" className="bg-blue-900 text-white px-4 py-2 rounded hover:bg-blue-800">Sign Up</Link>
@@ -226,7 +226,7 @@ useEffect(() => {
             <thead className="bg-blue-900 text-white uppercase text-xs">
               <tr>
                 {/* Column level interactive inline filter fields */}
-                <th className="border p-2 w-[160px]">
+                <th className="border p-2 w-[180px]">
                   <div className="flex flex-col gap-1">
                     <span>Ref No.</span>
                     <input 
@@ -238,7 +238,7 @@ useEffect(() => {
                     />
                   </div>
                 </th>
-                <th className="border p-2 w-[90px]">Date</th>
+                <th className="border p-2 w-[65px]">Date</th>
                 <th className="border p-2 w-[180px]">
                   <div className="flex flex-col gap-1">
                     <span>Customer Name</span>
@@ -251,12 +251,12 @@ useEffect(() => {
                     />
                   </div>
                 </th>
-                <th className="border p-2 w-[220px]">Property Address</th>
-                <th className="border p-2 w-[90px]">Plot Area</th>
-                <th className="border p-2 w-[90px]">Built-up</th>
-                <th className="border p-2 w-[95px]">Rate/Sq.Ft</th>
-                <th className="border p-2 w-[115px]">Amount</th>
-                <th className="border p-2 w-[75px]">Action</th>
+                <th className="border p-2 w-[270px]">Property Address</th>
+                <th className="border p-2 w-[60px]">Plot Area</th>
+                <th className="border p-2 w-[60px]">Built-up</th>
+                <th className="border p-2 w-[70px]">Rate/Sq.Ft</th>
+                <th className="border p-2 w-[90px]">Amount</th>
+                <th className="border p-2 w-[60px]">Action</th>
               </tr>
             </thead>
             <tbody>

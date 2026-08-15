@@ -1,9 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import PlotCadCanvas from "./PlotCadCanvas";
 import PlotPolygonRenderer from "./PlotPolygonRenderer";
 import BoundaryLabels from "./BoundaryLabels";
 import RoadRenderer from "./RoadRenderer";
 import { PlotDimensions, CadObject } from "@/lib/constructionPlan/types";
+import CadFloorElevationRenderer from "./CadFloorElevationRenderer";
+import CadToolbarSection from "./CadToolbarSection";
+import CadSidebarDimensions from "./CadSidebarDimensions";
 
 type CadTool = 
   | "SELECT" | "LINE" | "PLINE" | "RECTANGLE" | "OFFSET" 
@@ -37,6 +40,7 @@ interface CadModalViewProps {
   handleCadCanvasClick: (e: React.MouseEvent<SVGSVGElement>) => void;
   handleCadDoubleClick: () => void;
   panOffset: { x: number; y: number };
+  setPanOffset?: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   plotDimensions: PlotDimensions;
   updateDimensionPart: (side: keyof PlotDimensions, field: "ft" | "in", val: number) => void;
   measurementUnit: "FEET" | "METERS";
@@ -55,6 +59,18 @@ interface CadModalViewProps {
   toggleCadSelection: (id: string) => void;
   activeDrawingStart: { x: number; y: number } | null;
   mouseCurrentPoint: { x: number; y: number } | null;
+  roadWidth?: number;                     
+  setRoadWidth?: (val: number) => void;  
+  frontMos?: number;
+  rearMos?: number;
+  leftMos?: number;
+  rightMos?: number;
+  setFrontMos?: (val: number) => void;
+  setRearMos?: (val: number) => void;
+  setLeftMos?: (val: number) => void;
+  setRightMos?: (val: number) => void;
+  totalFloors?: number;
+  selectedFloors?: string[]; // <--- Yeh add karein
 }
 
 export default function CadModalView({
@@ -85,6 +101,7 @@ export default function CadModalView({
   handleCadCanvasClick,
   handleCadDoubleClick,
   panOffset,
+  setPanOffset,
   plotDimensions,
   updateDimensionPart,
   measurementUnit,
@@ -101,23 +118,178 @@ export default function CadModalView({
   cadObjects,
   selectedCadObjectIds,
   toggleCadSelection,
-  activeDrawingStart,
-  mouseCurrentPoint,
+  roadWidth: propRoadWidth,
+  setRoadWidth: propSetRoadWidth,
+  frontMos = 0,
+  rearMos = 0,
+  leftMos = 0,
+  rightMos = 0,
+  setFrontMos,
+  setRearMos,
+  setLeftMos,
+  setRightMos,
+  totalFloors = 1,
+  selectedFloors = [], // <--- YAHAN ADD KARNA HAI BHAI!
 }: CadModalViewProps) {
+  
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
-  const [isCustomIrregular, setIsCustomIrregular] = useState<boolean>(false);
+  const [mosAngles, setMosAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+  const [sideSlant, setSideSlant] = useState<Record<string, "MID" | "LEFT" | "RIGHT">>({ A: "MID", B: "MID", C: "MID", D: "MID", E: "MID", F: "MID" });
+  const [localRoadWidth, setLocalRoadWidth] = useState<number>(15);
+  const currentRoadWidth = propRoadWidth !== undefined ? propRoadWidth : localRoadWidth;
+  
+  const [editModeToggle, setEditModeToggle] = useState<"PLOT" | "MOS">("PLOT");
+  
+  const [sideMos, setSideMos] = useState<Record<string, number>>({ 
+    A: frontMos || 0, 
+    B: rearMos || 0, 
+    C: leftMos || 0, 
+    D: rightMos || 0, 
+    E: 0, 
+    F: 0 
+  });
+
+  useEffect(() => {
+    setSideMos({
+      A: frontMos || 0,
+      B: rearMos || 0,
+      C: leftMos || 0,
+      D: rightMos || 0,
+      E: 0,
+      F: 0,
+    });
+  }, [frontMos, rearMos, leftMos, rightMos]);
+
+  const handleMosChange = (side: string, val: number) => {
+    setSideMos((prev) => ({ ...prev, [side]: val }));
+    if (side === "A" && setFrontMos) setFrontMos(val);
+    if (side === "B" && setRearMos) setRearMos(val);
+    if (side === "C" && setLeftMos) setLeftMos(val);
+    if (side === "D" && setRightMos) setRightMos(val);
+  };
+  
+  const handleRoadWidthChange = (val: number) => {
+    if (propSetRoadWidth && typeof propSetRoadWidth === "function") {
+      propSetRoadWidth(val);
+    } else {
+      setLocalRoadWidth(val);
+    }
+  };
 
   if (!isCadModalOpen) return null;
 
   const currentZoom = cadZoom && cadZoom > 0.1 ? cadZoom : 1.2;
+  const isSimpleRect = (plotShape === "RECTANGLE" || plotShape === "SQUARE") && !isMultiDimShape;
+
+  let dimA = Number(plotDimensions?.A) || 30;
+  let dimB = isSimpleRect ? dimA : (Number(plotDimensions?.B) || dimA);
+  let dimC = Number(plotDimensions?.C) || 40;
+  let dimD = isSimpleRect ? dimC : (Number(plotDimensions?.D) || dimC);
+
+  const scale = 5.5; 
+  const bottomWidth = dimA * scale;
+  const topWidth = dimB * scale;
+  const heightLeft = dimC * scale;
+  const heightRight = dimD * scale;
+
+  let diffWidth = topWidth - bottomWidth;
+  let shiftXLeft = 0;
+  let shiftXRight = 0;
+
+  const slantB = sideSlant.B || "MID";
+  if (slantB === "LEFT") {
+    shiftXLeft = -diffWidth;
+    shiftXRight = 0;
+  } else if (slantB === "RIGHT") {
+    shiftXLeft = 0;
+    shiftXRight = diffWidth;
+  } else {
+    shiftXLeft = -diffWidth / 2;
+    shiftXRight = diffWidth / 2;
+  }
+
+  let pBottomLeft = { x: -bottomWidth / 2, y: heightLeft / 2 };
+  let pBottomRight = { x: bottomWidth / 2, y: heightLeft / 2 };
+  let pTopLeft = { x: -bottomWidth / 2 + shiftXLeft, y: -heightLeft / 2 };
+  let pTopRight = { x: bottomWidth / 2 + shiftXRight, y: -heightRight / 2 };
+
+  const angleA = isSimpleRect ? 0 : ((sideAngles.A || 0) * Math.PI) / 180;
+  const angleB = isSimpleRect ? 0 : ((sideAngles.B || 0) * Math.PI) / 180;
+  const angleC = isSimpleRect ? 0 : ((sideAngles.C || 0) * Math.PI) / 180;
+  const angleD = isSimpleRect ? 0 : ((sideAngles.D || 0) * Math.PI) / 180;
+
+  if (angleA !== 0) {
+    const dx = pBottomRight.x - pBottomLeft.x;
+    const dy = pBottomRight.y - pBottomLeft.y;
+    const cos = Math.cos(angleA);
+    const sin = Math.sin(angleA);
+    pBottomRight = {
+      x: pBottomLeft.x + (dx * cos - dy * sin),
+      y: pBottomLeft.y + (dx * sin + dy * cos),
+    };
+  }
+
+  if (angleB !== 0) {
+    const dx = pTopRight.x - pTopLeft.x;
+    const dy = pTopRight.y - pTopLeft.y;
+    const cos = Math.cos(angleB);
+    const sin = Math.sin(angleB);
+    pTopRight = {
+      x: pTopLeft.x + (dx * cos - dy * sin),
+      y: pTopLeft.y + (dx * sin + dy * cos),
+    };
+  }
+
+  if (angleC !== 0) {
+    const cos = Math.cos(angleC);
+    const sin = Math.sin(angleC);
+    const dx = pTopLeft.x - pBottomLeft.x;
+    const dy = pTopLeft.y - pBottomLeft.y;
+    pTopLeft = {
+      x: pBottomLeft.x + (dx * cos - dy * sin),
+      y: pBottomLeft.y + (dx * sin + dy * cos),
+    };
+  }
+
+  if (angleD !== 0) {
+    const cos = Math.cos(angleD);
+    const sin = Math.sin(angleD);
+    const dx = pTopRight.x - pBottomRight.x;
+    const dy = pTopRight.y - pBottomRight.y;
+    pTopRight = {
+      x: pBottomRight.x + (dx * cos - dy * sin),
+      y: pBottomRight.y + (dx * sin + dy * cos),
+    };
+  }
+
+  const actualLenA = Math.hypot(pBottomRight.x - pBottomLeft.x, pBottomRight.y - pBottomLeft.y) / scale;
+  const actualLenB = Math.hypot(pTopRight.x - pTopLeft.x, pTopRight.y - pTopLeft.y) / scale;
+  const actualLenC = Math.hypot(pTopLeft.x - pBottomLeft.x, pTopLeft.y - pBottomLeft.y) / scale;
+  const actualLenD = Math.hypot(pTopRight.x - pBottomRight.x, pTopRight.y - pBottomRight.y) / scale;
+
+  const polyPoints = [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
+  let calculatedArea = 0;
+  for (let i = 0; i < polyPoints.length; i++) {
+    const j = (i + 1) % polyPoints.length;
+    calculatedArea += (polyPoints[i].x / scale) * (polyPoints[j].y / scale);
+    calculatedArea -= (polyPoints[j].x / scale) * (polyPoints[i].y / scale);
+  }
+  calculatedArea = Math.abs(calculatedArea) / 2;
+
+  const displayShapeName = isMultiDimShape ? "IRREGULAR / CUSTOM SHAPE" : (plotShape || "RECTANGLE");
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 p-2 flex flex-col uppercase font-sans">
       <div className="bg-white w-full h-full border-2 border-black flex flex-col relative overflow-hidden">
         {/* Top Header Bar */}
         <div className="bg-slate-950 text-white p-2 flex items-center justify-between">
-          <div className="font-black text-xs">
-            CONSTRUCTION CAD — {isCustomIrregular ? "IRREGULAR / CUSTOM SHAPE" : (plotShape || "RECTANGLE")} | ROAD: {roadFacingOption || "NOT SPECIFIED"}
+          <div className="flex items-center gap-2">
+            <span className="bg-yellow-400 text-black px-1.5 py-0.5 text-[10px] font-black rounded-sm">
+              SHAPE: {displayShapeName}
+            </span>
+            <div className="font-black text-xs">
+              CONSTRUCTION CAD | ROAD: {roadFacingOption || "NOT SPECIFIED"}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-white text-black px-2 py-0.5 text-[10px] font-black border border-black">
@@ -130,36 +302,51 @@ export default function CadModalView({
           </div>
         </div>
 
-        {/* CAD Toolbar */}
-        <div className="border-b border-black bg-gray-100 p-2 flex gap-1 flex-wrap items-center">
-          {(["SELECT", "LINE", "PLINE", "RECTANGLE", "OFFSET", "MOVE", "COPY", "ROTATE", "DELETE", "DIMENSION", "TEXT", "HATCH"] as CadTool[]).map((tool) => (
-            <button
-              key={tool}
-              type="button"
-              onClick={() => setCadCommand(tool)}
-              className={`px-2 py-1 border border-black text-[9px] font-black cursor-pointer ${cadTool === tool ? "bg-blue-700 text-white" : "bg-white"}`}
-            >
-              {tool}
-            </button>
-          ))}
-          <button type="button" onClick={() => setOrthMode((v) => !v)} className={`px-2 py-1 border border-black text-[9px] font-black cursor-pointer ${orthMode ? "bg-green-600 text-white" : "bg-white"}`}>ORTHO</button>
-          <button type="button" onClick={() => setOsnapMode((v) => !v)} className={`px-2 py-1 border border-black text-[9px] font-black cursor-pointer ${osnapMode ? "bg-green-600 text-white" : "bg-white"}`}>OSNAP</button>
-          <button type="button" onClick={undoLastCadAction} className="px-2 py-1 border border-black text-[9px] font-black bg-yellow-200 cursor-pointer">UNDO</button>
-          <button type="button" onClick={copySelectedCadObjects} className="px-2 py-1 border border-black text-[9px] font-black bg-white cursor-pointer">COPY</button>
-          <button type="button" onClick={() => rotateSelectedCadObjects(cadRotation)} className="px-2 py-1 border border-black text-[9px] font-black bg-white cursor-pointer">ROTATE</button>
-          <button type="button" onClick={deleteSelectedCadObjects} className="px-2 py-1 border border-black text-[9px] font-black bg-red-100 cursor-pointer">DELETE</button>
-          <input type="number" value={cadRotation} onChange={(e) => setCadRotation(Number(e.target.value) || 0)} className="w-16 border border-black p-1 text-[9px] text-center" title="Rotation" />
-          <input value={cadText} onChange={(e) => setCadText(e.target.value)} placeholder="TEXT" className="w-32 border border-black p-1 text-[9px]" />
-        </div>
+        {/* CAD Toolbar Component */}
+        <CadToolbarSection
+          cadTool={cadTool}
+          setCadCommand={setCadCommand}
+          orthMode={orthMode}
+          setOrthMode={setOrthMode}
+          osnapMode={osnapMode}
+          setOsnapMode={setOsnapMode}
+          undoLastCadAction={undoLastCadAction}
+          copySelectedCadObjects={copySelectedCadObjects}
+          rotateSelectedCadObjects={rotateSelectedCadObjects}
+          deleteSelectedCadObjects={deleteSelectedCadObjects}
+          cadRotation={cadRotation}
+          setCadRotation={setCadRotation}
+          cadText={cadText}
+          setCadText={setCadText}
+        />
 
         {/* CAD Canvas Area with Right Sidebar */}
         <div className="flex-1 grid grid-cols-12 overflow-hidden relative">
           <div 
             className="col-span-9 h-full relative overflow-hidden bg-white"
             onWheel={(e) => {
-              // Mouse wheel delta se zoom calculate karein
-              const delta = e.deltaY < 0 ? 0.1 : -0.1;
-              setCadZoom((prev) => Math.min(3, Math.max(0.2, (prev || 1) + delta)));
+              e.preventDefault();
+              const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+              const newZoom = Math.min(3, Math.max(0.2, (cadZoom || 1) * zoomFactor));
+
+              if (setPanOffset) {
+                setPanOffset((prev: { x: number; y: number }) => {
+                  const p = prev || { x: 0, y: 0 };
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const centerX = rect.width / 2;
+                  const centerY = rect.height / 2;
+                  const mouseX = e.clientX - rect.left;
+                  const mouseY = e.clientY - rect.top;
+
+                  const scaleRatio = newZoom / (cadZoom || 1);
+                  return {
+                    x: p.x + (mouseX - centerX) * (1 - 1 / scaleRatio),
+                    y: p.y + (mouseY - centerY) * (1 - 1 / scaleRatio),
+                  };
+                });
+              }
+
+              setCadZoom(newZoom);
             }}
           >
             <PlotCadCanvas
@@ -173,48 +360,32 @@ export default function CadModalView({
             >
               {/* North Badge Direction */}
               {(() => {
-                const opt = (roadFacingOption || "").toUpperCase();
-                let northText = "↑ NORTH";
+                let northText = "NORTH";
                 let badgePos = "top-2 left-2";
+                const opt = (roadFacingOption || "").toUpperCase();
                 
                 if (opt.includes("EAST")) {
-                  northText = "← NORTH (WEST)";
+                  northText = "NORTH (WEST)";
                 } else if (opt.includes("WEST")) {
-                  northText = "→ NORTH (EAST)";
+                  northText = "NORTH (EAST)";
                   badgePos = "top-2 right-2";
                 } else if (opt.includes("NORTH")) {
-                  northText = "↓ NORTH (REAR / SOUTH)";
+                  northText = "NORTH (SOUTH)";
                   badgePos = "bottom-2 left-2";
                 } else {
-                  northText = "↑ NORTH (FRONT)";
+                  northText = "NORTH";
                   badgePos = "top-2 left-2";
                 }
 
-return (
-  <div className={`absolute ${badgePos} z-10 bg-yellow-300 border border-black px-2 py-1 text-[10px] font-black flex items-center gap-1 shadow-md pointer-events-none`}>
-    <span>{northText}</span>
-  </div>
-);
+                return (
+                  <div className={`absolute ${badgePos} z-10 bg-yellow-300 border border-black px-1.5 py-0.5 text-[8px] font-black flex items-center gap-1 shadow-sm pointer-events-none`}>
+                    <span>{northText}</span>
+                  </div>
+                );
               })()}
 
-              {/* Master Group Render with Safe Fallback Dimensions */}
+              {/* Master Group Render */}
               {(() => {
-                let dimA = Number(plotDimensions?.A) || 30;
-                let dimB = (!isCustomIrregular && (plotShape === "RECTANGLE" || plotShape === "SQUARE")) ? dimA : (Number(plotDimensions?.B) || dimA);
-                let dimC = Number(plotDimensions?.C) || 40;
-                let dimD = (!isCustomIrregular && (plotShape === "RECTANGLE" || plotShape === "SQUARE")) ? dimC : (Number(plotDimensions?.D) || dimC);
-
-                const scale = 5.5; 
-                const bottomWidth = dimA * scale;
-                const topWidth = dimB * scale;
-                const heightLeft = dimC * scale;
-                const heightRight = dimD * scale;
-
-                const pBottomLeft = { x: -bottomWidth / 2, y: heightLeft / 2 };
-                const pBottomRight = { x: bottomWidth / 2, y: heightLeft / 2 };
-                const pTopLeft = { x: -topWidth / 2, y: -heightLeft / 2 };
-                const pTopRight = { x: topWidth / 2, y: -heightRight / 2 };
-
                 const correctedPoints = [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
                 const xs = correctedPoints.map(p => p.x);
                 const ys = correctedPoints.map(p => p.y);
@@ -225,26 +396,247 @@ return (
                 const centerX = (minX + maxX) / 2;
                 const centerY = (minY + maxY) / 2;
 
-                const effectiveRotation = cadRotation + (sideAngles.A || 0);
+                const mosFront = (sideMos.A || 0) * scale;
+                const mosBack = (sideMos.B || 0) * scale;
+                const mosLeft = (sideMos.C || 0) * scale;
+                const mosRight = (sideMos.D || 0) * scale;
+
+                const mosAVal = Number(sideMos.A) || 0;
+                const mosBVal = Number(sideMos.B) || 0;
+                const mosCVal = Number(sideMos.C) || 0;
+                const mosDVal = Number(sideMos.D) || 0;
+
+                const isFullPlot = (mosAVal === 0 && mosBVal === 0 && mosCVal === 0 && mosDVal === 0);
+
+                let bTopLeft = { x: pTopLeft.x + mosLeft + 1, y: pTopLeft.y + mosBack + 1 };
+                let bTopRight = { x: pTopRight.x - mosRight - 1, y: pTopRight.y + mosBack + 1 };
+                let bBottomRight = { x: pBottomRight.x - mosRight - 1, y: pBottomRight.y - mosFront - 1 };
+                let bBottomLeft = { x: pBottomLeft.x + mosLeft + 1, y: pBottomLeft.y - mosFront - 1 };
+
+                const mAngleA = isSimpleRect ? 0 : ((mosAngles.A || 0) * Math.PI) / 180;
+                const mAngleB = isSimpleRect ? 0 : ((mosAngles.B || 0) * Math.PI) / 180;
+                const mAngleC = isSimpleRect ? 0 : ((mosAngles.C || 0) * Math.PI) / 180;
+                const mAngleD = isSimpleRect ? 0 : ((mosAngles.D || 0) * Math.PI) / 180;
+
+                if (mAngleA !== 0) {
+                  const dx = bBottomRight.x - bBottomLeft.x;
+                  const dy = bBottomRight.y - bBottomLeft.y;
+                  const cos = Math.cos(mAngleA);
+                  const sin = Math.sin(mAngleA);
+                  bBottomRight = {
+                    x: bBottomLeft.x + (dx * cos - dy * sin),
+                    y: bBottomLeft.y + (dx * sin + dy * cos),
+                  };
+                }
+                if (mAngleB !== 0) {
+                  const dx = bTopRight.x - bTopLeft.x;
+                  const dy = bTopRight.y - bTopLeft.y;
+                  const cos = Math.cos(mAngleB);
+                  const sin = Math.sin(mAngleB);
+                  bTopRight = {
+                    x: bTopLeft.x + (dx * cos - dy * sin),
+                    y: bTopLeft.y + (dx * sin + dy * cos),
+                  };
+                }
+                if (mAngleC !== 0) {
+                  const cos = Math.cos(mAngleC);
+                  const sin = Math.sin(mAngleC);
+                  const dx = bTopLeft.x - bBottomLeft.x;
+                  const dy = bTopLeft.y - bBottomLeft.y;
+                  bTopLeft = {
+                    x: bBottomLeft.x + (dx * cos - dy * sin),
+                    y: bBottomLeft.y + (dx * sin + dy * cos),
+                  };
+                }
+                if (mAngleD !== 0) {
+                  const cos = Math.cos(mAngleD);
+                  const sin = Math.sin(mAngleD);
+                  const dx = bTopRight.x - bBottomRight.x;
+                  const dy = bTopRight.y - bBottomRight.y;
+                  bTopRight = {
+                    x: bBottomRight.x + (dx * cos - dy * sin),
+                    y: bBottomRight.y + (dx * sin + dy * cos),
+                  };
+                }
+
+                const builtUpPoints = isFullPlot ? correctedPoints : [bTopLeft, bTopRight, bBottomRight, bBottomLeft];
+
+                const builtUpCenterX = (builtUpPoints.reduce((sum, p) => sum + p.x, 0)) / builtUpPoints.length;
+                const builtUpCenterY = (builtUpPoints.reduce((sum, p) => sum + p.y, 0)) / builtUpPoints.length;
+                const builtUpWidth = Math.abs(bTopRight.x - bTopLeft.x);
+
+                const roadPx = (currentRoadWidth || 15) * scale;
+                const baseRoadDefaultPx = 15 * scale; 
+                const extraRoadGrowth = Math.max(0, roadPx - baseRoadDefaultPx);
+                const verticalShift = -extraRoadGrowth * 1.0;
+
+                const hatchLines = [];
+                const step = 8;
+                const bX = builtUpPoints.map(p => p.x);
+                const bY = builtUpPoints.map(p => p.y);
+                const minBX = Math.min(...bX);
+                const maxBX = Math.max(...bX);
+                const minBY = Math.min(...bY);
+                const maxBY = Math.max(...bY);
+
+                for (let d = minBX - (maxBY - minBY); d < maxBX + (maxBY - minBY); d += step) {
+                  const x1 = d;
+                  const y1 = minBY;
+                  const x2 = d + (maxBY - minBY);
+                  const y2 = maxBY;
+                  hatchLines.push({ x1, y1, x2, y2 });
+                }
 
                 return (
-                  <g transform={`translate(380, 120) scale(${currentZoom}) rotate(${effectiveRotation}) translate(${panOffset?.x || 0}, ${panOffset?.y || 0})`}>
-                    <PlotPolygonRenderer
-                      plotPolygon={correctedPoints}
-                      proposedSitePolygon={correctedPoints}
-                      cadZoom={currentZoom}
-                      isSelected={false}
-                      handlePolygonClick={() => {}}
-                    />
+                 // Inside CadModalView.tsx, within your master SVG group:
+
+<g transform={`translate(380, ${150 + verticalShift}) translate(${panOffset?.x || 0}, ${panOffset?.y || 0}) scale(${currentZoom})`}>
+  <PlotPolygonRenderer
+    plotPolygon={correctedPoints}
+    proposedSitePolygon={[]}
+    cadZoom={currentZoom}
+    isSelected={false}
+    handlePolygonClick={() => {}}
+  />
+
+ {/* RENDER SELECTED FLOORS ELEVATION SIDE-BY-SIDE / OFFSET */}
+  <CadFloorElevationRenderer
+    totalFloors={totalFloors}
+    builtUpPoints={builtUpPoints}
+    scale={scale}
+    selectedFloors={selectedFloors}
+  />
+
+  {/* Existing Hatches, MOS, Boundaries & Road Renderers... */}
+
+                    <g>
+                      <defs>
+                        <clipPath id="builtUpClip">
+                          <polygon points={builtUpPoints.map(p => `${p.x},${p.y}`).join(" ")} />
+                        </clipPath>
+                      </defs>
+
+                      <polygon
+                        points={builtUpPoints.map(p => `${p.x},${p.y}`).join(" ")}
+                        fill="none"
+                        stroke={isFullPlot ? "transparent" : "red"}
+                        strokeWidth="1.5"
+                        strokeDasharray="4 2"
+                      />
+
+                      <g clipPath="url(#builtUpClip)">
+                        {hatchLines.map((line, idx) => (
+                          <line
+                            key={idx}
+                            x1={line.x1}
+                            y1={line.y1}
+                            x2={line.x2}
+                            y2={line.y2}
+                            stroke="#666666"
+                            strokeWidth="0.5"
+                            opacity="0.6"
+                          />
+                        ))}
+                      </g>
+
+                      {!isFullPlot && (
+                        <>
+                          {mosBVal > 0 && (() => {
+                            const dimX = pTopLeft.x - 5.5; 
+                            const midY = (pTopLeft.y + bTopLeft.y) / 2;
+                            const labelText = `${mosBVal}'`;
+                            const mosTextCenterX = (bTopLeft.x + bTopRight.x) / 2;
+                            const mosTextCenterY = (pTopLeft.y + bTopLeft.y) / 2;
+                            return (
+                              <g>
+                                <line x1={dimX} y1={pTopLeft.y} x2={dimX} y2={bTopLeft.y} stroke="red" strokeWidth="1" />
+                                <polygon points={`${dimX},${pTopLeft.y} ${dimX - 3},${pTopLeft.y + 6} ${dimX + 3},${pTopLeft.y + 6}`} fill="red" />
+                                <polygon points={`${dimX},${bTopLeft.y} ${dimX - 3},${bTopLeft.y - 6} ${dimX + 3},${bTopLeft.y - 6}`} fill="red" />
+                                <text x={dimX - 10} y={midY} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
+                                  {labelText}
+                                </text>
+                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+                                  REAR MOS
+                                </text>
+                              </g>
+                            );
+                          })()}
+
+                          {mosAVal > 0 && (() => {
+                            const dimX = pBottomLeft.x - 5.5; 
+                            const midY = (pBottomLeft.y + bBottomLeft.y) / 2;
+                            const labelText = `${mosAVal}'`;
+                            const mosTextCenterX = (bBottomLeft.x + bBottomRight.x) / 2;
+                            const mosTextCenterY = (pBottomLeft.y + bBottomLeft.y) / 2;
+                            return (
+                              <g>
+                                <line x1={dimX} y1={pBottomLeft.y} x2={dimX} y2={bBottomLeft.y} stroke="red" strokeWidth="1" />
+                                <polygon points={`${dimX},${pBottomLeft.y} ${dimX - 3},${pBottomLeft.y - 6} ${dimX + 3},${pBottomLeft.y - 6}`} fill="red" />
+                                <polygon points={`${dimX},${bBottomLeft.y} ${dimX - 3},${bBottomLeft.y + 6} ${dimX + 3},${bBottomLeft.y + 6}`} fill="red" />
+                                <text x={dimX - 10} y={midY} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
+                                  {labelText}
+                                </text>
+                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+                                  FRONT MOS
+                                </text>
+                              </g>
+                            );
+                          })()}
+
+                          {mosCVal > 0 && (() => {
+                            const dimY = pTopLeft.y - 5.5; 
+                            const midX = (pTopLeft.x + bTopLeft.x) / 2;
+                            const labelText = `${mosCVal}'`;
+                            const mosTextCenterX = (pTopLeft.x + bTopLeft.x) / 2;
+                            const mosTextCenterY = (bTopLeft.y + bBottomLeft.y) / 2;
+                            return (
+                              <g>
+                                <line x1={pTopLeft.x} y1={dimY} x2={bTopLeft.x} y2={dimY} stroke="red" strokeWidth="1" />
+                                <polygon points={`${pTopLeft.x},${dimY} ${pTopLeft.x + 6},${dimY - 3} ${pTopLeft.x + 6},${dimY + 3}`} fill="red" />
+                                <polygon points={`${bTopLeft.x},${dimY} ${bTopLeft.x - 6},${dimY - 3} ${bTopLeft.x - 6},${dimY + 3}`} fill="red" />
+                                <text x={midX} y={dimY - 8} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+                                  {labelText}
+                                </text>
+                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
+                                  LEFT MOS
+                                </text>
+                              </g>
+                            );
+                          })()}
+
+                          {mosDVal > 0 && (() => {
+                            const dimY = pTopRight.y - 5.5; 
+                            const midX = (pTopRight.x + bTopRight.x) / 2;
+                            const labelText = `${mosDVal}'`;
+                            const mosTextCenterX = (pTopRight.x + bTopRight.x) / 2;
+                            const mosTextCenterY = (bTopRight.y + bBottomRight.y) / 2;
+                            return (
+                              <g>
+                                <line x1={pTopRight.x} y1={dimY} x2={bTopRight.x} y2={dimY} stroke="red" strokeWidth="1" />
+                                <polygon points={`${pTopRight.x},${dimY} ${pTopRight.x + 6},${dimY - 3} ${pTopRight.x + 6},${dimY + 3}`} fill="red" />
+                                <polygon points={`${bTopRight.x},${dimY} ${bTopRight.x - 6},${dimY - 3} ${bTopRight.x - 6},${dimY + 3}`} fill="red" />
+                                <text x={midX} y={dimY - 8} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+                                  {labelText}
+                                </text>
+                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
+                                  RIGHT MOS
+                                </text>
+                              </g>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </g>
+
                     <BoundaryLabels
                       topBoundary={boundaryNorth}
                       bottomBoundary={boundarySouth}
                       leftBoundary={boundaryWest}
                       rightBoundary={boundaryEast}
-                      dimA={dimA}
-                      dimB={dimB}
-                      dimC={dimC}
-                      dimD={dimD}
+                      dimA={isSimpleRect ? dimA : Number(actualLenA.toFixed(1))}
+                      dimB={isSimpleRect ? dimA : Number(actualLenB.toFixed(1))}
+                      dimC={isSimpleRect ? dimC : Number(actualLenC.toFixed(1))}
+                      dimD={isSimpleRect ? dimC : Number(actualLenD.toFixed(1))}
                       pTopLeft={pTopLeft}
                       pTopRight={pTopRight}
                       pBottomLeft={pBottomLeft}
@@ -254,6 +646,7 @@ return (
                       minX={minX}
                       maxX={maxX}
                       roadFacingOption={roadFacingOption}
+                      roadWidth={currentRoadWidth}
                     />
                     <RoadRenderer
                       roadFacingOption={roadFacingOption}
@@ -265,20 +658,33 @@ return (
                       pTopRight={pTopRight}
                       pBottomLeft={pBottomLeft}
                       pBottomRight={pBottomRight}
+                      roadWidth={currentRoadWidth}
                     />
 
-                    {/* Proposed Site Label */}
-                    <g transform={`translate(${centerX}, ${centerY})`}>
-                      <rect x="-65" y="-16" width="130" height="32" fill="#121212" stroke="#ffffff" strokeWidth="1.5" />
-                      <text x="0" y="5" textAnchor="middle" fill="#ffffff" style={{ fontWeight: "900", fontSize: "13px", fontFamily: "sans-serif" }}>
-                        PROPOSED SITE
-                      </text>
-                    </g>
+                    {(() => {
+                      const isNarrowBuiltUp = builtUpWidth < 80;
+                      const textRotation = isNarrowBuiltUp ? -90 : 0;
+
+                      return (
+                        <g transform={`translate(${builtUpCenterX}, ${builtUpCenterY})`}>
+                          <text 
+                            x="0" 
+                            y="1" 
+                            textAnchor="middle" 
+                            dominantBaseline="middle"
+                            fill="#ffffff" 
+                            transform={`rotate(${textRotation})`}
+                            style={{ fontWeight: "900", fontSize: "7.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#000000", strokeWidth: "3px" }}
+                          >
+                            PROPOSED SITE
+                          </text>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })()}
 
-              {/* Render User CAD Objects */}
               {cadObjects?.map((obj) => {
                 const isSelected = selectedCadObjectIds?.includes(obj.id);
                 const strokeColor = isSelected ? "red" : "black";
@@ -334,92 +740,42 @@ return (
             </PlotCadCanvas>
           </div>
 
-          {/* Right Sidebar: Edit Plot Dimensions & Boundaries */}
-          <div className="col-span-3 border-l border-black bg-gray-100 p-2.5 overflow-y-auto flex flex-col space-y-2">
-            <div className="font-black text-xs mb-1">EDIT PLOT DIMENSIONS</div>
-
-            {/* Side Rows with Equal Columns for Dimension & Angle */}
-            {["A", "B", "C", "D", ...(isMultiDimShape ? ["E", "F"] : [])].map((side) => (
-              <div key={side} className="border border-black bg-white p-1.5 flex flex-col gap-1 shadow-sm">
-                <span className="font-black text-[10px]">SIDE {side}:</span>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div className="flex items-center gap-1 bg-gray-50 border border-black px-1 py-0.5">
-                    <input
-                      type="number"
-                      value={plotDimensions?.[side as keyof PlotDimensions] || 0}
-                      onChange={(e) => {
-                        setIsCustomIrregular(true);
-                        updateDimensionPart(side as any, "ft", Number(e.target.value));
-                      }}
-                      className="w-full bg-transparent text-center font-black text-[11px] text-black outline-none"
-                    />
-                    <span className="text-[9px] font-bold text-gray-600">{measurementUnit === "FEET" ? "FT" : "M"}</span>
-                  </div>
-
-                  <div className="flex items-center gap-1 bg-gray-50 border border-black px-1 py-0.5">
-                    <input
-                      type="number"
-                      value={sideAngles[side] || 0}
-                      onChange={(e) => {
-                        setIsCustomIrregular(true);
-                        const val = Number(e.target.value) || 0;
-                        setSideAngles((prev) => ({ ...prev, [side]: val }));
-                      }}
-                      className="w-full bg-transparent text-center font-black text-[11px] text-black outline-none"
-                    />
-                    <span className="text-[9px] font-bold text-gray-600">°</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            <div className="border border-black bg-yellow-100 p-1.5 font-black text-center text-xs mt-1">
-              AREA: {plotArea ? plotArea.toFixed(2) : "0.00"} SQ.{measurementUnit === "FEET" ? "FEET" : "METERS"}
-            </div>
-
-            {/* BOUNDARIES REFERENCE SECTION */}
-            <div className="border-t-2 border-black pt-2 mt-2">
-              <div className="font-black text-xs mb-1.5">PLOT BOUNDARIES</div>
-              <div className="border border-black bg-white p-2 flex flex-col gap-1.5 shadow-sm text-[11px]">
-                <div>
-                  <span className="font-bold text-[10px] block">NORTH:</span>
-                  <input
-                    type="text"
-                    value={boundaryNorth || ""}
-                    onChange={(e) => setBoundaryNorth(e.target.value)}
-                    className="w-full border border-black p-1 text-xs font-bold bg-white text-black mt-0.5 box-border"
-                  />
-                </div>
-                <div>
-                  <span className="font-bold text-[10px] block">SOUTH:</span>
-                  <input
-                    type="text"
-                    value={boundarySouth || ""}
-                    onChange={(e) => setBoundarySouth(e.target.value)}
-                    className="w-full border border-black p-1 text-xs font-bold bg-white text-black mt-0.5 box-border"
-                  />
-                </div>
-                <div>
-                  <span className="font-bold text-[10px] block">EAST:</span>
-                  <input
-                    type="text"
-                    value={boundaryEast || ""}
-                    onChange={(e) => setBoundaryEast(e.target.value)}
-                    className="w-full border border-black p-1 text-xs font-bold bg-white text-black mt-0.5 box-border"
-                  />
-                </div>
-                <div>
-                  <span className="font-bold text-[10px] block">WEST:</span>
-                  <input
-                    type="text"
-                    value={boundaryWest || ""}
-                    onChange={(e) => setBoundaryWest(e.target.value)}
-                    className="w-full border border-black p-1 text-xs font-bold bg-white text-black mt-0.5 box-border"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          {/* Right Sidebar Dimensions Component */}
+          <CadSidebarDimensions
+            editModeToggle={editModeToggle}
+            setEditModeToggle={setEditModeToggle}
+            isSimpleRect={isSimpleRect}
+            isMultiDimShape={isMultiDimShape}
+            plotDimensions={plotDimensions}
+            updateDimensionPart={updateDimensionPart}
+            sideAngles={sideAngles}
+            setSideAngles={setSideAngles}
+            mosAngles={mosAngles}
+            setMosAngles={setMosAngles}
+            sideSlant={sideSlant}
+            setSideSlant={setSideSlant}
+            sideMos={sideMos}
+            handleMosChange={handleMosChange}
+            actualLenA={actualLenA}
+            actualLenB={actualLenB}
+            actualLenC={actualLenC}
+            actualLenD={actualLenD}
+            dimA={dimA}
+            dimC={dimC}
+            calculatedArea={calculatedArea}
+            plotArea={plotArea}
+            measurementUnit={measurementUnit}
+            boundaryNorth={boundaryNorth}
+            setBoundaryNorth={setBoundaryNorth}
+            boundarySouth={boundarySouth}
+            setBoundarySouth={setBoundarySouth}
+            boundaryEast={boundaryEast}
+            setBoundaryEast={setBoundaryEast}
+            boundaryWest={boundaryWest}
+            setBoundaryWest={setBoundaryWest}
+            currentRoadWidth={currentRoadWidth}
+            handleRoadWidthChange={handleRoadWidthChange}
+          />
         </div>
       </div>
     </div>

@@ -446,6 +446,7 @@ const handleSaveAndFinalize = async (paymentData?: any) => {
         .from("estimates")
         .select("id")
         .eq("ref_no", activeRefNo)
+        .eq("user_id", userId)
         .maybeSingle();
       
       if (foundRec) {
@@ -458,6 +459,7 @@ const handleSaveAndFinalize = async (paymentData?: any) => {
       const { data: duplicate } = await supabase
         .from("estimates")
         .select("id, ref_no")
+        .eq("user_id", userId)
         .eq("customer_name", estimate?.customer_name)
         .eq("property_address", estimate?.property_address)
         .maybeSingle();
@@ -1456,6 +1458,8 @@ return (
         ...
       }
     `}</style>
+
+    
     {/* ... baki content ... */}
     {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (!estimate?.id || estimate?.id === "temp-id" || !estimate?.ref_no)) && (
       <div className="draft-watermark no-print">DRAFT</div>
@@ -1790,37 +1794,76 @@ return (
 </table>
 {/* [END NEW FEATURE] */}
 
-{/* Dynamic Payment & Print Logic */}
-<div className="flex flex-wrap items-center justify-start gap-6 mt-8 mb-12 no-print border-t border-slate-200 pt-6">
+{/* --- E-COMMERCE STYLE LAUNCH OFFER BANNER & DYNAMIC BUTTONS --- */}
+<div className="mt-8 mb-12 no-print border-t border-slate-300 pt-6">
   
-  {/* ✅ FIXED CONDITION: Agar Paid hai, Already Paid hai, ya Admin hai toh Print button dikhega */}
-  {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
-    <button
-      onClick={handleSaveAndPrint}
-      disabled={isSaving}
-      className="bg-blue-600 text-white px-8 py-3 rounded shadow-md hover:bg-blue-700 transition font-bold"
-    >
-      {isSaving ? "SAVING..." : "PRINT ESTIMATE"}
-    </button>
-  ) : (
-    <button
-      onClick={handleRazorpayPayment}
-      className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold"
-    >
-      PAY TO PRINT (₹21)
-    </button>
+  {/* {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && condition ke andar banner */}
+  {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (
+    <div className="mb-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+      
+      {/* Left side: Offer Title */}
+      <div className="flex items-center gap-3">
+        <span className="bg-red-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse">
+          ⚡ LIMITED TIME DEAL
+        </span>
+        <div>
+          <h4 className="text-sm font-extrabold text-slate-900 uppercase">
+            Professional Construction Estimate & Verified Report
+          </h4>
+          <p className="text-xs text-slate-600 font-medium">
+            Includes Instant PDF Download, Digital Sealing & Verification QR Code.
+          </p>
+        </div>
+      </div>
+
+      {/* Right side: Amazon/Flipkart Style Price Box */}
+      <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
+        <div className="text-right">
+          <div className="flex items-center justify-end gap-2">
+            <span className="text-xs text-gray-400 line-through font-semibold">₹ 120/-</span>
+            <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+              82% OFF
+            </span>
+          </div>
+          <div className="text-lg font-black text-emerald-600 leading-tight">
+            ₹ 21 <span className="text-xs font-bold text-slate-700">Only</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
   )}
 
-  {/* BACK TO INPUT button */}
-  <button
-    onClick={() => {
-      localStorage.removeItem("estimatePreview");
-      router.push("/estimate");
-    }}
-    className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold ml-4" 
-  >
-    BACK TO INPUT
-  </button>
+  {/* Action Buttons Row */}
+  <div className="flex flex-wrap items-center justify-start gap-6">
+    {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
+      <button
+        onClick={handleSaveAndPrint}
+        disabled={isSaving}
+        className="bg-blue-600 text-white px-8 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
+      >
+        {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
+      </button>
+    ) : (
+      <button
+        onClick={handleRazorpayPayment}
+        className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce"
+      >
+        🚀 PAY TO PRINT (₹21)
+      </button>
+    )}
+
+    <button
+      onClick={() => {
+        localStorage.removeItem("estimatePreview");
+        router.push("/estimate");
+      }}
+      className="bg-slate-700 text-white px-8 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
+    >
+      ⬅️ BACK TO INPUT
+    </button>
+  </div>
+
 </div>
 </div>
 );

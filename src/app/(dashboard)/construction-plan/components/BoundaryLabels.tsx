@@ -19,6 +19,8 @@ interface BoundaryLabelsProps {
   maxX: number;
   roadFacingOption?: string;
   northAngle?: number;
+  roadWidth?: number;
+  measurementUnit?: "FEET" | "METERS";
 }
 
 export default function BoundaryLabels({
@@ -40,18 +42,19 @@ export default function BoundaryLabels({
   maxX,
   roadFacingOption = "1 SIDE ROAD (SOUTH)",
   northAngle = 0,
+  roadWidth = 15,
+  measurementUnit = "FEET",
 }: BoundaryLabelsProps) {
-  const angleTop = Math.atan2(pTopRight.y - pTopLeft.y, pTopRight.x - pTopLeft.x) * (180 / Math.PI);
-  const topWidth = pTopRight.x - pTopLeft.x;
-
-  const midX = (pTopLeft.x + pTopRight.x) / 2;
-  const midY = (pTopLeft.y + pTopRight.y) / 2;
-  const distDim = -20; 
-  const nx = -Math.sin((angleTop * Math.PI) / 180);
-  const ny = Math.cos((angleTop * Math.PI) / 180);
-
-  const boxHalfWidth = 22; 
-  const overshoot = 6;     
+  // Format dimension helper for Feet-Inches or Meters
+  const formatDim = (val: number) => {
+    if (measurementUnit === "METERS") {
+      return `${Number(val || 0).toFixed(2)}m`;
+    }
+    const totalInches = Math.round((val || 0) * 12);
+    const feet = Math.floor(totalInches / 12);
+    const inches = totalInches % 12;
+    return `${feet}'-${inches}"`;
+  };
 
   const wrapText = (text: string, maxPerLine = 22) => {
     const clean = (text || "-").toUpperCase();
@@ -74,101 +77,100 @@ export default function BoundaryLabels({
     return lines.slice(0, 2);
   };
 
+  const scale = 5.5;
+  const currentRoadHeight = roadWidth * scale;
+  const siteLayoutYOffset = 115 + (currentRoadHeight - (15 * scale));
+
+  // Universal helper function to render side dimensions and boundary texts parallel to any slanted/angled side
+  const renderSideDimension = (
+    p1: { x: number; y: number },
+    p2: { x: number; y: number },
+    boundaryText: string,
+    dimVal: number
+  ) => {
+    const L = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+    const midX = (p1.x + p2.x) / 2;
+    const midY = (p1.y + p2.y) / 2;
+
+    // Tangent unit vector along the line
+    const tx = (p2.x - p1.x) / L;
+    const ty = (p2.y - p1.y) / L;
+
+    // Perpendicular normal vector pointing strictly outward from the plot center
+    let perpX = -ty;
+    let perpY = tx;
+    const dx = midX - centerX;
+    const dy = midY - centerY;
+    if (perpX * dx + perpY * dy < 0) {
+      perpX = ty;
+      perpY = -tx;
+    }
+
+    const dist = 22; 
+    const overshoot = 6;    
+    const boxHalfWidth = 28;
+
+    const ext1_end = { x: p1.x + perpX * (dist + overshoot), y: p1.y + perpY * (dist + overshoot) };
+    const ext2_end = { x: p2.x + perpX * (dist + overshoot), y: p2.y + perpY * (dist + overshoot) };
+
+    const textDist = dist + 40;
+    const textPosX = midX + perpX * textDist;
+    const textPosY = midY + perpY * textDist;
+
+    return (
+      <g>
+        {/* Extension dashed lines */}
+        <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
+
+        {/* Boundary Name Text (Parallel to side angle) */}
+        <text 
+          x={textPosX} 
+          y={textPosY} 
+          textAnchor="middle" 
+          dominantBaseline="middle" 
+          fill="white" 
+          transform={`rotate(${angle}, ${textPosX}, ${textPosY})`} 
+          style={{ fontSize: "14px", fontWeight: "900" }}
+        >
+          {wrapText(boundaryText, 25).map((line, idx) => (
+            <tspan key={idx} x={textPosX} dy={idx === 0 ? 0 : 16}>{line}</tspan>
+          ))}
+        </text>
+
+        {/* Dimension Line, Arrows and Value Box */}
+        <g transform={`translate(${midX + perpX * dist}, ${midY + perpY * dist}) rotate(${angle})`}>
+          <polygon points={`${-L / 2},0 ${-L / 2 + 7},-3.5 ${-L / 2 + 7},3.5`} fill="white" />
+          <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="white" strokeWidth="1" />
+
+          <polygon points={`${L / 2},0 ${L / 2 - 7},-3.5 ${L / 2 - 7},3.5`} fill="white" />
+          <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke="white" strokeWidth="1" />
+
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "12px", fontWeight: "bold" }}>
+            {formatDim(dimVal)}
+          </text>
+        </g>
+      </g>
+    );
+  };
+
   return (
     <g style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "sans-serif" }}>
-      {/* TOP BOUNDARY & DIMENSION */}
-      <g>
-        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x + nx * (distDim - overshoot)} y2={pTopLeft.y + ny * (distDim - overshoot)} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + nx * (distDim - overshoot)} y2={pTopRight.y + ny * (distDim - overshoot)} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        
-        <text x={midX + nx * (distDim - 34)} y={midY + ny * (distDim - 34)} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${angleTop}, ${midX + nx * (distDim - 45)}, ${midY + ny * (distDim - 45)})`} style={{ fontSize: "14px", fontWeight: "900" }}>
-          {wrapText(topBoundary, 25).map((line, idx) => (
-            <tspan key={idx} x={midX + nx * (distDim - 45)} dy={idx === 0 ? 0 : 16}>{line}</tspan>
-          ))}
-        </text>
+      {/* TOP BOUNDARY & DIMENSION (SIDE B) */}
+      {renderSideDimension(pTopLeft, pTopRight, topBoundary, dimB)}
 
-        <g transform={`translate(${midX + nx * distDim}, ${midY + ny * distDim}) rotate(${angleTop})`}>
-          <polygon points={`${-topWidth / 2},0 ${-topWidth / 2 + 7},-3.5 ${-topWidth / 2 + 7},3.5`} fill="white" />
-          <line x1={-topWidth / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="white" strokeWidth="1" />
+      {/* BOTTOM BOUNDARY & DIMENSION (SIDE A) */}
+      {renderSideDimension(pBottomLeft, pBottomRight, bottomBoundary, dimA)}
 
-          <polygon points={`${topWidth / 2},0 ${topWidth / 2 - 7},-3.5 ${topWidth / 2 - 7},3.5`} fill="white" />
-          <line x1={boxHalfWidth} y1="0" x2={topWidth / 2} y2="0" stroke="white" strokeWidth="1" />
+      {/* RIGHT BOUNDARY & DIMENSION (SIDE D) */}
+      {renderSideDimension(pTopRight, pBottomRight, rightBoundary, dimD)}
 
-          {/* Background rect removed, only clean text */}
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimB}&apos;</text>
-        </g>
-      </g>
+      {/* LEFT BOUNDARY & DIMENSION (SIDE C) */}
+      {renderSideDimension(pTopLeft, pBottomLeft, leftBoundary, dimC)}
 
-      {/* BOTTOM BOUNDARY / DIMENSION (SIDE A) */}
-      <g>
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x} y2={pBottomLeft.y + 30 + overshoot} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x} y2={pBottomRight.y + 30 + overshoot} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        
-        <text x={centerX} y={pBottomLeft.y + 50} textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "14px", fontWeight: "900" }}>
-          {wrapText(bottomBoundary, 30).map((line, idx) => (
-            <tspan key={idx} x={centerX} dy={idx === 0 ? 0 : 16}>{line}</tspan>
-          ))}
-        </text>
-
-        <polygon points={`${pBottomLeft.x},${pBottomLeft.y + 22} ${pBottomLeft.x + 7},${pBottomLeft.y + 18.5} ${pBottomLeft.x + 7},${pBottomLeft.y + 25.5}`} fill="white" />
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y + 22} x2={centerX - boxHalfWidth} y2={pBottomLeft.y + 22} stroke="white" strokeWidth="1" />
-
-        <polygon points={`${pBottomRight.x},${pBottomLeft.y + 22} ${pBottomRight.x - 7},${pBottomLeft.y + 18.5} ${pBottomRight.x - 7},${pBottomLeft.y + 25.5}`} fill="white" />
-        <line x1={centerX + boxHalfWidth} y1={pBottomLeft.y + 22} x2={pBottomRight.x} y2={pBottomLeft.y + 22} stroke="white" strokeWidth="1" />
-
-        {/* Background rect removed, only clean text */}
-        <text x={centerX} y={pBottomLeft.y + 22} textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimA}&apos;</text>
-      </g>
-
-      {/* RIGHT BOUNDARY & DIMENSION */}
-      <g>
-        <line x1={pTopRight.x} y1={pTopRight.y} x2={pTopRight.x + 22 + overshoot} y2={pTopRight.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomRight.x} y1={pBottomRight.y} x2={pBottomRight.x + 22 + overshoot} y2={pBottomRight.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        
-        <polygon points={`${pTopRight.x + 22},${pTopRight.y} ${pTopRight.x + 18.5},${pTopRight.y + 7} ${pTopRight.x + 25.5},${pTopRight.y + 7}`} fill="white" />
-        <line x1={pTopRight.x + 22} y1={pTopRight.y} x2={pTopRight.x + 22} y2={centerY - boxHalfWidth} stroke="white" strokeWidth="1" />
-
-        <polygon points={`${pTopRight.x + 22},${pBottomRight.y} ${pTopRight.x + 18.5},${pBottomRight.y - 7} ${pTopRight.x + 25.5},${pBottomRight.y - 7}`} fill="white" />
-        <line x1={pTopRight.x + 22} y1={centerY + boxHalfWidth} x2={pTopRight.x + 22} y2={pBottomRight.y} stroke="white" strokeWidth="1" />
-
-        <text x={maxX + 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(90, ${maxX + 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
-          {wrapText(rightBoundary, 25).map((line, idx) => (
-            <tspan key={idx} x={maxX + 75} dy={idx === 0 ? 0 : 16}>{line}</tspan>
-          ))}
-        </text>
-
-        <g transform={`translate(${maxX + 22}, ${centerY}) rotate(90)`}>
-          {/* Background rect removed, only clean text */}
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimD}&apos;</text>
-        </g>
-      </g>
-
-      {/* LEFT BOUNDARY & DIMENSION */}
-      <g>
-        <line x1={pTopLeft.x} y1={pTopLeft.y} x2={pTopLeft.x - 22 - overshoot} y2={pTopLeft.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        <line x1={pBottomLeft.x} y1={pBottomLeft.y} x2={pBottomLeft.x - 22 - overshoot} y2={pBottomLeft.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        
-        <polygon points={`${pTopLeft.x - 22},${pTopLeft.y} ${pTopLeft.x - 25.5},${pTopLeft.y + 7} ${pTopLeft.x - 18.5},${pTopLeft.y + 7}`} fill="white" />
-        <line x1={pTopLeft.x - 22} y1={pTopLeft.y} x2={pTopLeft.x - 22} y2={centerY - boxHalfWidth} stroke="white" strokeWidth="1" />
-
-        <polygon points={`${pTopLeft.x - 22},${pBottomLeft.y} ${pTopLeft.x - 25.5},${pBottomLeft.y - 7} ${pTopLeft.x - 18.5},${pBottomLeft.y - 7}`} fill="white" />
-        <line x1={pTopLeft.x - 22} y1={centerY + boxHalfWidth} x2={pTopLeft.x - 22} y2={pBottomLeft.y} stroke="white" strokeWidth="1" />
-
-        <text x={minX - 70} y={centerY} textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(-90, ${minX - 70}, ${centerY})`} style={{ fontSize: "14px", fontWeight: "900" }}>
-          {wrapText(leftBoundary, 25).map((line, idx) => (
-            <tspan key={idx} x={minX - 75} dy={idx === 0 ? 0 : 16}>{line}</tspan>
-          ))}
-        </text>
-
-        <g transform={`translate(${minX - 22}, ${centerY}) rotate(-90)`}>
-          {/* Background rect removed, only clean text */}
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "13px", fontWeight: "bold" }}>{dimC}&apos;</text>
-        </g>
-      </g>
-
-      {/* ROAD KE NICHE "SITE LAYOUT" BOX (Border Removed) */}
-      <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + 115})`}>
-        {/* Rect background & border removed */}
+      {/* DYNAMIC ROAD WIDTH KE SATH MOVE HONE WALA "SITE LAYOUT" TEXT */}
+      <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + siteLayoutYOffset})`}>
         <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "18px", fontWeight: "bold" }}>
           SITE LAYOUT
         </text>

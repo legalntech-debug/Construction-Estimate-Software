@@ -406,10 +406,11 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
             </div>
           ) : (
             [
-              { label: "NORTH", value: boundaryNorth, setter: setBoundaryNorth },
-              { label: "SOUTH", value: boundarySouth, setter: setBoundarySouth },
               { label: "EAST", value: boundaryEast, setter: setBoundaryEast },
               { label: "WEST", value: boundaryWest, setter: setBoundaryWest },
+              { label: "NORTH", value: boundaryNorth, setter: setBoundaryNorth },
+              { label: "SOUTH", value: boundarySouth, setter: setBoundarySouth },
+
             ].map((item) => (
               <div key={item.label}>
                 <label className="font-bold text-[9pt] block mb-1">{item.label}</label>

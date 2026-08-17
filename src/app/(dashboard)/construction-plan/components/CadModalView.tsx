@@ -80,7 +80,9 @@ interface CadModalViewProps {
   setRightMos?: (val: number) => void;
   totalFloors?: number;
   selectedFloors?: string[];
-}
+  floorBuiltUpAreas?: { [key: string]: number };
+  floorData?: Record<string, { length: number; width: number; area: number }>;
+  }
 
 export default function CadModalView({
   isCadModalOpen,
@@ -147,6 +149,8 @@ export default function CadModalView({
   setRightMos,
   totalFloors = 1,
   selectedFloors = [],
+  floorBuiltUpAreas = {},
+  floorData = {}, // 👉 Yeh line yahan add kar dein!
 }: CadModalViewProps) {
   
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
@@ -178,8 +182,29 @@ export default function CadModalView({
   const currentEastRoad = localEastRoad;
   const currentWestRoad = localWestRoad;
 
-  // Maximum road width for general scaling reference
-  const maxRoadWidth = Math.max(currentNorthRoad, currentSouthRoad, currentEastRoad, currentWestRoad, 15);
+  // STRICT ROAD DETECTION BASED ON roadFacingOption
+  const roadOptUpper = (roadFacingOption || "").toUpperCase();
+  const hasNorthRoad = roadOptUpper.includes("NORTH") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI") || roadOptUpper.includes("CORNER");
+  const hasSouthRoad = roadOptUpper.includes("SOUTH") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI");
+  const hasEastRoad = roadOptUpper.includes("EAST") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI") || roadOptUpper.includes("CORNER");
+  const hasWestRoad = roadOptUpper.includes("WEST") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI");
+
+  let activeNorth = hasNorthRoad;
+  let activeSouth = hasSouthRoad;
+  let activeEast = hasEastRoad;
+  let activeWest = hasWestRoad;
+
+  if (roadOptUpper.includes("CORNER")) {
+    activeNorth = roadOptUpper.includes("NORTH");
+    activeSouth = roadOptUpper.includes("SOUTH");
+    activeEast = roadOptUpper.includes("EAST");
+    activeWest = roadOptUpper.includes("WEST");
+  } else if (!roadOptUpper.includes("NORTH") && !roadOptUpper.includes("SOUTH") && !roadOptUpper.includes("EAST") && !roadOptUpper.includes("WEST") && !roadOptUpper.includes("ALL") && !roadOptUpper.includes("MULTI")) {
+    activeSouth = true; 
+    activeNorth = false;
+    activeEast = false;
+    activeWest = false;
+  }
   
   const [editModeToggle, setEditModeToggle] = useState<"PLOT" | "MOS">("PLOT");
 
@@ -226,47 +251,68 @@ export default function CadModalView({
 
   const currentZoom = cadZoom && cadZoom > 0.1 ? cadZoom : 1.2;
 
-  // Wheel Zoom Setup
+  // ==========================================
+  // MOBILE TOUCH GESTURES (2-FINGER PINCH ZOOM & 1-FINGER PAN)
+  // ==========================================
   useEffect(() => {
     const element = canvasWrapperRef.current;
     if (!element) return;
 
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-      const oldZoom = currentZoom;
-      const newZoom = Math.min(3, Math.max(0.2, oldZoom * zoomFactor));
+    let initialTouchDistance = 0;
+    let initialZoom = 1;
+    let touchStartPos: { x: number; y: number } | null = null;
 
-      updatePan((prev) => {
-        const p = prev || { x: 0, y: 0 };
-        const rect = element.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        const scaleRatio = newZoom / oldZoom;
-        const scaleVal = 5.5;
-        const roadPx = maxRoadWidth * scaleVal;
-        const baseRoadDefaultPx = 15 * scaleVal;
-        const extraRoadGrowth = Math.max(0, roadPx - baseRoadDefaultPx);
-        const verticalShift = -extraRoadGrowth * 1.0;
-
-        const baseOffX = 380;
-        const baseOffY = 150 + verticalShift;
-
-        return {
-          x: p.x + (mouseX - baseOffX - p.x) * (1 - scaleRatio),
-          y: p.y + (mouseY - baseOffY - p.y) * (1 - scaleRatio),
-        };
-      });
-
-      setCadZoom(newZoom);
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      } else if (e.touches.length === 2) {
+        touchStartPos = null;
+        initialTouchDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        initialZoom = currentZoom;
+      }
     };
 
-    element.addEventListener("wheel", handleWheel, { passive: false });
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1 && touchStartPos) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - touchStartPos.x;
+        const dy = e.touches[0].clientY - touchStartPos.y;
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+
+        updatePan((prev) => ({
+          x: prev.x + dx,
+          y: prev.y + dy,
+        }));
+      } else if (e.touches.length === 2 && initialTouchDistance > 0) {
+        e.preventDefault();
+        const currentDistance = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        const scale = currentDistance / initialTouchDistance;
+        const newZoom = Math.min(4, Math.max(0.15, initialZoom * scale));
+        setCadZoom(newZoom);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartPos = null;
+      initialTouchDistance = 0;
+    };
+
+    element.addEventListener("touchstart", handleTouchStart, { passive: true });
+    element.addEventListener("touchmove", handleTouchMove, { passive: false });
+    element.addEventListener("touchend", handleTouchEnd, { passive: true });
+
     return () => {
-      element.removeEventListener("wheel", handleWheel);
+      element.removeEventListener("touchstart", handleTouchStart);
+      element.removeEventListener("touchmove", handleTouchMove);
+      element.removeEventListener("touchend", handleTouchEnd);
     };
-  }, [currentZoom, maxRoadWidth, setCadZoom]);
+  }, [currentZoom, setCadZoom]);
 
   const handleMosChange = (side: string, val: number) => {
     setSideMos((prev) => ({ ...prev, [side]: val }));
@@ -276,22 +322,26 @@ export default function CadModalView({
     if (side === "D" && setRightMos) setRightMos(val);
   };
   
-  // Handlers for Directional Road Widths with local state update
+  // STRICT POSITIVE ROAD WIDTH VALIDATION HANDLERS
   const handleNorthRoadChange = (val: number) => {
-    setLocalNorthRoad(val);
-    if (setRoadWidthNorth) setRoadWidthNorth(val);
+    const cleanVal = isNaN(val) ? 15 : Math.max(1, val);
+    setLocalNorthRoad(cleanVal);
+    if (setRoadWidthNorth) setRoadWidthNorth(cleanVal);
   };
   const handleSouthRoadChange = (val: number) => {
-    setLocalSouthRoad(val);
-    if (setRoadWidthSouth) setRoadWidthSouth(val);
+    const cleanVal = isNaN(val) ? 15 : Math.max(1, val);
+    setLocalSouthRoad(cleanVal);
+    if (setRoadWidthSouth) setRoadWidthSouth(cleanVal);
   };
   const handleEastRoadChange = (val: number) => {
-    setLocalEastRoad(val);
-    if (setRoadWidthEast) setRoadWidthEast(val);
+    const cleanVal = isNaN(val) ? 15 : Math.max(1, val);
+    setLocalEastRoad(cleanVal);
+    if (setRoadWidthEast) setRoadWidthEast(cleanVal);
   };
   const handleWestRoadChange = (val: number) => {
-    setLocalWestRoad(val);
-    if (setRoadWidthWest) setRoadWidthWest(val);
+    const cleanVal = isNaN(val) ? 15 : Math.max(1, val);
+    setLocalWestRoad(cleanVal);
+    if (setRoadWidthWest) setRoadWidthWest(cleanVal);
   };
 
   if (!isCadModalOpen) return null;
@@ -442,6 +492,30 @@ export default function CadModalView({
           <div 
             ref={canvasWrapperRef}
             className="col-span-9 h-full relative overflow-hidden bg-white cursor-grab active:cursor-grabbing"
+            onWheel={(e) => {
+              e.preventDefault();
+              const zoomFactor = Math.exp(-e.deltaY * 0.0015);
+              const oldZoom = currentZoom;
+              const newZoom = Math.min(4, Math.max(0.15, oldZoom * zoomFactor));
+              setCadZoom(newZoom);
+
+              const element = canvasWrapperRef.current;
+              if (element) {
+                const rect = element.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+
+                const scaleRatio = newZoom / oldZoom;
+                const baseOffX = 380;
+                const baseOffY = 150;
+                const currentPan = localPan || { x: 0, y: 0 };
+
+                updatePan(() => ({
+                  x: currentPan.x + (mouseX - baseOffX - currentPan.x) * (1 - scaleRatio),
+                  y: currentPan.y + (mouseY - baseOffY - currentPan.y) * (1 - scaleRatio),
+                }));
+              }
+            }}
             onMouseDown={(e) => {
               if (e.button === 0) {
                 isDraggingRef.current = true;
@@ -477,26 +551,20 @@ export default function CadModalView({
             >
               {/* North Badge Direction */}
               {(() => {
-                let northText = "NORTH";
                 let badgePos = "top-2 left-2";
                 const opt = (roadFacingOption || "").toUpperCase();
                 
                 if (opt.includes("EAST")) {
-                  northText = "NORTH (WEST)";
+                  badgePos = "top-2 left-2";
                 } else if (opt.includes("WEST")) {
-                  northText = "NORTH (EAST)";
                   badgePos = "top-2 right-2";
                 } else if (opt.includes("NORTH")) {
-                  northText = "NORTH (SOUTH)";
                   badgePos = "bottom-2 left-2";
-                } else {
-                  northText = "NORTH";
-                  badgePos = "top-2 left-2";
                 }
 
                 return (
                   <div className={`absolute ${badgePos} z-10 bg-yellow-300 border border-black px-1.5 py-0.5 text-[8px] font-black flex items-center gap-1 shadow-sm pointer-events-none`}>
-                    <span>{northText}</span>
+                    <span>NORTH</span>
                   </div>
                 );
               })()}
@@ -525,10 +593,10 @@ export default function CadModalView({
 
                 const isFullPlot = (mosAVal === 0 && mosBVal === 0 && mosCVal === 0 && mosDVal === 0);
 
-                let bTopLeft = { x: pTopLeft.x + mosLeft + 1, y: pTopLeft.y + mosBack + 1 };
-                let bTopRight = { x: pTopRight.x - mosRight - 1, y: pTopRight.y + mosBack + 1 };
-                let bBottomRight = { x: pBottomRight.x - mosRight - 1, y: pBottomRight.y - mosFront - 1 };
-                let bBottomLeft = { x: pBottomLeft.x + mosLeft + 1, y: pBottomLeft.y - mosFront - 1 };
+                let bTopLeft = { x: pTopLeft.x + mosLeft, y: pTopLeft.y + mosBack };
+                let bTopRight = { x: pTopRight.x - mosRight, y: pTopRight.y + mosBack };
+                let bBottomRight = { x: pBottomRight.x - mosRight, y: pBottomRight.y - mosFront };
+                let bBottomLeft = { x: pBottomLeft.x + mosLeft, y: pBottomLeft.y - mosFront };
 
                 const mAngleA = isSimpleRect ? 0 : ((mosAngles.A || 0) * Math.PI) / 180;
                 const mAngleB = isSimpleRect ? 0 : ((mosAngles.B || 0) * Math.PI) / 180;
@@ -582,11 +650,6 @@ export default function CadModalView({
                 const builtUpCenterY = (builtUpPoints.reduce((sum, p) => sum + p.y, 0)) / builtUpPoints.length;
                 const builtUpWidth = Math.abs(bTopRight.x - bTopLeft.x);
 
-                const roadPx = maxRoadWidth * scale;
-                const baseRoadDefaultPx = 15 * scale; 
-                const extraRoadGrowth = Math.max(0, roadPx - baseRoadDefaultPx);
-                const verticalShift = -extraRoadGrowth * 1.0;
-
                 const hatchLines = [];
                 const step = 8;
                 const bX = builtUpPoints.map(p => p.x);
@@ -605,7 +668,7 @@ export default function CadModalView({
                 }
 
                 return (
-                  <g transform={`translate(380, ${150 + verticalShift}) translate(${localPan?.x || 0}, ${localPan?.y || 0}) scale(${currentZoom})`}>
+                  <g transform={`translate(380, 150) translate(${localPan?.x || 0}, ${localPan?.y || 0}) scale(${currentZoom})`}>
                     <PlotPolygonRenderer
                       plotPolygon={correctedPoints}
                       proposedSitePolygon={[]}
@@ -620,8 +683,10 @@ export default function CadModalView({
                       builtUpPoints={builtUpPoints}
                       scale={scale}
                       selectedFloors={selectedFloors}
-                      roadWidth={currentSouthRoad}
+                      roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
                       roadFacingOption={roadFacingOption}
+                      floorBuiltUpAreas={floorBuiltUpAreas} // 👉 Yeh prop yahan pass karein
+                      floorData={floorData} // 👉 Yeh prop yahan pass hona chahiye
                     />
 
                     <g>
@@ -761,10 +826,10 @@ export default function CadModalView({
                       minX={minX}
                       maxX={maxX}
                       roadFacingOption={roadFacingOption}
-                      roadWidth={currentSouthRoad}
+                      roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
                     />
 
-                    {/* Passing 4 Directional Road Widths to RoadRenderer */}
+                    {/* Active Directional Road Widths passed to RoadRenderer with strictly positive widths */}
                     <RoadRenderer
                       roadFacingOption={roadFacingOption}
                       bottomBoundary={boundarySouth}
@@ -775,10 +840,10 @@ export default function CadModalView({
                       pTopRight={pTopRight}
                       pBottomLeft={pBottomLeft}
                       pBottomRight={pBottomRight}
-                      roadWidthNorth={currentNorthRoad}
-                      roadWidthSouth={currentSouthRoad}
-                      roadWidthEast={currentEastRoad}
-                      roadWidthWest={currentWestRoad}
+                      roadWidthNorth={activeNorth ? currentNorthRoad : 0}
+                      roadWidthSouth={activeSouth ? currentSouthRoad : 0}
+                      roadWidthEast={activeEast ? currentEastRoad : 0}
+                      roadWidthWest={activeWest ? currentWestRoad : 0}
                     />
 
                     {(() => {
@@ -894,15 +959,14 @@ export default function CadModalView({
             boundaryWest={boundaryWest}
             setBoundaryWest={setBoundaryWest}
             
-            // Passing 4 directional road width values and handlers to Sidebar Component
-            roadWidthNorth={currentNorthRoad}
-            roadWidthSouth={currentSouthRoad}
-            roadWidthEast={currentEastRoad}
-            roadWidthWest={currentWestRoad}
-            handleNorthRoadChange={handleNorthRoadChange}
-            handleSouthRoadChange={handleSouthRoadChange}
-            handleEastRoadChange={handleEastRoadChange}
-            handleWestRoadChange={handleWestRoadChange}
+            roadWidthNorth={activeNorth ? currentNorthRoad : undefined}
+            roadWidthSouth={activeSouth ? currentSouthRoad : undefined}
+            roadWidthEast={activeEast ? currentEastRoad : undefined}
+            roadWidthWest={activeWest ? currentWestRoad : undefined}
+            handleNorthRoadChange={activeNorth ? handleNorthRoadChange : undefined}
+            handleSouthRoadChange={activeSouth ? handleSouthRoadChange : undefined}
+            handleEastRoadChange={activeEast ? handleEastRoadChange : undefined}
+            handleWestRoadChange={activeWest ? handleWestRoadChange : undefined}
           />
         </div>
       </div>

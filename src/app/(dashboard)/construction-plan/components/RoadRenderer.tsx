@@ -18,8 +18,6 @@ interface RoadRendererProps {
 }
 
 const SCALE = 5.5;
-
-// Road ke baad SITE LAYOUT ke liye fixed visual gap
 export const SITE_LAYOUT_GAP = 20;
 
 export default function RoadRenderer({
@@ -32,27 +30,17 @@ export default function RoadRenderer({
   pTopRight,
   pBottomLeft,
   pBottomRight,
+  roadWidthNorth,
+  roadWidthSouth,
+  roadWidthEast,
+  roadWidthWest,
   roadWidth = 15,
 }: RoadRendererProps) {
   const opt = (roadFacingOption || "").toUpperCase();
 
-  const safeRoadWidth =
-    Number.isFinite(Number(roadWidth)) && Number(roadWidth) > 0
-      ? Number(roadWidth)
-      : 15;
-
-  const roadHeight = safeRoadWidth * SCALE;
-  
-  // Road hamesha plot se exact 6 feet bahar nikale (6 * SCALE)
-  const ext = 6 * SCALE;
-
-  const siteLayoutY = pBottomLeft.y + roadHeight + SITE_LAYOUT_GAP;
-
   const isFourSide = opt.includes("4 SIDE");
   const isThreeSide = opt.includes("3 SIDE");
-  const isTwoSide =
-    opt.includes("2 SIDE") ||
-    opt.includes("FRONT & REAR");
+  const isTwoSide = opt.includes("2 SIDE") || opt.includes("FRONT & REAR");
 
   const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
   const foundDirs: { dir: string; index: number }[] = [];
@@ -67,197 +55,288 @@ export default function RoadRenderer({
   foundDirs.sort((a, b) => a.index - b.index);
 
   let mainRoad = "SOUTH";
-  let secondRoad = "";
-
   if (foundDirs.length > 0) {
     mainRoad = foundDirs[0].dir;
-  }
-  if (foundDirs.length > 1) {
-    secondRoad = foundDirs[1].dir;
   }
 
   const compassMap: Record<
     string,
     { top: string; left: string; right: string }
   > = {
-    NORTH: { top: "SOUTH", left: "WEST", right: "EAST" },
-    SOUTH: { top: "NORTH", left: "EAST", right: "WEST" },
+    NORTH: { top: "SOUTH", left: "EAST", right: "WEST" },
+    SOUTH: { top: "NORTH", left: "WEST", right: "EAST" },
     EAST: { top: "WEST", left: "SOUTH", right: "NORTH" },
     WEST: { top: "EAST", left: "NORTH", right: "SOUTH" },
   };
 
   const currentCompass = compassMap[mainRoad] || compassMap["SOUTH"];
+  const activeDirs = foundDirs.map((d) => d.dir);
 
-  let hasBottomRoad = true;
-  let hasTopRoad =
-    isFourSide ||
-    isThreeSide ||
-    isTwoSide ||
-    secondRoad === currentCompass.top;
+  let hasBottomRoad = false;
+  let hasTopRoad = false;
+  let hasLeftRoad = false;
+  let hasRightRoad = false;
 
-  let hasRightRoad =
-    isFourSide ||
-    isThreeSide ||
-    secondRoad === currentCompass.right;
+  if (isFourSide) {
+    hasBottomRoad = true;
+    hasTopRoad = true;
+    hasLeftRoad = true;
+    hasRightRoad = true;
+  } else if (isThreeSide) {
+    hasBottomRoad = activeDirs.includes(mainRoad) || foundDirs.length >= 1;
+    hasTopRoad    = activeDirs.includes(currentCompass.top);
+    hasLeftRoad   = activeDirs.includes(currentCompass.left);
+    hasRightRoad  = activeDirs.includes(currentCompass.right);
+  } else if (isTwoSide || opt.includes("FRONT & REAR")) {
+    hasBottomRoad = activeDirs.includes(mainRoad);
+    hasTopRoad    = activeDirs.includes(currentCompass.top);
+    hasLeftRoad   = false;
+    hasRightRoad  = false;
+  } else if (opt.includes("CORNER") || (foundDirs.length === 2 && !opt.includes("FRONT & REAR"))) {
+    hasBottomRoad = activeDirs.includes(mainRoad);
+    hasTopRoad    = false;
+    hasLeftRoad   = activeDirs.includes(currentCompass.left);
+    hasRightRoad  = activeDirs.includes(currentCompass.right);
+  } else {
+    hasBottomRoad = true;
+    hasTopRoad    = false;
+    hasLeftRoad   = false;
+    hasRightRoad  = false;
+  }
 
-  let hasLeftRoad =
-    isFourSide ||
-    isThreeSide ||
-    secondRoad === currentCompass.left;
+  const getWidthForDir = (dir: string) => {
+    let w = roadWidth;
+    if (dir === "NORTH") w = Number(roadWidthNorth) > 0 ? Number(roadWidthNorth) : roadWidth;
+    if (dir === "SOUTH") w = Number(roadWidthSouth) > 0 ? Number(roadWidthSouth) : roadWidth;
+    if (dir === "EAST")  w = Number(roadWidthEast) > 0 ? Number(roadWidthEast) : roadWidth;
+    if (dir === "WEST")  w = Number(roadWidthWest) > 0 ? Number(roadWidthWest) : roadWidth;
+    return Number.isFinite(w) && w > 0 ? w * SCALE : roadWidth * SCALE;
+  };
 
-  // ==========================================
-  // 1. BOTTOM ROAD GEOMETRY
-  // ==========================================
-  const dxB = pBottomRight.x - pBottomLeft.x;
-  const dyB = pBottomRight.y - pBottomLeft.y;
-  const lenB = Math.hypot(dxB, dyB) || 1;
-  const uBx = dxB / lenB;
-  const uBy = dyB / lenB;
-  const nxB = -uBy;
-  const nyB = uBx;
+  const bottomDirHeight = getWidthForDir(mainRoad);
+  const topDirHeight    = getWidthForDir(currentCompass.top);
+  const leftDirHeight   = getWidthForDir(currentCompass.left);
+  const rightDirHeight  = getWidthForDir(currentCompass.right);
 
-  const bExtLeft = hasLeftRoad ? ext + roadHeight : ext;
-  const bExtRight = hasRightRoad ? ext + roadHeight : ext;
-
-  const bP1 = { x: pBottomLeft.x - uBx * bExtLeft, y: pBottomLeft.y - uBy * bExtLeft };
-  const bP2 = { x: pBottomRight.x + uBx * bExtRight, y: pBottomRight.y + uBy * bExtRight };
-  const bP3 = { x: bP2.x + nxB * roadHeight, y: bP2.y + nyB * roadHeight };
-  const bP4 = { x: bP1.x + nxB * roadHeight, y: bP1.y + nyB * roadHeight };
-
-  // ==========================================
-  // 2. TOP ROAD GEOMETRY
-  // ==========================================
-  const dxT = pTopRight.x - pTopLeft.x;
-  const dyT = pTopRight.y - pTopLeft.y;
-  const lenT = Math.hypot(dxT, dyT) || 1;
-  const uTx = dxT / lenT;
-  const uTy = dyT / lenT;
-  const nxT = uTy;
-  const nyT = -uTx;
-
-  const tExtLeft = hasLeftRoad ? ext + roadHeight : ext;
-  const tExtRight = hasRightRoad ? ext + roadHeight : ext;
-
-  const tP1 = { x: pTopLeft.x - uTx * tExtLeft, y: pTopLeft.y - uTy * tExtLeft };
-  const tP2 = { x: pTopRight.x + uTx * tExtRight, y: pTopRight.y + uTy * tExtRight };
-  const tP3 = { x: tP2.x + nxT * roadHeight, y: tP2.y + nyT * roadHeight };
-  const tP4 = { x: tP1.x + nxT * roadHeight, y: tP1.y + nyT * roadHeight };
+  const ext = 6 * SCALE;
+  const siteLayoutY = pBottomLeft.y + bottomDirHeight + SITE_LAYOUT_GAP;
 
   // ==========================================
-  // 3. LEFT ROAD GEOMETRY
+  // ORTHOGONAL (90-DEGREE) RECTANGLE ROAD GEOMETRY
   // ==========================================
-  const dxL = pBottomLeft.x - pTopLeft.x;
-  const dyL = pBottomLeft.y - pTopLeft.y;
-  const lenL = Math.hypot(dxL, dyL) || 1;
-  const uLx = dxL / lenL;
-  const uLy = dyL / lenL;
-  const nxL = -uLy;
-  const nyL = uLx;
 
-  const lExtTop = hasTopRoad ? ext + roadHeight : ext;
-  const lExtBottom = hasBottomRoad ? 0 : ext;
+  // Left & Right Side Road Boundaries
+  const lLeft = pTopLeft.x - leftDirHeight;
+  const lRight = pTopLeft.x;
+  const rLeft = pBottomRight.x;
+  const rRight = pBottomRight.x + rightDirHeight;
 
-  const lP1 = { x: pTopLeft.x - uLx * lExtTop, y: pTopLeft.y - uLy * lExtTop };
-  const lP2 = { x: pBottomLeft.x + uLx * lExtBottom, y: pBottomLeft.y + uLy * lExtBottom };
-  const lP3 = { x: lP2.x + nxL * roadHeight, y: lP2.y + nyL * roadHeight };
-  const lP4 = { x: lP1.x + nxL * roadHeight, y: lP1.y + nyL * roadHeight };
+  // Bottom Road Box (Updated: 6' extra extension on both sides even if side road is absent)
+  const bLeft = hasLeftRoad ? lLeft - ext : pBottomLeft.x - ext;
+  const bRight = hasRightRoad ? rRight + ext : pBottomRight.x + ext;
+  const bTop = pBottomLeft.y;
+  const bBottom = pBottomLeft.y + bottomDirHeight;
 
-  // ==========================================
-  // 4. RIGHT ROAD GEOMETRY
-  // ==========================================
-  const dxR = pBottomRight.x - pTopRight.x;
-  const dyR = pBottomRight.y - pTopRight.y;
-  const lenR = Math.hypot(dxR, dyR) || 1;
-  const uRx = dxR / lenR;
-  const uRy = dyR / lenR;
-  const nxR = uRy;
-  const nyR = -uRx;
+  // Top Road Box
+  const tLeft = pTopLeft.x - (hasLeftRoad ? leftDirHeight + ext : ext);
+  const tRight = pTopRight.x + (hasRightRoad ? rightDirHeight + ext : ext);
+  const tBottom = pTopLeft.y;
+  const tTop = pTopLeft.y - topDirHeight;
 
-  const rExtTop = hasTopRoad ? ext + roadHeight : ext;
-  const rExtBottom = hasBottomRoad ? 0 : ext;
+  // Left Road Box
+  const lTop = hasTopRoad ? tTop : pTopLeft.y - ext;
 
-  const rP1 = { x: pTopRight.x - uRx * rExtTop, y: pTopRight.y - uRy * rExtTop };
-  const rP2 = { x: pBottomRight.x + uRx * rExtBottom, y: pBottomRight.y + uRy * rExtBottom };
-  const rP3 = { x: rP2.x + nxR * roadHeight, y: rP2.y + nyR * roadHeight };
-  const rP4 = { x: rP1.x + nxR * roadHeight, y: rP1.y + nyR * roadHeight };
+  // Right Road Box
+  const rTop = hasTopRoad ? tTop : pTopRight.y - ext;
 
   return (
     <>
-      {/* =========================================
-          1. BOTTOM ROAD (Clean Block)
-          ========================================= */}
+      {/* 1. BOTTOM ROAD */}
       {hasBottomRoad && (
         <>
-          <polygon
-            points={`
-              ${bP1.x},${bP1.y} 
-              ${bP2.x},${bP2.y} 
-              ${bP3.x},${bP3.y} 
-              ${bP4.x},${bP4.y}
-            `}
-            fill="transparent"
+          <line x1={bLeft} y1={bBottom} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          
+          {hasLeftRoad ? (
+            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          ) : (
+            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          )}
+
+          {hasRightRoad ? (
+            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          ) : (
+            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          )}
+          
+          {/* Left Extension Top Line */}
+          {hasLeftRoad ? (
+            <line x1={bLeft} y1={bTop} x2={lLeft} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          ) : (
+            <line x1={bLeft} y1={bTop} x2={pBottomLeft.x} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          )}
+
+          {/* Main Front Plot Road Line */}
+          <line
+            x1={pBottomLeft.x}
+            y1={bTop}
+            x2={pBottomRight.x}
+            y2={bTop}
             stroke="#ffffff"
-            strokeWidth="1.5"
+            strokeWidth="1"
+          />
+
+          {/* Right Extension Top Line */}
+          {hasRightRoad ? (
+            <line x1={rRight} y1={bTop} x2={bRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          ) : (
+            <line x1={pBottomRight.x} y1={bTop} x2={bRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          )}
+        </>
+      )}
+
+      {/* 2. TOP ROAD */}
+      {hasTopRoad && (
+        <>
+          <line x1={tLeft} y1={tTop} x2={tRight} y2={tTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={tLeft} y1={tBottom} x2={tLeft} y2={tTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={tRight} y1={tBottom} x2={tRight} y2={tTop} stroke="#ffffff" strokeWidth="1" />
+          <line
+            x1={hasLeftRoad ? pTopLeft.x : tLeft}
+            y1={tBottom}
+            x2={hasRightRoad ? pTopRight.x : tRight}
+            y2={tBottom}
+            stroke="#ffffff"
+            strokeWidth="1"
           />
         </>
       )}
 
-      {/* =========================================
-          2. LEFT SIDE ROAD (Clean T-Junction Meeting)
-          ========================================= */}
+      {/* 3. LEFT SIDE ROAD */}
       {hasLeftRoad && (
-        <polygon
-          points={`
-            ${lP1.x},${lP1.y} 
-            ${lP2.x},${lP2.y} 
-            ${lP3.x},${lP3.y} 
-            ${lP4.x},${lP4.y}
-          `}
-          fill="transparent"
-          stroke="#ffffff"
-          strokeWidth="1.5"
-        />
+        <>
+          <line x1={lLeft} y1={lTop} x2={lLeft} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={lLeft} y1={lTop} x2={lRight} y2={lTop} stroke="#ffffff" strokeWidth="1" />
+          <line
+            x1={lRight}
+            y1={hasTopRoad ? pTopLeft.y : lTop}
+            x2={lRight}
+            y2={bTop}
+            stroke="#ffffff"
+            strokeWidth="1"
+          />
+        </>
       )}
 
-      {/* =========================================
-          3. RIGHT SIDE ROAD (Clean T-Junction Meeting)
-          ========================================= */}
+      {/* 4. RIGHT SIDE ROAD */}
       {hasRightRoad && (
-        <polygon
-          points={`
-            ${rP1.x},${rP1.y} 
-            ${rP2.x},${rP2.y} 
-            ${rP3.x},${rP3.y} 
-            ${rP4.x},${rP4.y}
-          `}
-          fill="transparent"
-          stroke="#ffffff"
-          strokeWidth="1.5"
-        />
+        <>
+          <line x1={rRight} y1={rTop} x2={rRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={rLeft} y1={rTop} x2={rRight} y2={rTop} stroke="#ffffff" strokeWidth="1" />
+          <line
+            x1={rLeft}
+            y1={hasTopRoad ? pTopRight.y : rTop}
+            x2={rLeft}
+            y2={bTop}
+            stroke="#ffffff"
+            strokeWidth="1"
+          />
+        </>
       )}
 
-      
-      {/* =========================================
-          DEBUG / POSITION ANCHOR
-          ========================================= */}
       <g data-site-layout-y={siteLayoutY} />
     </>
   );
 }
 
+export function getRoadHeightsByDirection(
+  roadFacingOption: string = "",
+  roadWidthNorth?: number,
+  roadWidthSouth?: number,
+  roadWidthEast?: number,
+  roadWidthWest?: number,
+  roadWidth: number = 15
+) {
+  const getW = (dir: string) => {
+    let w = roadWidth;
+    if (dir === "NORTH") w = Number(roadWidthNorth) > 0 ? Number(roadWidthNorth) : roadWidth;
+    if (dir === "SOUTH") w = Number(roadWidthSouth) > 0 ? Number(roadWidthSouth) : roadWidth;
+    if (dir === "EAST")  w = Number(roadWidthEast) > 0 ? Number(roadWidthEast) : roadWidth;
+    if (dir === "WEST")  w = Number(roadWidthWest) > 0 ? Number(roadWidthWest) : roadWidth;
+    return Number.isFinite(w) && w > 0 ? w * SCALE : roadWidth * SCALE;
+  };
+
+  return {
+    north: getW("NORTH"),
+    south: getW("SOUTH"),
+    east: getW("EAST"),
+    west: getW("WEST"),
+  };
+}
+
 export function getSiteLayoutY(
   plotBottomY: number,
+  roadWidth: number = 15,
+  hasBottomRoad: boolean = true,
+  roadFacingOption: string = "",
+  roadWidthNorth?: number,
+  roadWidthSouth?: number,
+  roadWidthEast?: number,
+  roadWidthWest?: number
+): number {
+  if (!hasBottomRoad) {
+    return plotBottomY + SITE_LAYOUT_GAP;
+  }
+
+  const opt = (roadFacingOption || "").toUpperCase();
+  const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
+  const foundDirs: { dir: string; index: number }[] = [];
+  allDirs.forEach((dir) => {
+    const idx = opt.indexOf(dir);
+    if (idx !== -1) foundDirs.push({ dir, index: idx });
+  });
+  foundDirs.sort((a, b) => a.index - b.index);
+
+  let mainRoad = "SOUTH";
+  if (foundDirs.length > 0) mainRoad = foundDirs[0].dir;
+
+  let bottomRoadWidth = roadWidth;
+  if (mainRoad === "NORTH") bottomRoadWidth = Number(roadWidthNorth) > 0 ? Number(roadWidthNorth) : roadWidth;
+  else if (mainRoad === "SOUTH") bottomRoadWidth = Number(roadWidthSouth) > 0 ? Number(roadWidthSouth) : roadWidth;
+  else if (mainRoad === "EAST") bottomRoadWidth = Number(roadWidthEast) > 0 ? Number(roadWidthEast) : roadWidth;
+  else if (mainRoad === "WEST") bottomRoadWidth = Number(roadWidthWest) > 0 ? Number(roadWidthWest) : roadWidth;
+
+  const bottomRoadHeight = Number.isFinite(Number(bottomRoadWidth)) && Number(bottomRoadWidth) > 0
+    ? Number(bottomRoadWidth) * SCALE
+    : roadWidth * SCALE;
+
+  return plotBottomY + bottomRoadHeight + SITE_LAYOUT_GAP;
+}
+
+export function getCompassOffset(
+  roadFacingOption: string = "",
+  roadWidthNorth?: number,
+  roadWidthSouth?: number,
+  roadWidthEast?: number,
+  roadWidthWest?: number,
+  roadWidth: number = 15
+): { xOffset: number; yOffset: number } {
+  const heights = getRoadHeightsByDirection(roadFacingOption, roadWidthNorth, roadWidthSouth, roadWidthEast, roadWidthWest, roadWidth);
+  return {
+    xOffset: heights.east * 0.1,
+    yOffset: heights.north * 0.1,
+  };
+}
+
+export function getPlanningAreaOffset(
+  roadFacingOption: string = "",
+  roadWidthNorth?: number,
+  roadWidthSouth?: number,
+  roadWidthEast?: number,
+  roadWidthWest?: number,
   roadWidth: number = 15
 ): number {
-  const safeRoadWidth =
-    Number.isFinite(Number(roadWidth)) &&
-    Number(roadWidth) > 0
-      ? Number(roadWidth)
-      : 15;
-
-  const roadHeight = safeRoadWidth * SCALE;
-
-  return plotBottomY + roadHeight + SITE_LAYOUT_GAP;
+  const heights = getRoadHeightsByDirection(roadFacingOption, roadWidthNorth, roadWidthSouth, roadWidthEast, roadWidthWest, roadWidth);
+  return heights.west;
 }
 
 export function getRoadHeight(roadWidth: number = 15): number {

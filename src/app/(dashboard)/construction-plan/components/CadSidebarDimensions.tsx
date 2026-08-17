@@ -75,10 +75,10 @@ export default function CadSidebarDimensions({
   setBoundaryEast,
   boundaryWest,
   setBoundaryWest,
-  roadWidthNorth = 16,
-  roadWidthSouth = 16,
-  roadWidthEast = 16,
-  roadWidthWest = 16,
+  roadWidthNorth,
+  roadWidthSouth,
+  roadWidthEast,
+  roadWidthWest,
   handleNorthRoadChange,
   handleSouthRoadChange,
   handleEastRoadChange,
@@ -239,7 +239,7 @@ export default function CadSidebarDimensions({
       {/* BOUNDARIES REFERENCE SECTION */}
       <div className="border-t-2 border-black pt-2 mt-2">
         <div className="font-black text-xs mb-1.5">PLOT BOUNDARIES</div>
-        <div className="border border-black bg-white p-2 flex flex-col gap-1.5 shadow-sm text-[11px]">
+        <div className="border border-black bg-white p-2 flex flex-col gap-1.5 text-[11px]">
           <div>
             <span className="font-bold text-[10px] block">EAST:</span>
             <input
@@ -283,58 +283,71 @@ export default function CadSidebarDimensions({
         </div>
       </div>
 
-      {/* ROAD WIDTHS SECTION (4 DIRECTIONS) */}
+      {/* ROAD WIDTHS SECTION (CONDITIONAL - ONLY ACTIVE ROADS SHOWN) */}
       <div className="border-t-2 border-black pt-2 mt-2">
         <div className="font-black text-xs mb-1.5">ROAD WIDTHS (FEET)</div>
         <div className="border border-black bg-white p-2 grid grid-cols-2 gap-1.5 text-[10px]">
-          <div className="flex flex-col gap-0.5">
-            <span className="font-bold text-[9px] text-gray-700">NORTH</span>
-            <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
-              <input
-                type="number"
-                value={roadWidthNorth}
-                onChange={(e) => handleNorthRoadChange && handleNorthRoadChange(Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
-              />
-              <span className="text-[9px] font-bold text-gray-600">FT</span>
+          
+          {roadWidthNorth !== undefined && (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-bold text-[9px] text-gray-700">NORTH</span>
+              <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
+                <input
+                  type="number"
+                  value={roadWidthNorth}
+                  onChange={(e) => handleNorthRoadChange && handleNorthRoadChange(Number(e.target.value) || 0)}
+                  className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
+                />
+                <span className="text-[9px] font-bold text-gray-600">FT</span>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="font-bold text-[9px] text-gray-700">SOUTH</span>
-            <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
-              <input
-                type="number"
-                value={roadWidthSouth}
-                onChange={(e) => handleSouthRoadChange && handleSouthRoadChange(Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
-              />
-              <span className="text-[9px] font-bold text-gray-600">FT</span>
+          )}
+
+          {roadWidthSouth !== undefined && (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-bold text-[9px] text-gray-700">SOUTH</span>
+              <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
+                <input
+                  type="number"
+                  value={roadWidthSouth}
+                  onChange={(e) => handleSouthRoadChange && handleSouthRoadChange(Number(e.target.value) || 0)}
+                  className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
+                />
+                <span className="text-[9px] font-bold text-gray-600">FT</span>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="font-bold text-[9px] text-gray-700">EAST</span>
-            <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
-              <input
-                type="number"
-                value={roadWidthEast}
-                onChange={(e) => handleEastRoadChange && handleEastRoadChange(Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
-              />
-              <span className="text-[9px] font-bold text-gray-600">FT</span>
+          )}
+
+          {roadWidthEast !== undefined && (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-bold text-[9px] text-gray-700">EAST</span>
+              <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
+                <input
+                  type="number"
+                  value={roadWidthEast}
+                  onChange={(e) => handleEastRoadChange && handleEastRoadChange(Number(e.target.value) || 0)}
+                  className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
+                />
+                <span className="text-[9px] font-bold text-gray-600">FT</span>
+              </div>
             </div>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="font-bold text-[9px] text-gray-700">WEST</span>
-            <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
-              <input
-                type="number"
-                value={roadWidthWest}
-                onChange={(e) => handleWestRoadChange && handleWestRoadChange(Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
-              />
-              <span className="text-[9px] font-bold text-gray-600">FT</span>
+          )}
+
+          {roadWidthWest !== undefined && (
+            <div className="flex flex-col gap-0.5">
+              <span className="font-bold text-[9px] text-gray-700">WEST</span>
+              <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1.5 py-1">
+                <input
+                  type="number"
+                  value={roadWidthWest}
+                  onChange={(e) => handleWestRoadChange && handleWestRoadChange(Number(e.target.value) || 0)}
+                  className="w-full bg-transparent text-center font-black text-xs text-black outline-none"
+                />
+                <span className="text-[9px] font-bold text-gray-600">FT</span>
+              </div>
             </div>
-          </div>
+          )}
+
         </div>
       </div>
     </div>

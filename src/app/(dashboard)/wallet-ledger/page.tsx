@@ -869,7 +869,7 @@ export default function WalletLedgerPage() {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 font-bold text-sm uppercase tracking-wide text-slate-700 flex justify-between items-center">
             <span>Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : selectedMonth})</span>
-            <span className="text-xs text-slate-500 font-normal">Banking Passbook Format</span>
+            <span className="text-xs text-slate-500 font-normal"> Passbook </span>
           </div>
 
           {loading ? (

@@ -80,6 +80,63 @@ export default function BoundaryLabels({
   const currentRoadHeight = roadWidth * scale;
   const siteLayoutYOffset = 115 + (currentRoadHeight - (15 * scale));
 
+  // --- DYNAMIC BOUNDARY TEXT & COMPASS ROTATION (PLOT DIMENSIONS REMAIN FIXED) ---
+  const opt = (roadFacingOption || "").toUpperCase();
+  
+  const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
+  const foundDirs: { dir: string; index: number }[] = [];
+  allDirs.forEach((dir) => {
+    const idx = opt.indexOf(dir);
+    if (idx !== -1) {
+      foundDirs.push({ dir, index: idx });
+    }
+  });
+  foundDirs.sort((a, b) => a.index - b.index);
+
+  let mainRoad = "SOUTH";
+  if (foundDirs.length > 0) {
+    mainRoad = foundDirs[0].dir;
+  }
+
+  // Assuming standard inputs passed to props:
+  // top = North, bottom = South, left = West, right = East
+  const bNorth = topBoundary;
+  const bSouth = bottomBoundary;
+  const bWest = leftBoundary;
+  const bEast = rightBoundary;
+
+  let activeBottomBoundary = bSouth;
+  let activeTopBoundary = bNorth;
+  let activeLeftBoundary = bWest;
+  let activeRightBoundary = bEast;
+  let compassRotation = 0;
+
+  if (mainRoad === "NORTH") {
+    activeBottomBoundary = bNorth;
+    activeTopBoundary = bSouth;
+    activeLeftBoundary = bEast;
+    activeRightBoundary = bWest;
+    compassRotation = 180;
+  } else if (mainRoad === "SOUTH") {
+    activeBottomBoundary = bSouth;
+    activeTopBoundary = bNorth;
+    activeLeftBoundary = bWest;
+    activeRightBoundary = bEast;
+    compassRotation = 0;
+  } else if (mainRoad === "EAST") {
+    activeBottomBoundary = bEast;
+    activeTopBoundary = bWest;
+    activeLeftBoundary = bSouth;
+    activeRightBoundary = bNorth;
+    compassRotation = 90;
+  } else if (mainRoad === "WEST") {
+    activeBottomBoundary = bWest;
+    activeTopBoundary = bEast;
+    activeLeftBoundary = bNorth;
+    activeRightBoundary = bSouth;
+    compassRotation = 270;
+  }
+
   const renderSideDimension = (
     p1: { x: number; y: number },
     p2: { x: number; y: number },
@@ -147,10 +204,11 @@ export default function BoundaryLabels({
 
   return (
     <g style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "sans-serif" }}>
-      {renderSideDimension(pTopLeft, pTopRight, topBoundary, dimB)}
-      {renderSideDimension(pBottomLeft, pBottomRight, bottomBoundary, dimA)}
-      {renderSideDimension(pTopRight, pBottomRight, rightBoundary, dimD)}
-      {renderSideDimension(pTopLeft, pBottomLeft, leftBoundary, dimC)}
+      {/* PLOT DIMENSIONS STRICTLY FIXED TO THEIR PHYSICAL SIDES (Width remains Width, Length remains Length) */}
+      {renderSideDimension(pTopLeft, pTopRight, activeTopBoundary, dimB)}         {/* Top = Width (Side B) */}
+      {renderSideDimension(pBottomLeft, pBottomRight, activeBottomBoundary, dimA)}   {/* Bottom = Width (Side A) */}
+      {renderSideDimension(pTopRight, pBottomRight, activeRightBoundary, dimD)}     {/* Right = Length (Side D) */}
+      {renderSideDimension(pTopLeft, pBottomLeft, activeLeftBoundary, dimC)}       {/* Left = Length (Side C) */}
 
       <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + siteLayoutYOffset})`}>
         <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "18px", fontWeight: "bold" }}>
@@ -158,53 +216,27 @@ export default function BoundaryLabels({
         </text>
       </g>
 
-      {/* COMPASS (NORTH SYMBOL) REDUCED FURTHER BY 20% & WITH RIGHT ROAD OFFSET */}
+      {/* COMPASS (DYNAMICALLY ROTATED BASED ON MAIN ROAD / FACING OPTION) */}
       {(() => {
-        let rotation = 0; 
-        const opt = (roadFacingOption || "").toUpperCase();
-
-        if (opt.includes("SOUTH")) {
-          rotation = 0;    
-        } else if (opt.includes("NORTH")) {
-          rotation = 180;  
-        } else if (opt.includes("EAST")) {
-          rotation = 90;   
-        } else if (opt.includes("WEST")) {
-          rotation = 270;  
-        }
-
         const isFourSide = opt.includes("4 SIDE");
         const isThreeSide = opt.includes("3 SIDE");
-
-        const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
-        const foundDirs: { dir: string; index: number }[] = [];
-        allDirs.forEach((dir) => {
-          const idx = opt.indexOf(dir);
-          if (idx !== -1) {
-            foundDirs.push({ dir, index: idx });
-          }
-        });
-
-        let mainRoad = "SOUTH";
-        if (foundDirs.length > 0) mainRoad = foundDirs[0].dir;
-
-        const compassMap: Record<string, { top: string; left: string; right: string }> = {
-          NORTH: { top: "SOUTH", left: "WEST", right: "EAST" },
-          SOUTH: { top: "NORTH", left: "EAST", right: "WEST" },
-          EAST: { top: "WEST", left: "SOUTH", right: "NORTH" },
-          WEST: { top: "EAST", left: "NORTH", right: "SOUTH" },
+        
+        const compassMap: Record<string, string> = {
+          SOUTH: "EAST",
+          NORTH: "WEST",
+          EAST: "NORTH",
+          WEST: "SOUTH"
         };
-        const currentCompass = compassMap[mainRoad] || compassMap["SOUTH"];
-        const hasRightRoad = isFourSide || isThreeSide || foundDirs.some(f => f.dir === currentCompass.right);
-
+        const rightDir = compassMap[mainRoad] || "EAST";
+        const hasRightRoad = isFourSide || isThreeSide || foundDirs.some(f => f.dir === rightDir);
         const extraRightOffset = hasRightRoad ? currentRoadHeight : 0;
 
         return (
-          <g transform={`translate(${maxX + 130 + extraRightOffset}, ${pTopRight.y + 30}) rotate(${rotation})`}>
+          <g transform={`translate(${maxX + 120 + extraRightOffset}, ${pTopRight.y + 30}) rotate(${compassRotation})`}>
             <circle cx="0" cy="0" r="28" fill="#121212" stroke="white" strokeWidth="1.2" />
             <polygon points="0,-22 -22,11 0,5" fill="white" />
             <polygon points="0,-22 22,11 0,5" fill="#2c7ac9" stroke="white" strokeWidth="0.8" />
-            <text x="0" y="-39" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-rotation}, 0, -39)`} style={{ fontSize: "22px", fontWeight: "bold" }}>
+            <text x="0" y="-39" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-compassRotation}, 0, -39)`} style={{ fontSize: "22px", fontWeight: "bold" }}>
               N
             </text>
           </g>

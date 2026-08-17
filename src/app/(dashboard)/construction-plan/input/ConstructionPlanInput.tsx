@@ -119,6 +119,41 @@ export default function ConstructionPlanInput() {
   const totalWidthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
   const plotArea = totalLengthFt * totalWidthFt;
 
+  // Floor Manager States & Default Area Calculation (Dynamic dimensions sync, no hardcoding)
+  const [floorData, setFloorData] = useState<Record<string, FloorData>>({
+    "GROUND FLOOR": { 
+      length: totalWidthFt, 
+      width: totalLengthFt, 
+      area: plotArea 
+    }
+  });
+
+  // Added useEffect to dynamically update Ground Floor Width and Length when plot dimensions change
+  useEffect(() => {
+    const currentWidth = totalLengthFt;
+    const currentLength = totalWidthFt;
+    const calculatedArea = currentWidth * currentLength;
+
+    setFloorData(prev => ({
+      ...prev,
+      "GROUND FLOOR": {
+        ...prev["GROUND FLOOR"],
+        width: currentWidth,
+        length: currentLength,
+        area: calculatedArea > 0 ? calculatedArea : (prev["GROUND FLOOR"]?.area || 0)
+      }
+    }));
+  }, [totalLengthFt, totalWidthFt]);
+
+  // Added floorBuiltUpAreas mapping for CAD / Elevation Sync
+  const floorBuiltUpAreas = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    Object.keys(floorData).forEach((floor) => {
+      map[floor] = floorData[floor]?.area || 0;
+    });
+    return map;
+  }, [floorData]);
+
   // Fetch Clients
   useEffect(() => {
     const fetchData = async () => {
@@ -145,11 +180,6 @@ export default function ConstructionPlanInput() {
     fetchData();
   }, []);
 
-  // Floor Manager States & Default Area Calculation
-  const [floorData, setFloorData] = useState<Record<string, FloorData>>({
-    "GROUND FLOOR": { length: 0, width: 0, area: plotArea }
-  });
-
   const updateFloorAreaDirect = (floor: string, areaVal: number) => {
     setFloorData(prev => ({
       ...prev,
@@ -157,7 +187,21 @@ export default function ConstructionPlanInput() {
     }));
   };
 
-  // Auto-calculate Ground Floor Built-Up Area
+  // Added updateFloorDimensions function to handle floor-wise length, width and area updates
+  const updateFloorDimensions = (floor: string, length: number, width: number) => {
+    const area = Number((length * width).toFixed(2));
+    setFloorData(prev => ({
+      ...prev,
+      [floor]: {
+        ...(prev[floor] || { area: 0 }),
+        length,
+        width,
+        area: area > 0 ? area : (prev[floor]?.area || 0)
+      }
+    }));
+  };
+
+  // Auto-calculate Ground Floor Built-Up Area based on coverage rules
   useEffect(() => {
     const totalLength = totalLengthFt;
     const totalWidth = totalWidthFt;
@@ -337,7 +381,7 @@ export default function ConstructionPlanInput() {
     setPlotShape("");
     handleResetDimensions();
     setSelectedFloors(DEFAULT_FLOORS);
-    setFloorData({ "GROUND FLOOR": { length: 0, width: 0, area: 1200 } });
+    setFloorData({ "GROUND FLOOR": { length: 0, width: 0, area: 0 } });
     setFloorRooms({});
     setBoundaryNorth("");
     setBoundarySouth("");
@@ -449,7 +493,7 @@ export default function ConstructionPlanInput() {
       <line x1="80" y1="170" x2="220" y2="170" stroke="black" strokeWidth="1.5" strokeDasharray="4" />
       <text x="150" y="120" textAnchor="middle" fontSize="8" fontWeight="700">FIRST FLOOR SLAB</text>
       <text x="150" y="230" textAnchor="middle" fontSize="8" fontWeight="700">GROUND FLOOR SLAB</text>
-      <text x="150" y="305" textAnchor="middle" fontSize="9" fontWeight="900">SECTION VIEW (A-A')</text>
+      <text x="150" y="305" textAnchor="middle" fontSize="9" fontWeight="900">SECTION VIEW (A-A' )</text>
     </svg>
   );
 
@@ -533,6 +577,7 @@ export default function ConstructionPlanInput() {
         roomEditorFloor={roomEditorFloor}
         floorRooms={floorRooms}
         updateFloorAreaDirect={updateFloorAreaDirect}
+        updateFloorDimensions={updateFloorDimensions}
         applyBhkTemplate={applyBhkTemplate}
         openFloorCadModal={(_floor) => setIsCadModalOpen(true)}
         ensureFloorRooms={ensureFloorRooms}
@@ -540,6 +585,9 @@ export default function ConstructionPlanInput() {
         toggleRoom={toggleRoom}
         updateRoom={updateRoom}
         BHK_CONFIGURATIONS={BHK_CONFIGURATIONS}
+        plotLength={totalLengthFt}
+        plotWidth={totalWidthFt}
+        groundCoverage={coverageType}
       />
 
       <div className="flex gap-2 border-t-2 border-black pt-3">
@@ -602,6 +650,9 @@ export default function ConstructionPlanInput() {
         mouseCurrentPoint={null}
         totalFloors={selectedFloors.length}
         selectedFloors={selectedFloors}
+        floorBuiltUpAreas={floorBuiltUpAreas}
+        floorData={floorData}
+        
         // Strict safe passing for MOS when 100% coverage
         frontMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.front}
         rearMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.rear}

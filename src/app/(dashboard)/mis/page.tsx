@@ -30,11 +30,15 @@ interface MISRecord {
   estimates?: { user_id: string; }[];
   clients?: { mobile_no?: string; email_id?: string; };
   fee?: number;
+  floor_details?: any;
+  property_type?: string;
+  property_address?: string;
+  plot_area?: string;
+  rate_per_sqft?: number;
 }
 
 export default function MISPage() {
   const router = useRouter();
-  const menuRef = useRef<any>(null);
   const [records, setRecords] = useState<MISRecord[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -100,7 +104,6 @@ export default function MISPage() {
     fetchUserWalletAndData();
   }, []);
 
-  // Wallet check for Create Entry button
   const handleCreateClick = () => {
     if (walletBalance < 100) {
       alert("Access Denied: Wallet balance is less than ₹100. Please recharge first.");
@@ -109,7 +112,6 @@ export default function MISPage() {
     router.push('/estimate');
   };
 
-  // Filter Logic for Ref No & Date
   const filteredRecords = useMemo(() => {
     return records.filter(rec => {
       const matchRef = (rec.ref_no || "").toLowerCase().includes(filterRefNo.toLowerCase());
@@ -133,7 +135,6 @@ export default function MISPage() {
     });
   }, [records, filterRefNo, filterDate, filterClient, filterRepresentative, filterCaseType, filterStatus]);
 
-  // Metrics Calculation
   const metrics = useMemo(() => {
     return records.reduce((acc, curr) => {
       const currentStatus = (curr.status || "").toUpperCase();
@@ -148,25 +149,55 @@ export default function MISPage() {
     }, { total: 0, received: 0, pending: 0, waived: 0 });
   }, [records]);
 
-  // --- FUNCTION 1: Update Status ---
+  // Core Mutation Engine for Status Handling and Revenue Auditing (#PROTECT & #SYNC)
   const updateStatus = async (id: string, newStatus: string) => {
     try {
-      const { error } = await supabase
+      setActiveMenuId(null);
+
+      // 1. Session state verification to protect multi-tenant integrity (#PROTECT)
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        alert("⚠️ CRITICAL SECURITY WARNING: Session expired. Action blocked.");
+        return;
+      }
+
+      const exactUppercaseStatus = newStatus.toUpperCase();
+
+      // 2. Multi-layer validation constraint for revenue loss prevention
+      if (exactUppercaseStatus === 'WAIVED') {
+        const verifyWaived = confirm("WARNING: Are you sure you want to mark this consulting fee as WAIVED? This will immediately affect revenue metrics.");
+        if (!verifyWaived) return;
+      }
+
+      // 3. Secure database write transaction sequence with Typecasting and Row Select Sync (#SYNC)
+            
+      const numericId = parseInt(id, 10);
+      if (isNaN(numericId)) {
+        throw new Error("Invalid Record ID Format detected on Client Runtime Engine.");
+      }
+
+      const { data, error } = await supabase
         .from('mis_records')
-        .update({ status: newStatus })
-        .eq('id', id);
+        .update({ status: exactUppercaseStatus })
+        .eq('id', numericId)
+        .select(); // Real-time row return to verify commit execution
 
       if (error) throw error;
 
-      setRecords(prev =>
-        prev.map(r => (r.id === id ? { ...r, status: newStatus as any } : r))
-      );
-    } catch (err: any) {
-      alert("Failed to update status: " + err.message);
+      if (!data || data.length === 0) {
+        alert("⚠️ DATABASE WRITE FAILED: Row match query executed but 0 records updated in DB ledger. Please check RLS or connection state.");
+        return;
+      }
+
+      // 4. Guaranteed Local UI Synchronization matrix allocation (#CLEAN)
+      setRecords(prev => prev.map(r => String(r.id) === String(id) ? { ...r, status: exactUppercaseStatus as any } : r));
+      
+    } catch (error: any) {
+      
+      alert("Error processing mutation status updates: " + error.message);
     }
   };
 
-  // --- FUNCTION 2: Reopen Case (Fixed & Robust) ---
   const handleReopen = async (record: any) => {
     try {
       let parsedFloorDetails = record.floor_details;
@@ -214,7 +245,6 @@ export default function MISPage() {
     }
   };
 
-  // --- FUNCTION 3: Archive / Delete Trigger ---
   const handleArchive = (id: string) => {
     setRecordToDelete(id);
     setConfirmPassword('');
@@ -222,7 +252,6 @@ export default function MISPage() {
     setIsAuthModalOpen(true);
   };
 
-  // --- FUNCTION 4: Execute Secure Delete with Password ---
   const executeSecureDelete = async () => {
     if (!recordToDelete) return;
     try {
@@ -259,16 +288,12 @@ export default function MISPage() {
     }
   };
 
-  // --- FUNCTION 5: WhatsApp Broadcast (Advanced Grouping & Loading Protection) ---
+ // Broadcast Communication Features Channels (Grouped by Client & Representative for Pending Cases)
   const triggerWhatsAppBroadcast = async () => {
-    if (loading) {
-      alert("⚠️ Please wait, active engine tables are still syncing...");
-      return;
-    }
-
     try {
       setLoading(true);
 
+      // Get logged-in user details using profiles table schema (full_name, mobile, email)
       const { data: { user } } = await supabase.auth.getUser();
       let loggedInUserName = "Admin / Executive";
       let loggedInUserMobile = "";
@@ -283,24 +308,31 @@ export default function MISPage() {
         if (userProfile) {
           loggedInUserName = userProfile.full_name || "Admin";
           loggedInUserMobile = userProfile.mobile || "";
+        } else {
+          loggedInUserName = user.user_metadata?.full_name || user.email?.split('@')[0] || "Admin";
         }
       }
 
+      // 1. Get filtered records from current view (Case-insensitive check for PENDING or FINALIZED)
       let targetRecords = filteredRecords.filter(r => {
         const s = String(r.status || "").trim().toUpperCase();
-        return s === 'PENDING' || s === 'FINALIZED' || s === '';
+        return s === 'PENDING' || s === 'FINALIZED';
       });
 
       if (targetRecords.length === 0) {
-        targetRecords = records;
+        targetRecords = records.filter(r => {
+          const s = String(r.status || "").trim().toUpperCase();
+          return s === 'PENDING' || s === 'FINALIZED';
+        });
       }
 
       if (targetRecords.length === 0) {
-        alert("⚠️ No records found in the database to broadcast!");
+        alert("⚠️ No pending or finalized cases found based on the current filter/view!");
         setLoading(false);
         return;
       }
 
+      // 2. Group records by Client Name & Representative combination
       const groupedMap: { [key: string]: any[] } = {};
 
       targetRecords.forEach(record => {
@@ -317,6 +349,7 @@ export default function MISPage() {
       let broadcastCount = 0;
       let emailFallbackCount = 0;
 
+      // 3. Loop through each unique group and build message
       for (const groupKey of Object.keys(groupedMap)) {
         const [clientName, repName] = groupKey.split('_|_');
         const recordsGroup = groupedMap[groupKey];
@@ -324,6 +357,7 @@ export default function MISPage() {
         let targetMobile = "";
         let targetEmail = "";
 
+        // Check if mobile or email exists directly in the record
         for (const rec of recordsGroup) {
           if (rec.mobile_no) targetMobile = rec.mobile_no;
           if (rec.email_id) targetEmail = rec.email_id;
@@ -333,6 +367,7 @@ export default function MISPage() {
           if (rec.clients?.email_id) targetEmail = rec.clients.email_id;
         }
 
+        // If not in record, fetch from 'clients' table using client_name
         if ((!targetMobile || !targetEmail) && clientName !== "Valued Client") {
           try {
             const { data: clientDbData } = await supabase
@@ -348,14 +383,42 @@ export default function MISPage() {
           } catch (e) {}
         }
 
+        // If still no mobile, check representative in clients or profiles table
+        if (!targetMobile && repName && repName !== "General") {
+          try {
+            const { data: repClientData } = await supabase
+              .from('clients')
+              .select('mobile_no, email_id')
+              .ilike('representative_name', `%${repName}%`)
+              .maybeSingle();
+
+            if (repClientData) {
+              if (repClientData.mobile_no) targetMobile = repClientData.mobile_no;
+              if (repClientData.email_id && !targetEmail) targetEmail = repClientData.email_id;
+            } else {
+              const { data: repProfileData } = await supabase
+                .from('profiles')
+                .select('mobile, email')
+                .ilike('full_name', `%${repName}%`)
+                .maybeSingle();
+
+              if (repProfileData) {
+                if (repProfileData.mobile) targetMobile = repProfileData.mobile;
+                if (repProfileData.email && !targetEmail) targetEmail = repProfileData.email;
+              }
+            }
+          } catch (e) {}
+        }
+
         let totalPendingFee = 0;
         recordsGroup.forEach(rec => {
-          const fee = parseFloat(String(rec.fee_standard || rec.fee || 0));
+          const fee = parseFloat(rec.fee_standard || rec.fee || 0);
           if (!isNaN(fee)) totalPendingFee += fee;
         });
 
+        // 4. Constructing Professional Message Format
         let message = `Hello ${clientName} ${repName},\n\n`;
-        message += `Here is the summary of your cases (${repName}):\n\n`;
+        message += `Here is the summary of your Pending Cases list (${repName}):\n\n`;
         
         message += `REF NO | DATE | CUSTOMER | TYPE | FEE | STATUS\n`;
         message += `--------------------------------------------------\n`;
@@ -372,49 +435,54 @@ export default function MISPage() {
         });
 
         message += `--------------------------------------------------\n`;
-        message += `Total Cases: ${recordsGroup.length}\n`;
-        message += `Total Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
-        message += `Please review and clear dues.\n\n`;
-        message += `Regards,\n${loggedInUserName}`;
-        if (loggedInUserMobile) message += `\n📞 ${loggedInUserMobile}`;
+        message += `Total Pending Cases: ${recordsGroup.length}\n`;
+        message += `Total Pending Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
+        message += `Please review and clear the dues at your earliest convenience.\n\n`;
+        
+        message += `Thanks & Regards,\n`;
+        message += `${loggedInUserName}`;
+        if (loggedInUserMobile) {
+          message += `\n📞 ${loggedInUserMobile}`;
+        }
 
         const cleanMobile = String(targetMobile || "").replace(/\D/g, '');
 
+        // 5. Send via WhatsApp if valid mobile exists, otherwise fallback to Email if email exists
         if (cleanMobile.length >= 10) {
           const encodedMessage = encodeURIComponent(message);
-          window.open(`https://wa.me/91${cleanMobile}?text=${encodedMessage}`, '_blank');
+          const whatsappUrl = `https://wa.me/91${cleanMobile}?text=${encodedMessage}`;
+          window.open(whatsappUrl, '_blank');
           broadcastCount++;
         } else if (targetEmail && targetEmail.includes('@')) {
-          const emailSubject = encodeURIComponent(`Cases Summary - ${clientName}`);
+          const emailSubject = encodeURIComponent(`Pending Cases Summary - ${clientName}`);
           const emailBody = encodeURIComponent(message);
-          window.open(`mailto:${targetEmail}?subject=${emailSubject}&body=${emailBody}`, '_blank');
+          const mailtoUrl = `mailto:${targetEmail}?subject=${emailSubject}&body=${emailBody}`;
+          window.open(mailtoUrl, '_blank');
           emailFallbackCount++;
+        } else {
+          
         }
       }
 
       if (broadcastCount > 0 || emailFallbackCount > 0) {
         alert(`✅ Broadcast sent successfully!\n- WhatsApp opened: ${broadcastCount}\n- Email fallback opened: ${emailFallbackCount}`);
       } else {
-        alert("⚠️ No valid mobile numbers or emails found in the records to broadcast. Please ensure your records contain 'mobile_no' or 'email_id'.");
+        alert("⚠️ Could not send broadcast. Please ensure valid mobile numbers or email IDs are saved in the database.");
       }
 
     } catch (error: any) {
-      alert("An error occurred during WhatsApp broadcast.");
+      
+      alert("An error occurred while generating the broadcast.");
     } finally {
       setLoading(false);
     }
   };
 
-  // --- FUNCTION 6: Email Broadcast (Advanced Grouping & Loading Protection) ---
-  const triggerEmailBroadcast = async () => {
-    if (loading) {
-      alert("⚠️ Please wait, active engine tables are still syncing...");
-      return;
-    }
-
+const triggerEmailBroadcast = async () => {
     try {
       setLoading(true);
 
+      // Get logged-in user details
       const { data: { user } } = await supabase.auth.getUser();
       let loggedInUserName = "Admin / Executive";
       let loggedInUserEmail = "";
@@ -431,24 +499,32 @@ export default function MISPage() {
           loggedInUserName = userProfile.full_name || "Admin";
           loggedInUserEmail = userProfile.email || user.email || "";
           loggedInUserMobile = userProfile.mobile || "";
+        } else {
+          loggedInUserName = user.user_metadata?.full_name || user.email?.split('@')[0] || "Admin";
+          loggedInUserEmail = user.email || "";
         }
       }
 
+      // 1. Get filtered records
       let targetRecords = filteredRecords.filter(r => {
         const s = String(r.status || "").trim().toUpperCase();
-        return s === 'PENDING' || s === 'FINALIZED' || s === '';
+        return s === 'PENDING' || s === 'FINALIZED';
       });
 
       if (targetRecords.length === 0) {
-        targetRecords = records;
+        targetRecords = records.filter(r => {
+          const s = String(r.status || "").trim().toUpperCase();
+          return s === 'PENDING' || s === 'FINALIZED';
+        });
       }
 
       if (targetRecords.length === 0) {
-        alert("⚠️ No records found in the database to broadcast!");
+        alert("⚠️ No pending or finalized cases found based on the current filter/view!");
         setLoading(false);
         return;
       }
 
+      // 2. Group records by Client & Representative
       const groupedMap: { [key: string]: any[] } = {};
 
       targetRecords.forEach(record => {
@@ -464,6 +540,7 @@ export default function MISPage() {
 
       let emailCount = 0;
 
+      // 3. Loop through each group
       for (const groupKey of Object.keys(groupedMap)) {
         const [clientName, repName] = groupKey.split('_|_');
         const recordsGroup = groupedMap[groupKey];
@@ -487,16 +564,20 @@ export default function MISPage() {
           } catch (e) {}
         }
 
-        if (!targetEmail || !targetEmail.includes('@')) continue;
+        if (!targetEmail || !targetEmail.includes('@')) {
+          
+          continue;
+        }
 
         let totalPendingFee = 0;
         recordsGroup.forEach(rec => {
-          const fee = parseFloat(String(rec.fee_standard || rec.fee || 0));
+          const fee = parseFloat(rec.fee_standard || rec.fee || 0);
           if (!isNaN(fee)) totalPendingFee += fee;
         });
 
+        // Build Email Content
         let emailBody = `Hello ${clientName},\n\n`;
-        emailBody += `Here is the summary of your cases (Representative: ${repName}):\n\n`;
+        emailBody += `Here is the summary of your Pending Cases (Representative: ${repName}):\n\n`;
         
         emailBody += `REF NO | DATE | CUSTOMER | TYPE | FEE | STATUS\n`;
         emailBody += `--------------------------------------------------\n`;
@@ -513,17 +594,20 @@ export default function MISPage() {
         });
 
         emailBody += `--------------------------------------------------\n`;
-        emailBody += `Total Cases: ${recordsGroup.length}\n`;
-        emailBody += `Total Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
-        emailBody += `Please review and clear dues.\n\n`;
-        emailBody += `Regards,\n${loggedInUserName}`;
+        emailBody += `Total Pending Cases: ${recordsGroup.length}\n`;
+        emailBody += `Total Pending Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
+        emailBody += `Please review and clear the dues at your earliest convenience.\n\n`;
+        
+        emailBody += `Thanks & Regards,\n`;
+        emailBody += `${loggedInUserName}`;
         if (loggedInUserMobile) emailBody += `\n📞 ${loggedInUserMobile}`;
         if (loggedInUserEmail) emailBody += `\n✉️ ${loggedInUserEmail}`;
 
-        const emailSubject = `Cases Summary - ${clientName} (${repName})`;
+        const emailSubject = `Pending Cases Summary - ${clientName} (${repName})`;
 
+        // 4. ASK USER: Gmail ya Outlook kisme kholna hai?
         const choice = window.prompt(
-          `Recipient Email: ${targetEmail}\n\nChoose your email client:\nType 'gmail' for Google Gmail\nType 'outlook' for Microsoft Outlook\n(Click 'Cancel' to skip)`,
+          `Recipient Email: ${targetEmail}\n\nChoose your preferred email client:\nType 'gmail' for Google Gmail\nType 'outlook' for Microsoft Outlook\n(Click 'Cancel' to skip)`,
           'gmail'
         );
 
@@ -533,8 +617,10 @@ export default function MISPage() {
         const lowerChoice = choice.trim().toLowerCase();
 
         if (lowerChoice.includes('gmail')) {
+          // Direct web Gmail composer link
           emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(targetEmail)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         } else {
+          // Direct web Outlook composer link (Works in browser without opening native desktop app)
           emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(targetEmail)}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         }
 
@@ -545,10 +631,11 @@ export default function MISPage() {
       if (emailCount > 0) {
         alert(`✅ Email composer opened successfully for ${emailCount} recipient(s)!`);
       } else {
-        alert("⚠️ No valid email IDs found in the records to broadcast.");
+        alert("⚠️ No valid emails found to broadcast.");
       }
 
     } catch (error: any) {
+      
       alert("An error occurred while generating the email broadcast.");
     } finally {
       setLoading(false);
@@ -574,7 +661,6 @@ export default function MISPage() {
         </div>
       </div>
 
-      {/* Metrics Performance Bar Component */}
       <MetricsBar metrics={metrics} />
 
       {/* Embedded Dynamic Table Matrix */}
@@ -682,7 +768,7 @@ export default function MISPage() {
                           </div>
                         </div>
                       </td>
-                      <td className="p-2 text-slate-800 text-center">{rec.client_name ? rec.client_name.substring(0, 10).toUpperCase() : "N/A"}</td>
+                      <td className="p-2 text-slate-800 text-center">{rec.client_name ? rec.client_name.toUpperCase() : "N/A"}</td>
                       <td className="p-2 text-slate-600 text-center">{rec.representative ? rec.representative.toUpperCase() : "N/A"}</td>
                       <td className="p-2 text-slate-900 text-center">{rec.case_type ? rec.case_type.toUpperCase() : "N/A"}</td>
                       <td className="p-2 text-center">₹{(rec.fee_standard || 0).toLocaleString('en-IN')}</td>
@@ -702,7 +788,6 @@ export default function MISPage() {
                         </select>
                       </td>
                       
-                      {/* Action Menu Component */}
                       <ActionMenu 
                         rec={rec}
                         activeMenuId={activeMenuId}
@@ -719,7 +804,6 @@ export default function MISPage() {
         </div>
       </div>
 
-      {/* Delete Auth Modal Component */}
       <AuthModal 
         isOpen={isAuthModalOpen}
         setIsOpen={setIsAuthModalOpen}

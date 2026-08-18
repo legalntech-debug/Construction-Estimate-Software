@@ -66,7 +66,7 @@ export default function ConstructionPlanInput() {
   const [blueprintZoom, setBlueprintZoom] = useState(1.0);
   const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
   
-  // Initial dimensions set to 0 (No hardcoding)
+  // Initial dimensions set to 0
   const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
     A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
   });
@@ -80,14 +80,12 @@ export default function ConstructionPlanInput() {
 
   const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
 
-  // Long-term fix: Automatically reset setbackInputs when coverageType is 100_PERCENT
   useEffect(() => {
     if (coverageType === "100_PERCENT") {
       setSetbackInputs({ front: 0, rear: 0, left: 0, right: 0 });
     }
   }, [coverageType]);
 
-  // Long-term fix: If plotShape is SQUARE, sync all sides (A, B, C, D) to be equal
   useEffect(() => {
     if (plotShape === "SQUARE") {
       const sideA = dimDetails.A || { ft: 0, in: 0 };
@@ -114,38 +112,47 @@ export default function ConstructionPlanInput() {
   const [boundaryEast, setBoundaryEast] = useState("");
   const [boundaryWest, setBoundaryWest] = useState("");
 
-  // Corrected Plot Area calculation handling Feet and Inches properly
-  const totalLengthFt = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0) + Number(dimDetails.A?.in ?? 0) / 12;
-  const totalWidthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
-  const plotArea = totalLengthFt * totalWidthFt;
+  // Side A = Front Width, Side C = Depth / Length
+  const frontWidthFt = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0) + Number(dimDetails.A?.in ?? 0) / 12;
+  const depthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
+  const plotArea = frontWidthFt * depthFt;
 
-  // Floor Manager States & Default Area Calculation (Dynamic dimensions sync, no hardcoding)
   const [floorData, setFloorData] = useState<Record<string, FloorData>>({
     "GROUND FLOOR": { 
-      length: totalWidthFt, 
-      width: totalLengthFt, 
+      width: frontWidthFt, 
+      length: depthFt, 
       area: plotArea 
     }
   });
 
-  // Added useEffect to dynamically update Ground Floor Width and Length when plot dimensions change
+  // 👉 Ground Floor ke liye width = frontWidthFt, length = depthFt sync logic
   useEffect(() => {
-    const currentWidth = totalLengthFt;
-    const currentLength = totalWidthFt;
+    const currentWidth = frontWidthFt;
+    const currentLength = depthFt;
     const calculatedArea = currentWidth * currentLength;
 
-    setFloorData(prev => ({
-      ...prev,
-      "GROUND FLOOR": {
-        ...prev["GROUND FLOOR"],
-        width: currentWidth,
-        length: currentLength,
-        area: calculatedArea > 0 ? calculatedArea : (prev["GROUND FLOOR"]?.area || 0)
-      }
-    }));
-  }, [totalLengthFt, totalWidthFt]);
+    setFloorData(prev => {
+      const updated = { ...prev };
+      selectedFloors.forEach(floor => {
+        if (floor === "GROUND FLOOR") {
+          const isUnset = !updated[floor] || updated[floor].width === 0 || updated[floor].length === 0;
+          if (isUnset) {
+            updated[floor] = {
+              width: currentWidth,
+              length: currentLength,
+              area: calculatedArea > 0 ? calculatedArea : 0
+            };
+          }
+        } else {
+          if (!updated[floor]) {
+            updated[floor] = { width: 0, length: 0, area: 0 };
+          }
+        }
+      });
+      return updated;
+    });
+  }, [frontWidthFt, depthFt, selectedFloors]);
 
-  // Added floorBuiltUpAreas mapping for CAD / Elevation Sync
   const floorBuiltUpAreas = React.useMemo(() => {
     const map: Record<string, number> = {};
     Object.keys(floorData).forEach((floor) => {
@@ -154,7 +161,6 @@ export default function ConstructionPlanInput() {
     return map;
   }, [floorData]);
 
-  // Fetch Clients
   useEffect(() => {
     const fetchData = async () => {
       const { data: clientsTable, error } = await supabase
@@ -183,29 +189,25 @@ export default function ConstructionPlanInput() {
   const updateFloorAreaDirect = (floor: string, areaVal: number) => {
     setFloorData(prev => ({
       ...prev,
-      [floor]: { ...(prev[floor] || { length: 0, width: 0 }), area: areaVal }
+      [floor]: { ...(prev[floor] || { width: 0, length: 0 }), area: areaVal }
     }));
   };
 
-  // Added updateFloorDimensions function to handle floor-wise length, width and area updates
-  const updateFloorDimensions = (floor: string, length: number, width: number) => {
-    const area = Number((length * width).toFixed(2));
+  const updateFloorDimensions = (floor: string, width: number, length: number) => {
+    const area = Number((width * length).toFixed(2));
     setFloorData(prev => ({
       ...prev,
       [floor]: {
         ...(prev[floor] || { area: 0 }),
-        length,
         width,
+        length,
         area: area > 0 ? area : (prev[floor]?.area || 0)
       }
     }));
   };
 
-  // Auto-calculate Ground Floor Built-Up Area based on coverage rules
+  // 👉 Setbacks minus hone ke baad net dimensions update karna
   useEffect(() => {
-    const totalLength = totalLengthFt;
-    const totalWidth = totalWidthFt;
-    
     const rules = calculateSetbacks(
       plotArea,
       20,
@@ -214,21 +216,20 @@ export default function ConstructionPlanInput() {
       coverageType
     );
 
-    let netArea = plotArea;
     if (coverageType === "AS_PER_NORMS" || coverageType === "CUSTOM_PERCENT") {
-      const netLength = Math.max(0, totalLength - (rules.leftSetback + rules.rightSetback));
-      const netWidth = Math.max(0, totalWidth - (rules.frontSetback + rules.rearSetback));
-      netArea = netLength * netWidth;
+      const netWidth = Math.max(0, frontWidthFt - (rules.leftSetback + rules.rightSetback));
+      const netLength = Math.max(0, depthFt - (rules.frontSetback + rules.rearSetback));
+      if (netWidth > 0 && netLength > 0) {
+        updateFloorDimensions("GROUND FLOOR", netWidth, netLength);
+      }
     } else if (coverageType === "100_PERCENT") {
-      netArea = totalLength * totalWidth;
-    }
-
-    if (netArea > 0) {
-      updateFloorAreaDirect("GROUND FLOOR", Number(netArea.toFixed(2)));
+      if (frontWidthFt > 0 && depthFt > 0) {
+        updateFloorDimensions("GROUND FLOOR", frontWidthFt, depthFt);
+      }
     }
   }, [
-    totalLengthFt, 
-    totalWidthFt, 
+    frontWidthFt, 
+    depthFt, 
     setbackInputs.front, 
     setbackInputs.rear, 
     setbackInputs.left, 
@@ -381,7 +382,7 @@ export default function ConstructionPlanInput() {
     setPlotShape("");
     handleResetDimensions();
     setSelectedFloors(DEFAULT_FLOORS);
-    setFloorData({ "GROUND FLOOR": { length: 0, width: 0, area: 0 } });
+    setFloorData({ "GROUND FLOOR": { width: 0, length: 0, area: 0 } });
     setFloorRooms({});
     setBoundaryNorth("");
     setBoundarySouth("");
@@ -585,8 +586,8 @@ export default function ConstructionPlanInput() {
         toggleRoom={toggleRoom}
         updateRoom={updateRoom}
         BHK_CONFIGURATIONS={BHK_CONFIGURATIONS}
-        plotLength={totalLengthFt}
-        plotWidth={totalWidthFt}
+        plotLength={frontWidthFt}
+        plotWidth={depthFt}
         groundCoverage={coverageType}
       />
 
@@ -653,7 +654,6 @@ export default function ConstructionPlanInput() {
         floorBuiltUpAreas={floorBuiltUpAreas}
         floorData={floorData}
         
-        // Strict safe passing for MOS when 100% coverage
         frontMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.front}
         rearMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.rear}
         leftMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.left}

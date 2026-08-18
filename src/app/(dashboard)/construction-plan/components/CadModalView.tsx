@@ -82,7 +82,7 @@ interface CadModalViewProps {
   selectedFloors?: string[];
   floorBuiltUpAreas?: { [key: string]: number };
   floorData?: Record<string, { length: number; width: number; area: number }>;
-  }
+}
 
 export default function CadModalView({
   isCadModalOpen,
@@ -150,20 +150,18 @@ export default function CadModalView({
   totalFloors = 1,
   selectedFloors = [],
   floorBuiltUpAreas = {},
-  floorData = {}, // 👉 Yeh line yahan add kar dein!
+  floorData = {},
 }: CadModalViewProps) {
   
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
   const [mosAngles, setMosAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
   const [sideSlant, setSideSlant] = useState<Record<string, "MID" | "LEFT" | "RIGHT">>({ A: "MID", B: "MID", C: "MID", D: "MID", E: "MID", F: "MID" });
   
-  // Local Road Width States if parent props are not passed
   const [localNorthRoad, setLocalNorthRoad] = useState<number>(roadWidthNorth ?? 15);
   const [localSouthRoad, setLocalSouthRoad] = useState<number>(roadWidthSouth ?? 15);
   const [localEastRoad, setLocalEastRoad] = useState<number>(roadWidthEast ?? 15);
   const [localWestRoad, setLocalWestRoad] = useState<number>(roadWidthWest ?? 15);
 
-  // Sync with props if they change from parent
   useEffect(() => {
     if (roadWidthNorth !== undefined) setLocalNorthRoad(roadWidthNorth);
   }, [roadWidthNorth]);
@@ -182,7 +180,6 @@ export default function CadModalView({
   const currentEastRoad = localEastRoad;
   const currentWestRoad = localWestRoad;
 
-  // STRICT ROAD DETECTION BASED ON roadFacingOption
   const roadOptUpper = (roadFacingOption || "").toUpperCase();
   const hasNorthRoad = roadOptUpper.includes("NORTH") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI") || roadOptUpper.includes("CORNER");
   const hasSouthRoad = roadOptUpper.includes("SOUTH") || roadOptUpper.includes("ALL") || roadOptUpper.includes("MULTI");
@@ -207,8 +204,6 @@ export default function CadModalView({
   }
   
   const [editModeToggle, setEditModeToggle] = useState<"PLOT" | "MOS">("PLOT");
-
-  // Local pan state to ensure smooth dragging and panning regardless of parent props
   const [localPan, setLocalPan] = useState<{ x: number; y: number }>(panOffset || { x: 0, y: 0 });
 
   useEffect(() => {
@@ -251,9 +246,6 @@ export default function CadModalView({
 
   const currentZoom = cadZoom && cadZoom > 0.1 ? cadZoom : 1.2;
 
-  // ==========================================
-  // MOBILE TOUCH GESTURES (2-FINGER PINCH ZOOM & 1-FINGER PAN)
-  // ==========================================
   useEffect(() => {
     const element = canvasWrapperRef.current;
     if (!element) return;
@@ -322,7 +314,6 @@ export default function CadModalView({
     if (side === "D" && setRightMos) setRightMos(val);
   };
   
-  // STRICT POSITIVE ROAD WIDTH VALIDATION HANDLERS
   const handleNorthRoadChange = (val: number) => {
     const cleanVal = isNaN(val) ? 15 : Math.max(1, val);
     setLocalNorthRoad(cleanVal);
@@ -348,10 +339,34 @@ export default function CadModalView({
 
   const isSimpleRect = (plotShape === "RECTANGLE" || plotShape === "SQUARE") && !isMultiDimShape;
 
-  let dimA = Number(plotDimensions?.A) || 30;
+  let dimA = Number(plotDimensions?.A) || 20;
   let dimB = isSimpleRect ? dimA : (Number(plotDimensions?.B) || dimA);
-  let dimC = Number(plotDimensions?.C) || 40;
+  let dimC = Number(plotDimensions?.C) || 50;
   let dimD = isSimpleRect ? dimC : (Number(plotDimensions?.D) || dimC);
+
+  // 👉 Strict Ground & Upper Floor Dimensions Normalization for CAD Elevation View
+  const normalizedFloorData: Record<string, { length: number; width: number; area: number }> = {};
+  if (floorData) {
+    Object.keys(floorData).forEach(floorKey => {
+      const fData = floorData[floorKey];
+      if (fData) {
+        let fW = Number(fData.width) || dimA;
+        let fL = Number(fData.length) || dimC;
+        
+        // Prevent accidental swap if width > length on a standard rectangular plot
+        if (floorKey.toUpperCase().includes("GROUND") && fW > fL && fL <= dimA) {
+          const temp = fW;
+          fW = fL;
+          fL = temp;
+        }
+        normalizedFloorData[floorKey] = {
+          width: fW,
+          length: fL,
+          area: Number(fData.area) || (fW * fL)
+        };
+      }
+    });
+  }
 
   const scale = 5.5; 
   const bottomWidth = dimA * scale;
@@ -677,7 +692,7 @@ export default function CadModalView({
                       handlePolygonClick={() => {}}
                     />
 
-                    {/* RENDER SELECTED FLOORS ELEVATION SIDE-BY-SIDE / OFFSET */}
+                    {/* RENDER SELECTED FLOORS ELEVATION SIDE-BY-SIDE WITH NORMALIZED FLOOR DATA */}
                     <CadFloorElevationRenderer
                       totalFloors={totalFloors}
                       builtUpPoints={builtUpPoints}
@@ -685,8 +700,8 @@ export default function CadModalView({
                       selectedFloors={selectedFloors}
                       roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
                       roadFacingOption={roadFacingOption}
-                      floorBuiltUpAreas={floorBuiltUpAreas} // 👉 Yeh prop yahan pass karein
-                      floorData={floorData} // 👉 Yeh prop yahan pass hona chahiye
+                      floorBuiltUpAreas={floorBuiltUpAreas}
+                      floorData={normalizedFloorData}
                     />
 
                     <g>
@@ -829,7 +844,6 @@ export default function CadModalView({
                       roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
                     />
 
-                    {/* Active Directional Road Widths passed to RoadRenderer with strictly positive widths */}
                     <RoadRenderer
                       roadFacingOption={roadFacingOption}
                       bottomBoundary={boundarySouth}
@@ -925,7 +939,6 @@ export default function CadModalView({
             </PlotCadCanvas>
           </div>
 
-          {/* Right Sidebar Dimensions Component */}
           <CadSidebarDimensions
             editModeToggle={editModeToggle}
             setEditModeToggle={setEditModeToggle}

@@ -258,7 +258,7 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 <option value="PREMIUM PLAN">PREMIUM PLAN</option>
-                <option value="BASIC ENGINE PLAN">BASIC ENGINE PLAN</option>
+                <option value="BASIC PLAN">BASIC PLAN</option>
               </select>
             </div>
           </div>

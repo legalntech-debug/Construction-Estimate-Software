@@ -15,7 +15,7 @@ export default function SignupPage() {
   const [mounted, setMounted] = useState(false);
   const [agreeTermsPolicy, setAgreeTermsPolicy] = useState(false); 
   const [showTermsModal, setShowTermsModal] = useState(false);
-  const [hasViewedTerms, setHasViewedTerms] = useState(false); // <--- New state to track if terms modal was opened
+  const [hasViewedTerms, setHasViewedTerms] = useState(false);
 
   const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
@@ -54,7 +54,7 @@ export default function SignupPage() {
     email: '',
     password: '',
     userType: 'INDIVIDUAL',
-    planType: 'BASIC PLAN',
+    planType: 'BASIC PLAN', // Forced to BASIC PLAN for normal registrations
     firmName: '',
     city: '',
     state: '',
@@ -77,11 +77,8 @@ export default function SignupPage() {
       const numericValue = value.replace(/\D/g, '').slice(0, 10);
       setForm({ ...form, mobile: numericValue });
     } else if (name === 'userType') {
-      if (value === 'INDIVIDUAL') {
-        setForm({ ...form, userType: value, planType: 'BASIC PLAN' });
-      } else {
-        setForm({ ...form, userType: value });
-      }
+      // Always keep planType as BASIC PLAN for standard public signups
+      setForm({ ...form, userType: value, planType: 'BASIC PLAN' });
     } else if (name === 'password' || name === 'email') {
       setForm({ ...form, [name]: value });
     } else {
@@ -168,7 +165,7 @@ export default function SignupPage() {
     }
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
-    const isPremium = form.planType === 'PREMIUM PLAN';
+    const isPremium = false; // Standard user signups are always BASIC PLAN
 
     const { error: profileError } = await supabase.from('profiles').insert([
       {
@@ -177,12 +174,12 @@ export default function SignupPage() {
         mobile: form.mobile,
         email: form.email.toLowerCase(),
         user_type: form.userType,
-        plan_type: form.planType,
+        plan_type: 'BASIC PLAN',
         firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
         city: form.city,
         state: form.state,
         user_code: generatedUserId,
-        status: isPremium ? 'PENDING' : 'active',
+        status: 'active',
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
       },
@@ -315,46 +312,35 @@ export default function SignupPage() {
                 </div>
               </div>
 
-{/* USER CATEGORY DROPDOWN */}
-    <div className="space-y-1">
-      <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Select User Category</label>
-      <select name="userType" value={form.userType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
-        <option value="BANKER">BANKER</option>
-        <option value="ENGINEER">ENGINEER</option>
-        <option value="ARCHITECT">ARCHITECT</option>
-        <option value="VALUER">VALUER</option>
-        <option value="DSA">DSA</option>
-        <option value="INDIVIDUAL">INDIVIDUAL USER</option>
-      </select>
-    </div>
-
-    {/* DYNAMIC FIRM / BANK NAME */}
-    {form.userType !== 'INDIVIDUAL' && (
-      <div className="space-y-1">
-        <label className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">
-          {form.userType === 'BANKER' ? 'Current Bank Name *' : 'Registered Firm Name *'}
-        </label>
-        <input
-          name="firmName"
-          required
-          placeholder={form.userType === 'BANKER' ? 'ENTER CURRENT BANK NAME' : 'ENTER YOUR FIRM NAME'}
-          value={form.firmName}
-          onChange={handleChange}
-          className="w-full border-2 border-blue-100 p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold uppercase bg-blue-50/30"
-        />
-      </div>
-    )}
-
-              {/* ENGINE PLAN DROPDOWN */}
+              {/* USER CATEGORY DROPDOWN */}
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Choose Engine Plan</label>
-                <select name="planType" value={form.planType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
-                  <option value="BASIC PLAN">BASIC PLAN</option>
-                  {form.userType !== 'INDIVIDUAL' && (
-                    <option value="PREMIUM PLAN">PREMIUM PLAN</option>
-                  )}
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Select User Category</label>
+                <select name="userType" value={form.userType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
+                  <option value="BANKER">BANKER</option>
+                  <option value="ENGINEER">ENGINEER</option>
+                  <option value="ARCHITECT">ARCHITECT</option>
+                  <option value="VALUER">VALUER</option>
+                  <option value="DSA">DSA</option>
+                  <option value="INDIVIDUAL">INDIVIDUAL USER</option>
                 </select>
               </div>
+
+              {/* DYNAMIC FIRM / BANK NAME */}
+              {form.userType !== 'INDIVIDUAL' && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-blue-700 uppercase tracking-wider block">
+                    {form.userType === 'BANKER' ? 'Current Bank Name *' : 'Registered Firm Name *'}
+                  </label>
+                  <input
+                    name="firmName"
+                    required
+                    placeholder={form.userType === 'BANKER' ? 'ENTER CURRENT BANK NAME' : 'ENTER YOUR FIRM NAME'}
+                    value={form.firmName}
+                    onChange={handleChange}
+                    className="w-full border-2 border-blue-100 p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold uppercase bg-blue-50/30"
+                  />
+                </div>
+              )}
 
               {/* LEGAL COMPLIANCE & PLATFORM RULES WITH MODAL POPUP BUTTON */}
               <div className="space-y-2 mt-2 pt-2 border-t border-slate-200">
@@ -369,7 +355,7 @@ export default function SignupPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      setHasViewedTerms(true); // Unlock checkbox when modal is opened
+                      setHasViewedTerms(true);
                       setShowTermsModal(true);
                     }}
                     className="px-3 py-1 bg-blue-900 hover:bg-blue-800 text-white text-[11px] font-bold rounded shadow transition uppercase cursor-pointer"
@@ -383,7 +369,7 @@ export default function SignupPage() {
                     type="checkbox" 
                     id="termsPolicy" 
                     required
-                    disabled={!hasViewedTerms} // <--- Disabled until terms are viewed
+                    disabled={!hasViewedTerms}
                     checked={agreeTermsPolicy} 
                     onChange={(e) => setAgreeTermsPolicy(e.target.checked)} 
                     className={`mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-blue-900 focus:ring-blue-800 ${!hasViewedTerms ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -435,21 +421,15 @@ export default function SignupPage() {
             <div className="text-center space-y-2">
               <div className="text-green-600 text-5xl font-bold animate-bounce">✓</div>
               <h2 className="font-black text-blue-900 tracking-tight text-lg">
-                {form.planType === 'PREMIUM PLAN' ? 'REGISTRATION SUBMITTED FOR APPROVAL' : 'ACCOUNT CREATED SUCCESSFULLY'}
+                ACCOUNT CREATED SUCCESSFULLY
               </h2>
-
-              {form.planType === 'PREMIUM PLAN' && (
-                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs p-3 rounded-xl font-medium text-left">
-                  ⚠️ You have selected the <b>Premium Plan</b>. Your account status is currently set to <b>Pending Admin Approval</b>. You will be able to log in once the admin reviews and authorizes your profile.
-                </div>
-              )}
 
               <div className="bg-gray-100 p-4 rounded-xl mt-3 text-left text-xs font-mono border border-gray-200 space-y-1">
                 <p><b>SYSTEM ID :</b> <span className="text-blue-900 font-bold">{credentials.userId}</span></p>
                 <p><b>PASSWORD  :</b> <span className="text-slate-800 font-bold">{credentials.password}</span></p>
                 <p><b>CATEGORY  :</b> <span className="text-slate-800 font-bold">{form.userType}</span></p>
                 <p><b>LOCATION  :</b> <span className="text-slate-800 font-bold">{form.city}, {form.state}</span></p>
-                <p><b>PLAN TYPE :</b> <span className="text-slate-800 font-bold">{form.planType}</span></p>
+                <p><b>PLAN TYPE :</b> <span className="text-slate-800 font-bold">BASIC PLAN</span></p>
                 {form.userType !== 'INDIVIDUAL' && <p><b>FIRM NAME :</b> <span className="text-slate-800 font-bold">{form.firmName}</span></p>}
               </div>
 

@@ -16,19 +16,24 @@
 
 /* --- 3. Print Styles --- */
 @media print {
-  /* Hide Sidebar, Nav & UI Controls */
+  /* Hide Sidebar, Nav, UI Controls & Top Badges / Headers */
   nav, aside, .sidebar, .left-sidebar, #sidebar, .dashboard-sidebar, 
-  iframe, .no-print, button, header, footer { 
+  iframe, .no-print, button, header, footer, [role="navigation"],
+  .badge, [class*="badge"], .top-badge, .pro-tag, [class*="pro-"] { 
     display: none !important; 
   }
 
-  html, body, #__next, main {
+  /* FULL PAGE UNLOCK (Multi-page cut off fix) */
+  html, body, #__next, body > div, main, div, section {
     background: white !important;
     width: 100% !important;
     height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
+    position: static !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -42,22 +47,29 @@
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: visible !important;
   }
 
-  /* --- Header Section & Letterhead Fonts (1 Point Chhota) --- */
+  /* Top App Title / Header Hide Fix */
+  .estimate-container > div:first-child:has(.badge),
+  .print-header-top-badge {
+    display: none !important;
+  }
+
+  /* --- Header Section & Letterhead Fonts --- */
   .report-header h1, .report-header h2, .company-title, .report-title {
-    font-size: 9px !important; /* 10px se 9px kiya */
+    font-size: 9px !important;
     font-weight: bold !important;
   }
 
   .company-details, .header-text, .report-header, .header-container, .letterhead, .letterhead * {
-    font-size: 10px !important; /* 11px se 10px kiya */
+    font-size: 10px !important;
     line-height: 1.15 !important;
   }
 
-  /* --- REF NO & DATE Section (1 Point Chhota) --- */
+  /* --- REF NO & DATE Section --- */
   .ref-date-container, .ref-no, .ref-number, .report-date, .date-container, .ref-section, .ref-details, .ref-details * {
-    font-size: 9.5px !important; /* 1 point chhota */
+    font-size: 9.5px !important;
     font-weight: bold !important;
   }
 
@@ -72,6 +84,20 @@
     border-collapse: collapse !important;
     font-size: 10.5px !important; 
     margin-bottom: 6px !important;
+  }
+
+  /* MULTI-PAGE TABLE FIX */
+  thead {
+    display: table-header-group !important;
+  }
+
+  tbody {
+    display: table-row-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   th {
@@ -123,19 +149,12 @@
     font-size: 10px !important;
   }
 
-  tr {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  thead {
-    display: table-row-group !important;
-  }
-
   /* Disclaimer & Terms Formatting */
   .disclaimer-container, .disclaimer-section, .terms-container {
     width: 100% !important;
     margin-top: 6px !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .disclaimer-title, .terms-heading {

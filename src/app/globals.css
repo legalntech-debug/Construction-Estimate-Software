@@ -57,3 +57,33 @@ body {
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* =========================================
+   PRINT MULTI-PAGE FIX (1-PAGE CUT OFF FIX)
+   ========================================= */
+@media print {
+  /* 1. Full height unlock (Screen size height lock hatane ke liye) */
+  html, body, #__next, main, div, section, article {
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* 2. Hide Navbars, Sidebars & Buttons during print */
+  nav, aside, header, footer, button, .no-print,
+  [class*="Sidebar"], [class*="MobileBottomNav"], [class*="UserStatusTracker"] {
+    display: none !important;
+  }
+
+  /* 3. Prevent Table Rows from splitting mid-row across pages */
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+}

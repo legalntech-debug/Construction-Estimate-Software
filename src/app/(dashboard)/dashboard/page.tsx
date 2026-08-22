@@ -171,6 +171,22 @@ export default function DashboardPage() {
     }
   };
 
+  const handleAdminRejectRecharge = async (reqId: string) => {
+    try {
+      const { error } = await supabase
+        .from('wallet_recharges')
+        .update({ status: 'REJECTED' })
+        .eq('id', reqId);
+
+      if (error) throw error;
+
+      alert('Recharge request successfully rejected!');
+      fetchRecharges(userData.uuid, userData.isAdmin);
+    } catch (err: any) {
+      alert('Rejection failed: ' + (err.message || err));
+    }
+  };
+
   // LOGIC CALCULATIONS
   const currentDate = new Date();
   const targetLockDate = new Date('2026-08-20T00:00:00');
@@ -283,7 +299,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <button
-            onClick={() => router.push('/billing-ledger')} // Aapka billing page route
+            onClick={() => router.push('/billing-ledger')}
             className="bg-amber-400 text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs uppercase shadow-md hover:bg-amber-300 transition whitespace-nowrap"
           >
             View Bill & Clear
@@ -543,12 +559,23 @@ export default function DashboardPage() {
                     <p className="font-bold text-slate-900">{req.user_name || req.user_email}</p>
                     <p className="text-slate-500">Amount: <span className="font-black text-emerald-600">₹{req.amount}</span> | UTR / Ref: <span className="font-mono font-bold text-blue-600">{req.utr_no}</span></p>
                   </div>
-                  <button
-                    onClick={() => handleAdminApproveRecharge(req.id, req.user_id, req.amount)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-4 py-1.5 rounded-lg shadow uppercase transition"
-                  >
-                    Approve Recharge
-                  </button>
+                  
+                  {/* APPROVE & REJECT BUTTONS */}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleAdminApproveRecharge(req.id, req.user_id, req.amount)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs shadow uppercase transition"
+                    >
+                      Approve
+                    </button>
+
+                    <button
+                      onClick={() => handleAdminRejectRecharge(req.id)}
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs shadow uppercase transition"
+                    >
+                      Reject
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -743,7 +770,6 @@ export default function DashboardPage() {
             <div className="flex flex-col items-center justify-center bg-slate-50 p-4 rounded-xl border border-slate-200 text-center space-y-2">
               <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wide">Scan QR Code to Pay via Any UPI App</p>
               
-              {/* Yahan apni QR code image ka path dein (e.g., /qr-code.jpg) */}
               <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200">
                 <img 
                   src="/qr-code.jpg" 
@@ -760,7 +786,7 @@ export default function DashboardPage() {
             <form onSubmit={handleRequestRecharge} className="space-y-4 text-xs">
               <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-blue-800">
                 <p className="font-bold">Instructions:</p>
-                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below for Admin approval.Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at 7987561396 for quick Admin approval.</p>
+                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at 7987561396 for quick Admin approval.</p>
               </div>
 
               <div>

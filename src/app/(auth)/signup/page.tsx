@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import emailjs from '@emailjs/browser';
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -54,10 +55,11 @@ export default function SignupPage() {
     email: '',
     password: '',
     userType: 'INDIVIDUAL',
-    planType: 'BASIC PLAN', // Forced to BASIC PLAN for normal registrations
+    planType: 'BASIC PLAN',
     firmName: '',
     city: '',
     state: '',
+    partnerId: '', // Partner / Ref ID stored here
     otp: '',
   });
 
@@ -68,7 +70,12 @@ export default function SignupPage() {
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    // URL query parameters check (?ref=... or ?partnerId=...)
+    const refCode = searchParams.get('ref') || searchParams.get('partnerId') || '';
+    if (refCode) {
+      setForm((prev) => ({ ...prev, partnerId: refCode.toUpperCase() }));
+    }
+  }, [searchParams]);
 
   const handleChange = (e: any) => {
     const { name, value } = e.target;
@@ -77,7 +84,6 @@ export default function SignupPage() {
       const numericValue = value.replace(/\D/g, '').slice(0, 10);
       setForm({ ...form, mobile: numericValue });
     } else if (name === 'userType') {
-      // Always keep planType as BASIC PLAN for standard public signups
       setForm({ ...form, userType: value, planType: 'BASIC PLAN' });
     } else if (name === 'password' || name === 'email') {
       setForm({ ...form, [name]: value });
@@ -165,7 +171,6 @@ export default function SignupPage() {
     }
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
-    const isPremium = false; // Standard user signups are always BASIC PLAN
 
     const { error: profileError } = await supabase.from('profiles').insert([
       {
@@ -179,6 +184,7 @@ export default function SignupPage() {
         city: form.city,
         state: form.state,
         user_code: generatedUserId,
+        partner_id: form.partnerId || null, // Saves Partner ID if present
         status: 'active',
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
@@ -265,7 +271,7 @@ export default function SignupPage() {
               <input name="email" required type="email" placeholder="EMAIL ADDRESS" value={form.email} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
               <input name="password" required type="password" placeholder="PASSWORD" value={form.password} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
 
-              {/* STATE & CITY SEARCHABLE DROPDOWN (STATE FIRST) */}
+              {/* STATE & CITY SEARCHABLE DROPDOWN */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <input
@@ -338,6 +344,22 @@ export default function SignupPage() {
                     value={form.firmName}
                     onChange={handleChange}
                     className="w-full border-2 border-blue-100 p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold uppercase bg-blue-50/30"
+                  />
+                </div>
+              )}
+
+              {/* CONDITIONAL PARTNER / REF ID FIELD (Only shown if user clicked partner link) */}
+              {form.partnerId && (
+                <div className="space-y-1 pt-1">
+                  <label className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">
+                    REF / PARTNER ID *
+                  </label>
+                  <input
+                    type="text"
+                    name="partnerId"
+                    value={form.partnerId}
+                    readOnly
+                    className="w-full border-2 border-blue-200 p-2 rounded text-sm font-bold bg-blue-50 text-blue-900 uppercase cursor-not-allowed"
                   />
                 </div>
               )}
@@ -430,6 +452,7 @@ export default function SignupPage() {
                 <p><b>CATEGORY  :</b> <span className="text-slate-800 font-bold">{form.userType}</span></p>
                 <p><b>LOCATION  :</b> <span className="text-slate-800 font-bold">{form.city}, {form.state}</span></p>
                 <p><b>PLAN TYPE :</b> <span className="text-slate-800 font-bold">BASIC PLAN</span></p>
+                {form.partnerId && <p><b>REF PARTNER:</b> <span className="text-blue-900 font-bold">{form.partnerId}</span></p>}
                 {form.userType !== 'INDIVIDUAL' && <p><b>FIRM NAME :</b> <span className="text-slate-800 font-bold">{form.firmName}</span></p>}
               </div>
 
@@ -497,7 +520,7 @@ export default function SignupPage() {
               </button>
             </div>
 
-            {/* Modal Body (Scrollable) */}
+            {/* Modal Body */}
             <div className="p-4 overflow-y-auto space-y-3 text-xs text-slate-700 leading-relaxed">
               <p className="font-bold text-slate-900">Welcome to Our Platform</p>
               <p>Please read these terms and conditions carefully before proceeding to login. By accessing and using our platform, you agree to abide by the following operational rules and guidelines:</p>
@@ -528,7 +551,7 @@ export default function SignupPage() {
               </div>
             </div>
 
-            {/* Modal Footer with Action Buttons */}
+            {/* Modal Footer */}
             <div className="p-3 bg-gray-100 border-t border-gray-200 flex justify-end gap-2">
               <button
                 type="button"

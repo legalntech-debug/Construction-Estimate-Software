@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, FileText, Calculator, FolderKanban, Wallet } from 'lucide-react';
+import { LayoutDashboard, FileText, Calculator, Folder, Wallet } from 'lucide-react';
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
@@ -11,14 +11,14 @@ export default function MobileBottomNav() {
     { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { label: "Estimate", href: "/estimate", icon: Calculator },
     { label: "Certificate", href: "/construction-certificate", icon: FileText },
-    { label: "DMS", href: "/document-management", icon: FolderKanban },
+    { label: "DMS", href: "/document-management", icon: Folder },
     { label: "Ledger", href: "/wallet-ledger", icon: Wallet },
   ];
 
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 bg-blue-950 text-white border-t border-blue-800 flex justify-around items-center py-2.5 z-40 no-print shadow-2xl">
       {navItems.map((item) => {
-        const Icon = item.icon;
+        const IconComponent = item.icon;
         const isActive = pathname === item.href;
         return (
           <Link
@@ -28,7 +28,7 @@ export default function MobileBottomNav() {
               isActive ? 'text-amber-400 font-bold scale-105' : 'text-slate-300 hover:text-white'
             }`}
           >
-            <Icon size={18} />
+            <IconComponent size={18} />
             <span>{item.label}</span>
           </Link>
         );

@@ -1605,20 +1605,18 @@ return (
       </h2>
     </div>
 
-    <table className="w-full border-collapse mb-6">
-      <tbody>
-        <tr>
-          <td className="font-bold w-[250px] py-1">CUSTOMER NAME</td>
-          <td className="font-bold w-[20px]">:</td>
-          <td className="uppercase">{estimate.customer_name}</td>
-        </tr>
-        <tr>
-          <td className="font-bold py-1">PROPERTY ADDRESS</td>
-          <td className="font-bold">:</td>
-          <td className="uppercase">{estimate.property_address}</td>
-        </tr>
-      </tbody>
-    </table>
+    <div className="mb-6 space-y-2">
+  <div className="flex items-start text-xs font-bold">
+    <span className="w-[250px] shrink-0">CUSTOMER NAME</span>
+    <span className="w-[20px]">:</span>
+    <span className="uppercase flex-1">{estimate.customer_name}</span>
+  </div>
+  <div className="flex items-start text-xs font-bold">
+    <span className="w-[250px] shrink-0">PROPERTY ADDRESS</span>
+    <span className="w-[20px]">:</span>
+    <span className="uppercase flex-1">{estimate.property_address}</span>
+  </div>
+</div>
 
     <table className="w-full border border-black border-collapse mb-4">
       <tbody>
@@ -1740,13 +1738,13 @@ return (
 <table className="w-full border border-black border-collapse mt-6">
   <tbody>
     <tr>
-      <td className="border border-black p-4 w-[60%] align-top">
+      <td className="border border-black p-4 w-[65%] align-top">
         <h4 className="font-bold mb-1">DISCLAIMER & TERMS:</h4>
         {useCustomLetterhead ? (
           <textarea
             value={disclaimerText}
             onChange={(e) => setDisclaimerText(e.target.value)}
-            className="w-full text-xs border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none bg-white"
+            className="w-full text-sm border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none bg-white"
             rows={6}
           />
         ) : (
@@ -1755,7 +1753,7 @@ return (
           </div>
         )}
       </td>
-      <td className="border border-black p-4 w-[40%] align-top">
+      <td className="border border-black p-4 w-[35%] align-top">
         {!useCustomLetterhead && (isPaid || isAlreadyPaid || userCategory === 'ADMIN' || signatureDetails) ? (
           <>
             {/* Horizontal Layout: QR Left, Details Right */}

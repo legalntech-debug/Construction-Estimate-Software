@@ -161,6 +161,7 @@ export default function CadModalView({
   const [localSouthRoad, setLocalSouthRoad] = useState<number>(roadWidthSouth ?? 15);
   const [localEastRoad, setLocalEastRoad] = useState<number>(roadWidthEast ?? 15);
   const [localWestRoad, setLocalWestRoad] = useState<number>(roadWidthWest ?? 15);
+  
 
   useEffect(() => {
     if (roadWidthNorth !== undefined) setLocalNorthRoad(roadWidthNorth);

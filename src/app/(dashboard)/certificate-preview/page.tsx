@@ -99,7 +99,7 @@ export default function CertificatePreviewPage() {
       key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mockkeyID", 
       amount: amountInPaise,
       currency: "INR",
-      name: `${user?.name || "Er. J. Chouhan"} Valuer Portal`,
+      name: `${user?.name || "Er. J. TOMAR"} Valuer Portal`,
       description: "Certificate Verification & Generation Fee",
       // Removed localhost image reference to avoid CORS loopback error in checkout popup
       handler: function (response: any) {
@@ -310,9 +310,7 @@ export default function CertificatePreviewPage() {
                     <p className="text-base text-black font-bold uppercase">{customHeaderTitle || "ENTER HEADER TITLE"}</p>
                   ) : (
                     <>
-                      <p>IOV APPROVED VALUER A-33162</p>
-                      <p>BUILDING PERMISSION DEPARTMENT</p>
-                      <p>ENG/172/2024</p>
+                      <p>T&CP 23IND-IER050924212</p>
                     </>
                   )}
                 </td>
@@ -353,10 +351,10 @@ export default function CertificatePreviewPage() {
                     <p className="text-xs text-black font-medium uppercase">{customSubtitle || "ENTER DESIGNATION"}</p>
                   ) : (
                     <>
-                      <p>ADDRESS GROUND FLOOR, BUILDING NO. 180/5,</p>
-                      <p>MEGHDOOT NAGAR, INDORE</p>
-                      <p>CONTACT NO. 79875-61396</p>
-                      <p>Gmail: legalntech@gmail.com</p>
+                      <p>203, MAYUR COMPLEX, 49 SUTAR GALI,</p>
+        <p>JAIL ROAD, INDORE (M.P)</p>
+        <p>CONTACT NO. 8103804355 / 79875-61396 </p>
+        <p>Gmail: legalntech@gmail.com</p>
                     </>
                   )}
                 </td>
@@ -425,7 +423,7 @@ export default function CertificatePreviewPage() {
           <p>Sir / Madam,</p>
 
           <p>
-            I / We <strong>{user?.name || "Er. Jasvant Chouhan"}</strong>, having License Number <strong>172/2024</strong> have undertaken assignment as Engineer / Licensed Engineer appointed by <strong>{estimate.customer_name}</strong> for checking and certifying the construction work of the Building as per IS code Standards and following Building By laws / norms.
+            I / We <strong>{user?.name || "Er. J. Tomar"}</strong>, having License Number <strong>T&CP 23IND-IER050924212</strong> have undertaken assignment as Engineer / Licensed Engineer appointed by <strong>{estimate.customer_name}</strong> for checking and certifying the construction work of the Building as per IS code Standards and following Building By laws / norms.
           </p>
 
           <p>
@@ -465,7 +463,7 @@ export default function CertificatePreviewPage() {
 
                   <div className="text-[10px] text-blue-900 border border-blue-200 bg-blue-50 p-2.5 rounded text-left w-full shadow-sm">
                     <p className="font-bold border-b border-blue-200 mb-1">✓ VERIFIED SIGNATURE</p>
-                    <p className="font-bold">{user?.name || "Er. J. Chouhan"}</p>
+                    <p className="font-bold">{user?.name || "Er. J. TOMAR"}</p>
                     <p className="mt-1 break-words">{signatureDetails || "Digitally Verified & Approved"}</p>
                   </div>
                 </div>

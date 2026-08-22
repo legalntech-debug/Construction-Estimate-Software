@@ -283,6 +283,7 @@ export default function WalletLedgerPage() {
     let startDate = fromDate ? `${fromDate}T00:00:00` : `${selectedMonth}-01T00:00:00`;
     let endDate = toDate ? `${toDate}T23:59:59` : `${selectedMonth}-31T23:59:59`;
 
+    // 1. Fetch Wallet Transactions
     const { data: walletTx } = await supabaseClient
       .from('wallet_transactions')
       .select('*')
@@ -290,17 +291,36 @@ export default function WalletLedgerPage() {
       .gte('created_at', startDate)
       .lte('created_at', endDate);
 
+    // 2. Fetch Wallet Recharges
     const { data: rechargeTx } = await supabaseClient
       .from('wallet_recharges')
+      .select('*')
+      .eq('user_id', selectedUserId)
+      .or('status.eq.APPROVED,status.eq.approved')
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+
+    // 3. Fetch Estimates / Plan Usage
+    const { data: estimateTx } = await supabaseClient
+      .from('estimates')
       .select('*')
       .eq('user_id', selectedUserId)
       .gte('created_at', startDate)
       .lte('created_at', endDate);
 
-    const { data: estimateTx } = await supabaseClient
-      .from('estimates')
+    // 4. FETCH PARTNER SETTLEMENTS & AUTO ADJUSTMENTS
+    const { data: partnerSettlements } = await supabaseClient
+      .from('partner_settlements')
       .select('*')
       .eq('user_id', selectedUserId)
+      .gte('created_at', startDate)
+      .lte('created_at', endDate);
+
+    // 5. FETCH PARTNER LEDGER ADJUSTMENTS
+    const { data: partnerTx } = await supabaseClient
+      .from('partner_ledger')
+      .select('*')
+      .or(`user_id.eq.${selectedUserId},partner_id.eq.${selectedUserId}`)
       .gte('created_at', startDate)
       .lte('created_at', endDate);
 
@@ -325,6 +345,9 @@ export default function WalletLedgerPage() {
 
     if (rechargeTx) {
       rechargeTx.forEach((r: any) => {
+        const statusUpper = (r.status || '').toUpperCase();
+        if (statusUpper !== 'APPROVED') return;
+
         const exists = combinedTx.some(t => t.id === r.id || (t.amount === Number(r.amount) && t.created_at === r.created_at));
         if (!exists) {
           combinedTx.push({
@@ -358,6 +381,52 @@ export default function WalletLedgerPage() {
           amount: fee,
           balance_after: 0
         });
+      });
+    }
+
+    // PROCESS PARTNER SETTLEMENTS (AUTO-RECOVERY / AUTO-ADJUSTMENT)
+    if (partnerSettlements) {
+      partnerSettlements.forEach((ps: any) => {
+        const exists = combinedTx.some(t => t.id === ps.id || (ps.utr_no && t.ref_no === ps.utr_no));
+        if (!exists) {
+          combinedTx.push({
+            id: ps.id,
+            created_at: ps.created_at || ps.date || new Date().toISOString(),
+            ref_no: ps.utr_no || ps.ref_no || 'AUTO-RECOVERY',
+            customer_name: currentTarget?.full_name || 'Partner Auto Settlement',
+            case_type: ps.notes || 'Partner Network Auto Adjustment',
+            payment_mode: ps.mode || 'Commission Auto-Recovery',
+            razorpay_payment_id: ps.utr_no || '-',
+            type: 'CREDIT', // Auto-adjusting negative wallet acts as a CREDIT
+            amount: Math.abs(Number(ps.amount || ps.amount_paid || 0)),
+            balance_after: 0
+          });
+        }
+      });
+    }
+
+    // PROCESS PARTNER LEDGER
+    if (partnerTx) {
+      partnerTx.forEach((pt: any) => {
+        const exists = combinedTx.some(t => t.id === pt.id || (pt.ref_no && t.ref_no === pt.ref_no));
+        if (!exists) {
+          const rawType = (pt.type || pt.transaction_type || '').toUpperCase();
+          const txType: 'CREDIT' | 'DEBIT' = rawType === 'DEBIT' ? 'DEBIT' : 'CREDIT';
+          const amt = Math.abs(Number(pt.amount || pt.adjusted_amount || 0));
+
+          combinedTx.push({
+            id: pt.id,
+            created_at: pt.created_at || pt.updated_at,
+            ref_no: pt.ref_no || pt.reference_no || 'PL-ADJ-' + (pt.id ? pt.id.toString().slice(0, 6) : '00'),
+            customer_name: pt.customer_name || pt.partner_name || currentTarget?.full_name || 'Partner Adjustment',
+            case_type: pt.case_type || pt.remarks || pt.description || 'Partner Wallet Settlement',
+            payment_mode: pt.payment_mode || 'Partner Ledger Adjustment',
+            razorpay_payment_id: pt.razorpay_payment_id || pt.utr_no || '-',
+            type: txType,
+            amount: amt,
+            balance_after: 0
+          });
+        }
       });
     }
 
@@ -563,7 +632,6 @@ export default function WalletLedgerPage() {
   return (
     <div className="p-8 max-w-[1400px] mx-auto bg-slate-50 min-h-screen text-black font-sans relative select-none" style={{ WebkitUserSelect: 'none' }}>
       
-      {/* Strict Print CSS: Landscape Mode, Profile & Table Visible, Sidebars Hidden */}
       <style jsx global>{`
         @media print {
           @page {
@@ -627,7 +695,7 @@ export default function WalletLedgerPage() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-200 print:hidden">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-wide uppercase">Wallet & Account Ledger</h1>
-          <p className="text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, and platform usage logs.</p>
+          <p className="text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, partner adjustments, and platform usage logs.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 shrink-0">
           
@@ -702,7 +770,7 @@ export default function WalletLedgerPage() {
               <button 
                 onClick={() => {
                   if (isWalletNegative) {
-                    alert("Your wallet balance is negative. Please recharge your wallet first to proceed with refund requests.");
+                    alert("Your wallet balance is negative. Please recharge or adjust your wallet first to proceed with refund requests.");
                   } else {
                     setShowOtpModal(true);
                   }
@@ -822,10 +890,9 @@ export default function WalletLedgerPage() {
         </div>
       )}
 
-      {/* Printable Section wrapper - Includes Customer Profile Card & Ledger Table */}
+      {/* Printable Section wrapper */}
       <div className="printable-ledger-section space-y-6">
         
-        {/* Customer Profile Card Component included inside print section */}
         <div>
           <CustomerProfileCard 
             targetProfile={targetProfile} 

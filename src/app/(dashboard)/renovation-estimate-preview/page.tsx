@@ -1214,55 +1214,187 @@ if (isCheckingHistory) {
 return (
   <div className="print-area print-page p-10 bg-white min-h-screen relative">
     
-    {/* Yeh style tag ensure karega ki print ke time sirf print-area dikhe */}
-    <style jsx global>{`
-      @media print {
-        @page {
-          size: A4 portrait;
-          margin: 10mm 12mm 10mm 12mm; /* Top, Right, Bottom, Left proper margins */
-        }
-
-        body * {
-          visibility: hidden !important;
-        }
-
-        .print-area, .print-area * {
-          visibility: visible !important;
-        }
-
-        .print-area {
-          position: absolute !important;
-          left: 0 !important;
-          top: 0 !important;
-          width: 100% !important;
-          max-width: 100% !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          background: #ffffff !important;
-          box-shadow: none !important;
-          border: none !important;
-        }
-
-        body, html, #__next, main {
-          background: #ffffff !important;
-          color: #000000 !important;
-          overflow: visible !important; /* hidden ki jagah visible taaki content dusre page par properly flow ho sake */
-          height: auto !important;
-          margin: 0 !important;
-          padding: 0 !important;
-        }
-
-        .no-print, nav, aside, header, footer, button {
-          display: none !important;
-        }
+    {/* Yeh style tag ensure karega ki print ke time sirf print-area dikhe aur letterhead/tables perfectly formatted rahein */}
+<style jsx global>{`
+  @media print {
+    @page {
+      size: A4 portrait;
+      margin: 10mm 12mm 10mm 12mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 8pt;
+        color: #444;
       }
-        @media print {
-  /* Isse table ka header agle pages par repeat nahi hoga */
-  thead {
-    display: table-row-group !important;
+    }
+
+    /* --- Print Area Visibility Controls --- */
+    body * {
+      visibility: hidden !important;
+    }
+
+    .print-area, .print-area * {
+      visibility: visible !important;
+    }
+
+    .print-area {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      box-shadow: none !important;
+      border: none !important;
+    }
+
+    body, html, #__next, main {
+      background: #ffffff !important;
+      color: #000000 !important;
+      overflow: visible !important;
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .no-print, nav, aside, header, footer, button {
+      display: none !important;
+    }
+
+    thead {
+      display: table-row-group !important;
+    }
+
+    /* --- Header Section & Letterhead Fonts (1 Point Chhota) --- */
+    .report-header h1, .report-header h2, .company-title, .report-title {
+      font-size: 9px !important;
+      font-weight: bold !important;
+    }
+
+    .company-details, .header-text, .report-header, .header-container, .letterhead, .letterhead * {
+      font-size: 10px !important;
+      line-height: 1.15 !important;
+    }
+
+    /* --- REF NO & DATE Section (1 Point Chhota) --- */
+    .ref-date-container, .ref-no, .ref-number, .report-date, .date-container, .ref-section, .ref-details, .ref-details * {
+      font-size: 9.5px !important;
+      font-weight: bold !important;
+    }
+
+    .customer-details, .customer-details * {
+      font-size: 10px !important;
+      text-align: left !important;
+    }
+
+    /* --- General Table Base Settings --- */
+    table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      font-size: 10.5px !important; 
+      margin-bottom: 6px !important;
+    }
+
+    th {
+      font-weight: bold !important;
+      background-color: #f3f4f6 !important;
+      white-space: nowrap !important;
+      word-break: normal !important;
+      padding: 4px 2px !important;
+      font-size: 10px !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    td {
+      padding: 3px 2px !important;
+      line-height: 1.2 !important;
+      vertical-align: top !important;
+    }
+
+    /* Plot / Summary Table Unaffected */
+    table:not(.estimate-table) {
+      table-layout: auto !important;
+    }
+
+    /* --- ONLY Estimate Table Width Distribution --- */
+    table.estimate-table {
+      table-layout: fixed !important;
+      width: 100% !important;
+    }
+
+    table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 3.5% !important; text-align: center !important; } /* SR */
+    table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 38.5% !important; text-align: left !important; word-break: break-word !important; } /* DESCRIPTION */
+    table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 4% !important; text-align: center !important; white-space: nowrap !important; }   /* NOS */
+    table.estimate-table th:nth-child(4), table.estimate-table td:nth-child(4) { width: 8.5% !important; text-align: right !important; white-space: nowrap !important; }  /* QTY */
+    table.estimate-table th:nth-child(5), table.estimate-table td:nth-child(5) { width: 5.5% !important; text-align: center !important; white-space: nowrap !important; } /* UNIT */
+    table.estimate-table th:nth-child(6), table.estimate-table td:nth-child(6) { width: 14% !important; text-align: right !important; white-space: nowrap !important; }  /* RATE */
+    
+    /* Amount Column & Total Amount Row (Single Line Fix) */
+    table.estimate-table th:nth-child(7), 
+    table.estimate-table td:nth-child(7),
+    table.estimate-table tfoot td,
+    table.estimate-table tr.total-row td,
+    table.estimate-table tr:last-child td { 
+      width: 26% !important; 
+      text-align: right !important; 
+      white-space: nowrap !important; 
+      word-break: keep-all !important;
+      font-weight: bold !important; 
+      font-size: 10px !important;
+    }
+
+    tr {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* Disclaimer & Terms Formatting */
+    .disclaimer-container, .disclaimer-section, .terms-container {
+      width: 100% !important;
+      margin-top: 6px !important;
+    }
+
+    .disclaimer-title, .terms-heading {
+      font-size: 8px !important;
+      font-weight: bold !important;
+    }
+
+    .disclaimer-text, .terms-text, .disclaimer-container p {
+      font-size: 8px !important;
+      line-height: 1.2 !important;
+      text-align: justify !important;
+    }
+
+    /* Watermark Fix */
+    .draft-watermark {
+      display: block !important;
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) rotate(-45deg) !important;
+      color: rgba(220, 38, 38, 0.08) !important;
+      z-index: 9999 !important;
+    }
   }
-}
-    `}</style>
+
+  /* Watermark Default Screen Styling */
+  .draft-watermark {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(-45deg) !important;
+    font-size: 8rem !important;
+    font-weight: 900 !important;
+    color: rgba(220, 38, 38, 0.08) !important;
+    pointer-events: none !important;
+    white-space: nowrap !important;
+    z-index: 9999 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1rem !important;
+  }
+`}</style>
 
     {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (!estimate?.id || estimate?.id === "temp-id" || !estimate?.ref_no)) && (
       <div className="draft-watermark no-print">DRAFT</div>
@@ -1324,9 +1456,7 @@ return (
             <p className="text-xl text-black font-bold uppercase">{customHeaderTitle || "ENTER HEADER TITLE"}</p>
           ) : (
             <>
-              <p>IOV APPROVED VALUER A-33162</p>
-              <p>BUILDING PERMISSION DEPARTMENT</p>
-              <p>ENG/172/2024</p>
+              <p>T&CP 23IND-IER050924212</p>
             </>
           )}
         </div>
@@ -1369,10 +1499,10 @@ return (
             <p className="text-sm text-black font-medium uppercase">{customSubtitle || "ENTER DESIGNATION"}</p>
           ) : (
             <>
-              <p>ADDRESS GROUND FLOOR, BUILDING NO. 180/5,</p>
-              <p>MEGHDOOT NAGAR, INDORE</p>
-              <p>CONTACT NO. 79875-61396</p>
-              <p>Gmail: legalntech@gmail.com</p>
+<p>203, MAYUR COMPLEX, 49 SUTAR GALI,</p>
+        <p>JAIL ROAD, INDORE (M.P)</p>
+        <p>CONTACT NO. 8103804355 / 79875-61396 </p>
+        <p>Gmail: legalntech@gmail.com</p>
             </>
           )}
         </div>
@@ -1613,7 +1743,7 @@ return (
                   </div>
                   <div className="text-[10px] text-blue-900 border border-blue-200 bg-blue-50 p-2 rounded text-left w-full shadow-sm">
                     <p className="font-bold border-b border-blue-200 mb-1">✓ VERIFIED SIGNATURE</p>
-                    <p className="font-bold">Er. J.Chouhan</p>
+                    <p className="font-bold">Er. J.TOMAR</p>
                     <p className="mt-1 break-words">{signatureDetails || "Digitally Verified & Approved"}</p>
                   </div>
                 </div>

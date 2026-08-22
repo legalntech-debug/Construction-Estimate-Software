@@ -12,6 +12,7 @@ interface FloorManagerSectionProps {
   updateFloorAreaDirect: (floor: string, area: number) => void;
   updateFloorDimensions?: (floor: string, width: number, length: number) => void;
   updateFloorSetbacks?: (floor: string, setback: { front?: number; rear?: number; left?: number; right?: number }) => void;
+  updateFloorPosition?: (floor: string, x: number, y: number) => void;
   applyBhkTemplate: (floor: string, bhkType: string) => void;
   openFloorCadModal: (floor: string) => void;
   ensureFloorRooms: (floor: string) => void;
@@ -73,6 +74,7 @@ export default function FloorManagerSection({
   updateFloorAreaDirect,
   updateFloorDimensions,
   updateFloorSetbacks,
+  updateFloorPosition,
   applyBhkTemplate,
   openFloorCadModal,
   ensureFloorRooms,
@@ -90,8 +92,8 @@ export default function FloorManagerSection({
   rightSetback = 0,
 }: FloorManagerSectionProps) {
   const [mosEditorFloor, setMosEditorFloor] = useState<string | null>(null);
+  const [localSetbacks, setLocalSetbacks] = useState<Record<string, SetbackType>>({});
 
-  // Accurate Plot Mapping: plotLength is Front Width (Side A), plotWidth is Depth (Side C)
   const plotFrontWidth = Number(plotLength) > 0 ? Number(plotLength) : 20;
   const plotDepth = Number(plotWidth) > 0 ? Number(plotWidth) : 50;
   const maxPlotArea = plotFrontWidth * plotDepth > 0 ? plotFrontWidth * plotDepth : 1000;
@@ -100,12 +102,6 @@ export default function FloorManagerSection({
   const numRearSetback = Number(rearSetback) || 0;
   const numLeftSetback = Number(leftSetback) || 0;
   const numRightSetback = Number(rightSetback) || 0;
-
-  console.log("=== [FloorManagerSection Render Debug] ===", {
-    plotFrontWidth,
-    plotDepth,
-    maxPlotArea,
-  });
 
   return (
     <div className="border-2 border-black mb-4 bg-white shadow-sm uppercase font-sans">
@@ -122,7 +118,7 @@ export default function FloorManagerSection({
               <th className="border-r border-black p-2.5 font-black text-center">LENGTH (FT)</th>
               <th className="border-r border-black p-2.5 font-black text-center">BUILT-UP AREA</th>
               <th className="border-r border-black p-2.5 font-black text-center">TEMPLATE</th>
-              <th className="border-r border-black p-2.5 font-black text-center">MOS</th>
+              <th className="border-r border-black p-2.5 font-black text-center">MOS / POSITION</th>
               <th className="border-r border-black p-2.5 font-black text-center">CAD VIEW</th>
               <th className="p-2.5 font-black text-center">ROOM EDIT</th>
             </tr>
@@ -131,22 +127,30 @@ export default function FloorManagerSection({
             {selectedFloors.map((floor) => {
               const isGround = floor === "GROUND FLOOR";
               const isTower = floor.toUpperCase().includes("TOWER");
-              const data = (floorData[floor] || {}) as FloorData & { setbacks?: SetbackType };
+              const data = (floorData[floor] || {}) as FloorData & { setbacks?: SetbackType; x?: number; y?: number };
               const currentBhk = floorBhkConfig[floor] || "CUSTOM";
               const isMosOpen = mosEditorFloor === floor;
               const isRoomOpen = roomEditorFloor === floor;
 
-              const setbacks: SetbackType = data.setbacks && typeof data.setbacks === 'object' ? {
-                front: Number(data.setbacks.front ?? numFrontSetback),
-                rear: Number(data.setbacks.rear ?? numRearSetback),
-                left: Number(data.setbacks.left ?? numLeftSetback),
-                right: Number(data.setbacks.right ?? numRightSetback),
+              const defaultSetbacks: SetbackType = data.setbacks && typeof data.setbacks === 'object' ? {
+                front: Number(data.setbacks.front ?? (isTower ? 15 : numFrontSetback)),
+                rear: Number(data.setbacks.rear ?? (isTower ? 25 : numRearSetback)),
+                left: Number(data.setbacks.left ?? (isTower ? 7 : numLeftSetback)),
+                right: Number(data.setbacks.right ?? (isTower ? 3 : numRightSetback)),
               } : {
-                front: numFrontSetback,
-                rear: numRearSetback,
-                left: numLeftSetback,
-                right: numRightSetback,
+                front: isTower ? 15 : numFrontSetback,
+                rear: isTower ? 25 : numRearSetback,
+                left: isTower ? 7 : numLeftSetback,
+                right: isTower ? 3 : numRightSetback,
               };
+
+              const setbacks = localSetbacks[floor] || defaultSetbacks;
+
+              // Formula-based automatic calculation: 
+              // Width = Plot Front Width - (Left MOS + Right MOS)
+              // Length = Plot Depth - (Front MOS + Rear MOS)
+              const calculatedFormulaWidth = Math.max(5, plotFrontWidth - (setbacks.left + setbacks.right));
+              const calculatedFormulaLength = Math.max(5, plotDepth - (setbacks.front + setbacks.rear));
 
               const rawW = Number(data.width);
               const rawL = Number(data.length);
@@ -155,11 +159,9 @@ export default function FloorManagerSection({
               let currentLength = 0;
 
               if (isGround) {
-                // Robust Ground Floor Normalizer & Swapping Guard
                 let w = rawW > 0 ? rawW : plotFrontWidth;
                 let l = rawL > 0 ? rawL : plotDepth;
 
-                // If width and length are swapped (e.g. width = 40/50 and length = 20)
                 if (w > plotFrontWidth && l <= plotFrontWidth) {
                   const temp = w;
                   w = l;
@@ -172,21 +174,13 @@ export default function FloorManagerSection({
                 currentWidth = rawW > 0 ? rawW : 10;
                 currentLength = rawL > 0 ? rawL : 10;
               } else {
-                // Upper floors fully manual width & length
-                currentWidth = rawW > 0 ? rawW : plotFrontWidth;
-                currentLength = rawL > 0 ? rawL : plotDepth;
+                // For Upper Floors, apply MOS deduction formula by default if not manually overridden
+                currentWidth = rawW > 0 ? rawW : calculatedFormulaWidth;
+                currentLength = rawL > 0 ? rawL : calculatedFormulaLength;
               }
 
               const calculatedArea = currentWidth * currentLength;
               const totalFloorBuiltUp = Number(data.area || calculatedArea || calculatedArea);
-
-              console.log(`--- [Floor Row Debug] ${floor} ---`, {
-                rawW,
-                rawL,
-                currentWidth,
-                currentLength,
-                totalFloorBuiltUp,
-              });
 
               const floorRoomMap = floorRooms[floor] || {};
               let allocatedRoomArea = 0;
@@ -208,61 +202,43 @@ export default function FloorManagerSection({
                 <React.Fragment key={floor}>
                   <tr className="border-b border-black hover:bg-gray-50 transition">
                     <td className="border-r border-black p-3 font-black text-left pl-3 uppercase bg-slate-50 min-w-[180px]">
-                      {isGround ? "GROUND FLOOR (PARKING & STAIR)" : isTower ? "TOWER PARKING & LIVING" : `${floor} PARKING & LIVING`}
+                      {isGround ? "GROUND FLOOR (PARKING & STAIR)" : isTower ? "TOWER PLANNING" : `${floor} PLANNING`}
                     </td>
                     
-                    {/* Width Input */}
+                    {/* Width Input (Manually Editable with Cantilever Support) */}
                     <td className="border-r border-black p-2.5 text-center">
                       <input
                         type="number"
-                        max={isGround ? plotFrontWidth : undefined}
                         value={currentWidth}
                         onChange={(e) => {
-                          let w = Number(e.target.value) || 0;
-                          if (isGround && w > plotFrontWidth) {
-                            alert(`Ground floor width cannot exceed plot front width (${plotFrontWidth} FT)!`);
-                            w = plotFrontWidth;
-                          }
+                          const w = Number(e.target.value) || 0;
                           const l = currentLength;
                           const newArea = Number((w * l).toFixed(2));
 
-                          if (!isGround || newArea <= maxPlotArea) {
-                            if (updateFloorDimensions) {
-                              updateFloorDimensions(floor, w, l);
-                            }
-                            updateFloorAreaDirect(floor, newArea);
-                          } else {
-                            alert(`Floor area cannot exceed plot area (${maxPlotArea} SQ.FT)!`);
+                          if (updateFloorDimensions) {
+                            updateFloorDimensions(floor, w, l);
                           }
+                          updateFloorAreaDirect(floor, newArea);
                         }}
                         placeholder="Width"
                         className="w-20 border-2 border-black p-1.5 text-center font-black text-xs bg-white"
                       />
                     </td>
 
-                    {/* Length Input */}
+                    {/* Length Input (Manually Editable based on MOS deduction or Custom Cantilever) */}
                     <td className="border-r border-black p-2.5 text-center">
                       <input
                         type="number"
-                        max={isGround ? plotDepth : undefined}
                         value={currentLength}
                         onChange={(e) => {
-                          let l = Number(e.target.value) || 0;
-                          if (isGround && l > plotDepth) {
-                            alert(`Ground floor length cannot exceed plot depth (${plotDepth} FT)!`);
-                            l = plotDepth;
-                          }
+                          const l = Number(e.target.value) || 0;
                           const w = currentWidth;
                           const newArea = Number((w * l).toFixed(2));
 
-                          if (!isGround || newArea <= maxPlotArea) {
-                            if (updateFloorDimensions) {
-                              updateFloorDimensions(floor, w, l);
-                            }
-                            updateFloorAreaDirect(floor, newArea);
-                          } else {
-                            alert(`Floor area cannot exceed plot area (${maxPlotArea} SQ.FT)!`);
+                          if (updateFloorDimensions) {
+                            updateFloorDimensions(floor, w, l);
                           }
+                          updateFloorAreaDirect(floor, newArea);
                         }}
                         placeholder="Length"
                         className="w-20 border-2 border-black p-1.5 text-center font-black text-xs bg-white"
@@ -274,14 +250,9 @@ export default function FloorManagerSection({
                       <div className="flex items-center justify-center gap-1">
                         <input
                           type="number"
-                          max={isGround ? maxPlotArea : undefined}
                           value={data.area || totalFloorBuiltUp || ""}
                           onChange={(event) => {
                             let val = Number(event.target.value) || 0;
-                            if (isGround && val > maxPlotArea) {
-                              alert(`Area cannot exceed total plot area (${maxPlotArea} SQ.FT)!`);
-                              val = maxPlotArea;
-                            }
                             updateFloorAreaDirect(floor, val);
                           }}
                           className="w-24 border-2 border-black p-1.5 text-center font-black text-xs bg-white"
@@ -301,7 +272,7 @@ export default function FloorManagerSection({
                       </select>
                     </td>
                     <td className="border-r border-black p-2.5 text-center">
-                      {isGround || isTower ? (
+                      {isGround ? (
                         <span className="text-[10px] font-bold text-gray-400">PLOT SETUP</span>
                       ) : (
                         <button
@@ -336,13 +307,13 @@ export default function FloorManagerSection({
                     </td>
                   </tr>
 
-                  {/* Individual Floor MOS Editor (Only for Upper Floors excluding Tower)[cite: 1] */}
-                  {!isGround && !isTower && isMosOpen && (
+                  {/* Universal MOS Editor with Formula Sync & Manual Override */}
+                  {!isGround && isMosOpen && (
                     <tr className="bg-amber-50 border-b border-black">
                       <td colSpan={8} className="p-3">
                         <div className="border border-amber-600 p-3 bg-white grid grid-cols-2 sm:grid-cols-4 gap-3 items-center">
                           <div className="text-xs font-black text-amber-900 col-span-2 sm:col-span-4 uppercase border-b border-amber-300 pb-1 flex justify-between items-center">
-                            <span>Margin of Setbacks (MOS) & Open Space for {floor}</span>
+                            <span>Margin of Setbacks (MOS) & Position for {floor} (Auto Formula: L = Plot Depth - (Front+Rear))[cite: 1]</span>
                             <span className="text-[10px] text-gray-600">Max Plot: {plotFrontWidth}×{plotDepth} FT</span>
                           </div>
                           {["front", "rear", "left", "right"].map((side) => (
@@ -357,7 +328,24 @@ export default function FloorManagerSection({
                                   if (rawVal.includes('-')) return;
                                   const val = rawVal === "" ? 0 : Number(rawVal);
                                   const updated: SetbackType = { ...setbacks, [side]: val };
-                                  if (updateFloorSetbacks) updateFloorSetbacks(floor, updated);
+                                  setLocalSetbacks(prev => ({ ...prev, [floor]: updated }));
+
+                                  if (updateFloorSetbacks) {
+                                    updateFloorSetbacks(floor, updated);
+                                  }
+
+                                  // Automatically update dimensions based on formula
+                                  const newLength = Math.max(5, plotDepth - (updated.front + updated.rear));
+                                  const newWidth = Math.max(5, plotFrontWidth - (updated.left + updated.right));
+                                  
+                                  if (updateFloorDimensions) {
+                                    updateFloorDimensions(floor, newWidth, newLength);
+                                  }
+                                  updateFloorAreaDirect(floor, Number((newWidth * newLength).toFixed(2)));
+
+                                  if (isTower && updateFloorPosition) {
+                                    updateFloorPosition(floor, updated.left, updated.front);
+                                  }
                                 }}
                                 className="border border-black p-1.5 text-center text-xs font-bold bg-white"
                               />

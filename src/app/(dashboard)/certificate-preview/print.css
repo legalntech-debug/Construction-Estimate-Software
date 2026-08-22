@@ -1,36 +1,41 @@
 /* --- 1. Global Page Settings --- */
 @page {
   size: A4 portrait;
-  margin: 15mm; /* Margins ko thoda balanced kiya hai taaki content 3 pages mein fit ho */
+  margin: 5mm 8mm 5mm 8mm !important; /* Side margins ko kam kiya gaya hai */
   @bottom-center {
     content: "Page " counter(page) " of " counter(pages);
-    font-size: 10pt;
+    font-size: 8pt;
     color: #333;
   }
 }
 
 /* --- 2. Screen & General Styles --- */
 .no-print {
-  display: block; /* Screen ke liye normal display */
+  display: block;
 }
 
-/* --- 3. Print Styles (Optimized for Multi-page Control) --- */
+/* --- 3. Print Styles (Reduced Margins & Fit to Page) --- */
 @media print {
-  /* HIDE: Navigation, sidebar, aur wo elements jo print nahi karne hain */
+  /* Hide Unnecessary Navigation & UI Controls */
   nav, aside, .sidebar, .left-sidebar, #sidebar, .dashboard-sidebar, 
-  iframe, .no-print, button { 
+  iframe, .no-print, button, header, footer { 
     display: none !important; 
   }
 
-  /* Reset Layout for Print */
+  /* Reset Layout for Clean Printing */
   html, body, #__next, main {
     background: white !important;
+    color: black !important;
     height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
     overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Container Adjustment */
-  .print-page, .estimate-container, .report-container, .preview-container, #estimate-preview-container {
+  /* Container Adjustments */
+  .print-page, .certificate-container, .report-container, .preview-container, #certificate-preview-container {
     display: block !important;
     width: 100% !important;
     margin: 0 !important;
@@ -38,8 +43,31 @@
     overflow: visible !important;
   }
 
-  /* Table Rows ko beech se cut hone se bachane ke liye */
-  tr, .table-row-item {
+  /* --- Letterhead Font Optimization (1 Point Chhota) --- */
+  .report-header h1, .report-header h2, .company-title, .report-title, .letterhead h1, .letterhead h2 {
+    font-size: 9px !important;
+    font-weight: bold !important;
+  }
+
+  .company-details, .header-text, .report-header, .header-container, .letterhead, .letterhead * {
+    font-size: 10px !important;
+    line-height: 1.15 !important;
+  }
+
+  /* --- REF NO & DATE Section (1 Point Chhota) --- */
+  .ref-date-container, .ref-no, .ref-number, .report-date, .date-container, .ref-section, .ref-details, .ref-details * {
+    font-size: 9.5px !important;
+    font-weight: bold !important;
+  }
+
+  /* --- Certificate Content & Paragraph Formatting --- */
+  .certificate-body, .certificate-content, .certificate-text, .certificate-details {
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Prevent Paragraph/Section Page Break Split */
+  .certificate-section, .signature-section, .details-block {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
@@ -47,7 +75,7 @@
   /* DRAFT Watermark Force Print */
   .draft-watermark {
     display: block !important;
-    position: absolute !important;
+    position: fixed !important;
     top: 50% !important;
     left: 50% !important;
     transform: translate(-50%, -50%) rotate(-45deg) !important;
@@ -74,15 +102,8 @@
   letter-spacing: 1rem !important;
 }
 
-/* --- 5. Button Style Helper --- */
+/* --- 5. Button & Utility Classes --- */
 .pay-button-class {
   -webkit-print-color-adjust: exact !important;
   print-color-adjust: exact !important;
-}
-
-@media print {
-  /* Isse table ka header agle pages par repeat nahi hoga */
-  thead {
-    display: table-row-group !important;
-  }
 }

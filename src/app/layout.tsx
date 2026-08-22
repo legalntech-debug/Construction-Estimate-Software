@@ -12,7 +12,7 @@ const inter = Inter({
 
 // PWA और App की metadata यहाँ डिफाइन करें
 export const metadata: Metadata = {
-  title: "LNT WITH AI 2.0 - Construction & Deed Software",
+ 
   description: "Construction Estimate & Deed Drafting System",
   manifest: "/manifest.json",
   icons: {

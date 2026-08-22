@@ -1,7 +1,7 @@
 /* --- 1. Global Page Settings --- */
 @page {
   size: A4 portrait;
-  margin: 8mm !important;
+  margin: 8mm 10mm !important;
   @bottom-center {
     content: "Page " counter(page) " of " counter(pages);
     font-size: 8pt;
@@ -14,18 +14,34 @@
   display: block;
 }
 
+.draft-watermark {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) rotate(-45deg) !important;
+  font-size: 8rem !important;
+  font-weight: 900 !important;
+  color: rgba(220, 38, 38, 0.08) !important;
+  pointer-events: none !important;
+  white-space: nowrap !important;
+  z-index: 9999 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 1rem !important;
+}
+
 /* --- 3. Print Styles --- */
 @media print {
-  /* Hide Sidebar, Nav, UI Controls & Top Badges / Headers */
+  /* Hide Navigation, Sidebar, Controls & Badges */
   nav, aside, .sidebar, .left-sidebar, #sidebar, .dashboard-sidebar, 
   iframe, .no-print, button, header, footer, [role="navigation"],
   .badge, [class*="badge"], .top-badge, .pro-tag, [class*="pro-"] { 
     display: none !important; 
   }
 
-  /* FULL PAGE UNLOCK (Multi-page cut off fix) */
+  /* FULL PAGE UNLOCK */
   html, body, #__next, body > div, main, div, section {
-    background: white !important;
+    background: #ffffff !important;
+    color: #000000 !important;
     width: 100% !important;
     height: auto !important;
     min-height: auto !important;
@@ -50,50 +66,104 @@
     overflow: visible !important;
   }
 
-  /* Top App Title / Header Hide Fix */
-  .estimate-container > div:first-child:has(.badge),
-  .print-header-top-badge {
-    display: none !important;
+  /* --- HEADER & REF SECTION --- */
+  .letterhead, .header-container, .report-header {
+    margin-bottom: 10px !important;
+    padding-bottom: 6px !important;
+    border-bottom: 1.5px solid #000 !important;
   }
 
-  /* --- Header Section & Letterhead Fonts --- */
-  .report-header h1, .report-header h2, .company-title, .report-title {
-    font-size: 9px !important;
+  .ref-date-container, .ref-section, .ref-details {
+    margin-top: 8px !important;
+    margin-bottom: 12px !important;
+    padding: 4px 0 !important;
+    border-bottom: 1px solid #000 !important;
+    font-size: 12px !important;
     font-weight: bold !important;
   }
 
-  .company-details, .header-text, .report-header, .header-container, .letterhead, .letterhead * {
-    font-size: 10px !important;
-    line-height: 1.15 !important;
+  /* --- TITLE FONT SIZE --- */
+  .report-title, .estimate-title, h1.text-center, h2.text-center {
+    margin-top: 12px !important;
+    margin-bottom: 14px !important;
+    font-size: 16px !important;
+    font-weight: 800 !important;
+    text-align: center !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
   }
 
-  /* --- REF NO & DATE Section --- */
-  .ref-date-container, .ref-no, .ref-number, .report-date, .date-container, .ref-section, .ref-details, .ref-details * {
-    font-size: 9.5px !important;
+  /* --- CUSTOMER DETAILS (NO BORDERS & 1-LINE VERTICAL GAP) --- */
+  .customer-details, 
+  .customer-info, 
+  .client-details,
+  .customer-details table,
+  .customer-info table,
+  .client-details table {
+    margin-top: 10px !important;
+    margin-bottom: 14px !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  .customer-details table td, 
+  .customer-details table th,
+  .customer-info table td,
+  .customer-info table th,
+  .client-details table td,
+  .client-details table th {
+    border: none !important;
+    padding: 2px 4px !important;
+    background: transparent !important;
+    font-size: 10px !important;
+    line-height: 1.4 !important;
+  }
+
+  /* CUSTOMER NAME और PROPERTY ADDRESS के बीच 12px का गैप */
+  table:not(.estimate-table) tr:first-child td,
+  .customer-details table tr:first-child td,
+  .customer-info table tr:first-child td {
+    padding-bottom: 12px !important;
+  }
+
+  .customer-details p, 
+  .customer-details div,
+  .customer-info p,
+  .customer-info div {
+    border: none !important;
+    margin-bottom: 12px !important;
+    font-size: 10px !important;
+    line-height: 1.4 !important;
     font-weight: bold !important;
   }
 
-  .customer-details, .customer-details * {
-    font-size: 10px !important;
-    text-align: left !important;
-  }
-
-  /* --- General Table Base Settings --- */
-  table {
+  /* --- ESTIMATE & SUMMARY TABLES --- */
+  table:not(.customer-details-table):not(.customer-table) {
     width: 100% !important;
     border-collapse: collapse !important;
-    font-size: 10.5px !important; 
-    margin-bottom: 6px !important;
+    font-size: 9.5px !important; 
+    margin-top: 6px !important;
+    margin-bottom: 12px !important;
   }
 
-  /* MULTI-PAGE TABLE FIX */
-  thead {
-    display: table-header-group !important;
+  .total-value-bar, .rate-summary-row {
+    margin-top: 10px !important;
+    margin-bottom: 14px !important;
+    padding: 6px 4px !important;
+    font-weight: bold !important;
+    font-size: 9.5px !important;
   }
 
-  tbody {
-    display: table-row-group !important;
+  table.estimate-table {
+    margin-top: 12px !important;
+    table-layout: fixed !important;
+    width: 100% !important;
   }
+
+  /* Header repeat बंद करने के लिए बदला हुआ रूल */
+  thead { display: table-row-group !important; }
+  tbody { display: table-row-group !important; }
 
   tr {
     page-break-inside: avoid !important;
@@ -102,73 +172,45 @@
 
   th {
     font-weight: bold !important;
-    background-color: #f3f4f6 !important;
-    white-space: nowrap !important;
-    word-break: normal !important;
-    padding: 4px 2px !important;
-    font-size: 10px !important;
+    background-color: #f1f5f9 !important;
+    padding: 5px 3px !important;
+    font-size: 9px !important;
+    border: 1px solid #000 !important;
+    text-align: center !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
 
   td {
-    padding: 3px 2px !important;
-    line-height: 1.2 !important;
+    padding: 4px 3px !important;
+    line-height: 1.25 !important;
     vertical-align: top !important;
+    border: 1px solid #000 !important;
   }
 
-  /* Plot / Summary Table Layout Unaffected */
-  table:not(.estimate-table) {
-    table-layout: auto !important;
-  }
+  /* Column Width Alignment */
+  table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 4% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 46% !important; text-align: left !important; word-wrap: break-word !important; }
+  table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 4% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(4), table.estimate-table td:nth-child(4) { width: 9% !important; text-align: right !important; }
+  table.estimate-table th:nth-child(5), table.estimate-table td:nth-child(5) { width: 6% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(6), table.estimate-table td:nth-child(6) { width: 14% !important; text-align: right !important; }
+  table.estimate-table th:nth-child(7), table.estimate-table td:nth-child(7) { width: 17% !important; text-align: right !important; font-weight: bold !important; }
 
-  /* --- ONLY Estimate Table Width Distribution --- */
-  table.estimate-table {
-    table-layout: fixed !important;
-    width: 100% !important;
-  }
-
-  table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 3.5% !important; text-align: center !important; } /* SR */
-  table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 38.5% !important; text-align: left !important; word-break: break-word !important; } /* DESCRIPTION */
-  table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 4% !important; text-align: center !important; white-space: nowrap !important; }   /* NOS */
-  table.estimate-table th:nth-child(4), table.estimate-table td:nth-child(4) { width: 8.5% !important; text-align: right !important; white-space: nowrap !important; }  /* QTY */
-  table.estimate-table th:nth-child(5), table.estimate-table td:nth-child(5) { width: 5.5% !important; text-align: center !important; white-space: nowrap !important; } /* UNIT */
-  table.estimate-table th:nth-child(6), table.estimate-table td:nth-child(6) { width: 14% !important; text-align: right !important; white-space: nowrap !important; }  /* RATE */
-  
-  /* Amount Column & Total Amount Row */
-  table.estimate-table th:nth-child(7), 
-  table.estimate-table td:nth-child(7),
-  table.estimate-table tfoot td,
-  table.estimate-table tr.total-row td,
-  table.estimate-table tr:last-child td { 
-    width: 26% !important; 
-    text-align: right !important; 
-    white-space: nowrap !important; 
-    word-break: keep-all !important;
-    font-weight: bold !important; 
-    font-size: 10px !important;
-  }
-
-  /* Disclaimer & Terms Formatting */
-  .disclaimer-container, .disclaimer-section, .terms-container {
-    width: 100% !important;
-    margin-top: 6px !important;
+  /* Terms & Disclaimer Section */
+  .disclaimer-container, 
+  .terms-container,
+  .disclaimer-container p,
+  .terms-container p,
+  .disclaimer-container li,
+  .terms-container li {
+    margin-top: 10px !important;
+    font-size: 7px !important;
+    line-height: 1.3 !important;
     page-break-inside: avoid !important;
-    break-inside: avoid !important;
   }
 
-  .disclaimer-title, .terms-heading {
-    font-size: 8px !important;
-    font-weight: bold !important;
-  }
-
-  .disclaimer-text, .terms-text, .disclaimer-container p {
-    font-size: 8px !important;
-    line-height: 1.2 !important;
-    text-align: justify !important;
-  }
-
-  /* Watermark Fix */
+  /* Watermark */
   .draft-watermark {
     display: block !important;
     position: fixed !important;
@@ -178,20 +220,4 @@
     color: rgba(220, 38, 38, 0.08) !important;
     z-index: 9999 !important;
   }
-}
-
-/* Watermark Default Screen Styling */
-.draft-watermark {
-  position: fixed !important;
-  top: 50% !important;
-  left: 50% !important;
-  transform: translate(-50%, -50%) rotate(-45deg) !important;
-  font-size: 8rem !important;
-  font-weight: 900 !important;
-  color: rgba(220, 38, 38, 0.08) !important;
-  pointer-events: none !important;
-  white-space: nowrap !important;
-  z-index: 9999 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 1rem !important;
 }

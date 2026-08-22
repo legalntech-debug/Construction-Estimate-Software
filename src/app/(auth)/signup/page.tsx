@@ -1,24 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import emailjs from '@emailjs/browser';
 
-export default function SignupPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [mounted, setMounted] = useState(false);
-  const [agreeTermsPolicy, setAgreeTermsPolicy] = useState(false); 
-  const [showTermsModal, setShowTermsModal] = useState(false);
-  const [hasViewedTerms, setHasViewedTerms] = useState(false);
-
-  const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
+const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
   "ARUNACHAL PRADESH": ["Tawang", "West Kameng", "East Kameng", "Papum Pare", "Kurung Kumey", "Kra Daadi", "Lower Subansiri", "Upper Subansiri", "West Siang", "East Siang", "Siang", "Upper Siang", "Lower Siang", "Lower Dibang Valley", "Dibang Valley", "Anjaw", "Lohang", "Namsai", "Changlang", "Tirap", "Longding"],
   "ASSAM": ["Baksa", "Barpeta", "Biswanath", "Bongaigaon", "Cachar", "Charaideo", "Chirang", "Darrang", "Dhemaji", "Dhubri", "Dibrugarh", "Goalpara", "Golaghat", "Hailakandi", "Hojai", "Jorhat", "Kamrup", "Kamrup Metropolitan", "Karbi Anglong", "Karimganj", "Kokrajhar", "Lakhimpur", "Majuli", "Morigaon", "Nagaon", "Nalbari", "Dima Hasao", "Sivasagar", "Sonitpur", "Tinsukia", "Udalguri", "West Karbi Anglong"],
@@ -49,6 +37,18 @@ export default function SignupPage() {
   "WEST BENGAL": ["Alipurduar", "Bankura", "Birbhum", "Cooch Behar", "Dakshin Dinajpur", "Darjeeling", "Hooghly", "Howrah", "Jalpaiguri", "Jhargram", "Kalimpong", "Kolkata", "Malda", "Murshidabad", "Nadia", "North 24 Parganas", "Paschim Bardhaman", "Paschim Medinipur", "Purba Bardhaman", "Purba Medinipur", "Purulia", "South 24 Parganas", "Uttar Dinajpur"]
 };
 
+function SignupContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [mounted, setMounted] = useState(false);
+  const [agreeTermsPolicy, setAgreeTermsPolicy] = useState(false); 
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [hasViewedTerms, setHasViewedTerms] = useState(false);
+
   const [form, setForm] = useState({
     fullName: '',
     mobile: '',
@@ -59,7 +59,7 @@ export default function SignupPage() {
     firmName: '',
     city: '',
     state: '',
-    partnerId: '', // Partner / Ref ID stored here
+    partnerId: '',
     otp: '',
   });
 
@@ -70,7 +70,6 @@ export default function SignupPage() {
 
   useEffect(() => {
     setMounted(true);
-    // URL query parameters check (?ref=... or ?partnerId=...)
     const refCode = searchParams.get('ref') || searchParams.get('partnerId') || '';
     if (refCode) {
       setForm((prev) => ({ ...prev, partnerId: refCode.toUpperCase() }));
@@ -127,7 +126,7 @@ export default function SignupPage() {
       setStep(2);
       setLoading(false);
     })
-    .catch((err) => {
+    .catch(() => {
       setError("Failed to send email!");
       setLoading(false);
     });
@@ -184,7 +183,7 @@ export default function SignupPage() {
         city: form.city,
         state: form.state,
         user_code: generatedUserId,
-        partner_id: form.partnerId || null, // Saves Partner ID if present
+        partner_id: form.partnerId || null,
         status: 'active',
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
@@ -348,7 +347,7 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* CONDITIONAL PARTNER / REF ID FIELD (Only shown if user clicked partner link) */}
+              {/* CONDITIONAL PARTNER / REF ID FIELD */}
               {form.partnerId && (
                 <div className="space-y-1 pt-1">
                   <label className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">
@@ -364,7 +363,7 @@ export default function SignupPage() {
                 </div>
               )}
 
-              {/* LEGAL COMPLIANCE & PLATFORM RULES WITH MODAL POPUP BUTTON */}
+              {/* LEGAL COMPLIANCE */}
               <div className="space-y-2 mt-2 pt-2 border-t border-slate-200">
                 <label className="text-[10px] font-black text-blue-900 uppercase tracking-wider block">
                   Platform Terms & Operational Guidelines *
@@ -467,7 +466,7 @@ export default function SignupPage() {
 
         </div>
 
-        {/* RIGHT PANEL - OFFER & LAUNCHING DETAILS */}
+        {/* RIGHT PANEL */}
         <div className="hidden lg:flex flex-1 flex-col justify-center p-6 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl backdrop-blur-sm">
           <h2 className="text-yellow-400 font-black text-base mb-4 text-center tracking-widest uppercase">
             ⚡ Special Launching Offer ⚡
@@ -504,12 +503,11 @@ export default function SignupPage() {
 
       </div>
 
-      {/* TERMS & CONDITIONS POPUP MODAL WINDOW */}
+      {/* TERMS MODAL */}
       {showTermsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white text-slate-900 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
             
-            {/* Modal Header */}
             <div className="bg-blue-900 text-white p-4 flex justify-between items-center">
               <h3 className="font-black text-sm uppercase tracking-wider">Platform Terms & Operational Guidelines</h3>
               <button 
@@ -520,38 +518,111 @@ export default function SignupPage() {
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-4 overflow-y-auto space-y-3 text-xs text-slate-700 leading-relaxed">
-              <p className="font-bold text-slate-900">Welcome to Our Platform</p>
-              <p>Please read these terms and conditions carefully before proceeding to login. By accessing and using our platform, you agree to abide by the following operational rules and guidelines:</p>
+            <div className="p-4 overflow-y-auto space-y-4 text-xs text-slate-700 leading-relaxed">
+  <p className="font-bold text-slate-900 border-b pb-1 uppercase tracking-wider">
+    Platform Terms, Legal Disclaimers & Operational Guidelines
+  </p>
 
-              <div className="space-y-1">
-                <p className="font-bold text-blue-900 uppercase">1. Wallet Balance & Account Status</p>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li><b>Minimum Balance Requirement:</b> Users must maintain a minimum wallet balance of <b>₹100</b> at all times to ensure uninterrupted access to all platform features and services.</li>
-                  <li><b>Low Balance Restrictions:</b> If your wallet balance falls below ₹100, certain active features will be restricted. However, you will still retain access to view and print your previously generated estimates and review your old cases.</li>
-                  <li><b>Account Deactivation Policy:</b> If the wallet balance remains below the required minimum and no activity or top-up is recorded for <b>60 days</b>, the account will be temporarily suspended, and estimates older than 60 days will no longer be accessible for opening or editing.</li>
-                </ul>
-              </div>
+  {/* 1. STRICT INTERNAL REFERENCE & NON-LEGAL USE */}
+  <div className="space-y-1 bg-red-50/60 p-2.5 rounded-lg border border-red-200">
+    <p className="font-black text-red-800 uppercase tracking-wide">
+      1. Internal Reference Only (Non-Legal Use)
+    </p>
+    <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
+      <li>
+        <b>Strictly Internal Purpose:</b> All reports, estimates, valuation drafts, route maps, and legal documentation generated through this portal are strictly intended for internal client reference and preliminary evaluation purposes only.
+      </li>
+      <li>
+        <b>Not Valid in Court / Legal Proceedings:</b> These documents are <b>NOT valid</b> as formal legal evidence or expert proof in any Court of Law, Judicial Proceeding, Arbitral Tribunal, or Statutory Government Authority.
+      </li>
+      <li>
+        <b>User Responsibility:</b> The user assumes complete responsibility and liability for any unauthorized use, misuse, or disputes arising from presenting these reports in formal legal proceedings.
+      </li>
+    </ul>
+  </div>
 
-              <div className="space-y-1">
-                <p className="font-bold text-blue-900 uppercase">2. Service & Estimate Guidelines</p>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li><b>Activity Requirement:</b> Generate at least <b>1 estimate every 2 months</b> to keep your account fully active and operational. Failure to meet this requirement may lead to account suspension.</li>
-                  <li><b>Editing Limits:</b> For every standard service package (including estimates, drafting, mapping, and other allied services), users are permitted a maximum of <b>3 free edits</b>.</li>
-                  <li><b>Additional Revisions:</b> Any modifications or edits requested after exhausting the initial 3 revisions will incur standard additional charges for a new request.</li>
-                  <li><b>Name & Address Correction Policy:</b> Only <b>minor typographical or spelling corrections</b> are permitted in the Name and Address fields. Substantial changes to identity details are not allowed once submitted.</li>
-                </ul>
-              </div>
+  {/* 2. STRICT NO-REFUND POLICY */}
+  <div className="space-y-1 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
+    <p className="font-black text-amber-900 uppercase tracking-wide">
+      2. No-Refund & Payment Deduction Policy
+    </p>
+    <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
+      <li>
+        <b>Strictly Non-Refundable:</b> All payments, wallet deductions, or service fees incurred for report generation, estimation, or drafting services are <b>100% non-refundable</b> under any circumstances.
+      </li>
+      <li>
+        <b>No Reversal or Chargeback:</b> Once a report or service is successfully processed, requests for payment cancellation, refund claims, or chargebacks will not be entertained.
+      </li>
+      <li>
+        <b>Wallet Balance:</b> Funds added to the platform wallet are non-transferable and non-refundable.
+      </li>
+    </ul>
+  </div>
 
-              <div className="space-y-1 pt-2 border-t border-gray-200">
-                <p className="font-bold text-slate-900 uppercase">Support & Assistance</p>
-                <p>If you encounter any technical issues, platform errors, or require clarification regarding your wallet balance or account status, please feel free to contact our Administrator Support Team at:</p>
-                <p className="font-bold text-blue-900">Helpline / WhatsApp: 7987561396</p>
-              </div>
-            </div>
+  {/* 3. LIMITATION OF LIABILITY & REJECTIONS */}
+  <div className="space-y-1">
+    <p className="font-bold text-blue-900 uppercase tracking-wide">
+      3. Bank Rejections & Site Verification
+    </p>
+    <ul className="list-disc pl-4 space-y-1 text-slate-700">
+      <li>
+        <b>No Guarantee for Approvals:</b> Legal n Tech Consultants holds no legal or financial liability in cases of bank loan rejections, municipal authority disapprovals, or third-party refusals.
+      </li>
+      <li>
+        <b>Mandatory Cross-Verification:</b> It is the sole responsibility of the user to physically verify site dimensions, local PWD/CPWD rates, and property legal title documents before finalizing any report.
+      </li>
+    </ul>
+  </div>
 
-            {/* Modal Footer */}
+  {/* 4. WALLET BALANCE & ACCOUNT STATUS */}
+  <div className="space-y-1">
+    <p className="font-bold text-blue-900 uppercase tracking-wide">
+      4. Wallet Balance & Account Status
+    </p>
+    <ul className="list-disc pl-4 space-y-1 text-slate-700">
+      <li>
+        <b>Minimum Balance Requirement:</b> Users must maintain a minimum wallet balance of <b>₹100</b> at all times to ensure uninterrupted access to all platform features and services.
+      </li>
+      <li>
+        <b>Low Balance Restrictions:</b> If your wallet balance falls below ₹100, new service requests will be restricted. However, you will retain access to view and print your previously generated estimates and review old cases.
+      </li>
+      <li>
+        <b>Account Deactivation Policy:</b> If the wallet balance remains below the required minimum and no activity or top-up is recorded for <b>60 days</b>, the account will be temporarily suspended, and estimates older than 60 days will no longer be accessible for opening or editing.
+      </li>
+    </ul>
+  </div>
+
+  {/* 5. SERVICE, EDITING & CORRECTION GUIDELINES */}
+  <div className="space-y-1">
+    <p className="font-bold text-blue-900 uppercase tracking-wide">
+      5. Service & Estimate Guidelines
+    </p>
+    <ul className="list-disc pl-4 space-y-1 text-slate-700">
+      <li>
+        <b>Activity Requirement:</b> Users must generate at least <b>1 estimate every 2 months</b> to keep their account fully active and operational. Failure to meet this requirement may lead to account suspension.
+      </li>
+      <li>
+        <b>Editing Limits:</b> For every standard service package (including estimates, drafting, mapping, and allied services), users are permitted a maximum of <b>3 free edits</b>.
+      </li>
+      <li>
+        <b>Additional Revisions:</b> Any modifications or edits requested after exhausting the initial 3 revisions will incur standard additional charges for a new request.
+      </li>
+      <li>
+        <b>Name & Address Correction Policy:</b> Only <b>minor typographical or spelling corrections</b> are permitted in the Name and Address fields. Substantial changes to identity or property ownership details are not allowed once submitted.
+      </li>
+    </ul>
+  </div>
+
+  {/* SUPPORT & ASSISTANCE */}
+  <div className="space-y-1 pt-2 border-t border-gray-200">
+    <p className="font-bold text-slate-900 uppercase">Support & Assistance</p>
+    <p className="text-slate-600">
+      If you encounter any technical issues, platform errors, or require clarification regarding your wallet balance or account status, please contact our Administrator Support Team at:
+    </p>
+    <p className="font-bold text-blue-900">Helpline / WhatsApp: 7987561396</p>
+  </div>
+</div>
+
             <div className="p-3 bg-gray-100 border-t border-gray-200 flex justify-end gap-2">
               <button
                 type="button"
@@ -577,5 +648,18 @@ export default function SignupPage() {
       )}
 
     </div>
+  );
+}
+
+// Default export wrapped in Suspense boundary
+export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen w-screen bg-slate-950 flex items-center justify-center text-gray-500 text-xs tracking-widest font-mono">
+        LOADING GATEWAY...
+      </div>
+    }>
+      <SignupContent />
+    </Suspense>
   );
 }

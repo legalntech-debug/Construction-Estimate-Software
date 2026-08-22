@@ -10,6 +10,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [userId, setUserId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userProfile, setUserProfile] = useState<{ full_name: string; mobile: string; user_code: string } | null>(null);
+  const [activeTab, setActiveTab] = useState("estimate");
 
   useEffect(() => {
     const checkUser = async () => {
@@ -49,24 +50,84 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   return (
-    <div className="flex h-screen relative overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen relative overflow-hidden bg-slate-100">
       {/* Tracker activate ho jayega jaise hi userId milegi */}
       {userId && !isAdmin && <UserStatusTracker userId={userId} />}
 
-      <Sidebar />
+      {/* 1. DESKTOP SIDEBAR (Mobile Screen Par Completely Hide Ho Jayega) */}
+      <div className="hidden md:block border-r border-slate-800 bg-slate-900">
+        <Sidebar />
+      </div>
 
-      {/* Main Content Area - Mobile par bottom margin/padding di gayi hai taaki navigation content ko hide na kare */}
-      <main className="flex-1 overflow-y-auto bg-slate-100 p-4 md:p-6 pb-24 md:pb-6">
+      {/* 2. MOBILE TOP CATEGORY BAR (redBus Style - Only on Mobile) */}
+      <div className="md:hidden bg-slate-900 text-white z-40 border-b border-slate-800">
+        <div className="p-2.5 text-center font-bold text-xs tracking-wider border-b border-slate-800/80 flex justify-between items-center px-4">
+          <span className="text-blue-400 font-extrabold">LNT WITH AI 2.0</span>
+          <span className="bg-blue-600/30 text-blue-300 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30">
+            PRO
+          </span>
+        </div>
+        
+        {/* Top Service Option Tabs (Horizontal Scrollable) */}
+        <div className="flex overflow-x-auto no-scrollbar py-2 px-2 space-x-2 text-xs border-t border-slate-800/40">
+          <button 
+            onClick={() => setActiveTab("estimate")}
+            className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+              activeTab === "estimate" 
+                ? "bg-blue-600 text-white font-bold shadow-sm" 
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <span>🏗️ Construction Est.</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab("plan")}
+            className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+              activeTab === "plan" 
+                ? "bg-blue-600 text-white font-bold shadow-sm" 
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <span>🗺️ Map & Key Plan</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab("drafting")}
+            className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+              activeTab === "drafting" 
+                ? "bg-blue-600 text-white font-bold shadow-sm" 
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <span>📝 Deed Drafting</span>
+          </button>
+
+          <button 
+            onClick={() => setActiveTab("doc")}
+            className={`flex items-center space-x-1 px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+              activeTab === "doc" 
+                ? "bg-blue-600 text-white font-bold shadow-sm" 
+                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+            }`}
+          >
+            <span>📁 Doc Management</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 3. MIDDLE MAIN CONTENT / FORM AREA (Mobile par top aur bottom bar ke beech me rahega) */}
+      <main className="flex-1 overflow-y-auto p-3 md:p-6 pb-20 md:pb-6">
         {children}
       </main>
 
-      {/* Mobile Sticky Bottom Navigation */}
+      {/* 4. MOBILE STICKY BOTTOM NAVIGATION */}
       <MobileBottomNav />
       
-      {/* WhatsApp Helpdesk Button - Mobile par bottom navigation ke thoda upar shift kiya gaya hai */}
+      {/* 5. WHATSAPP HELPDESK BUTTON */}
       <button
         onClick={handleSupportClick}
-        className="fixed bottom-16 md:bottom-6 right-4 md:right-6 z-50 flex h-12 w-12 md:h-14 md:w-14 items-center justify-center rounded-full bg-emerald-500 text-white shadow-xl transition-all duration-300 hover:scale-110 hover:bg-emerald-600 active:scale-95 no-print"
+        className="fixed bottom-16 md:bottom-6 right-4 md:right-6 z-50 flex h-11 w-11 md:h-14 md:w-14 items-center justify-center rounded-full bg-emerald-500 text-white shadow-xl transition-all duration-300 hover:scale-110 hover:bg-emerald-600 active:scale-95 no-print"
         title="Contact Helpdesk Support"
       >
         <svg className="h-6 w-6 md:h-7 md:w-7 fill-current" viewBox="0 0 24 24">

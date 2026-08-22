@@ -55,12 +55,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {userId && !isAdmin && <UserStatusTracker userId={userId} />}
 
       {/* 1. DESKTOP SIDEBAR (Mobile Screen Par Completely Hide Ho Jayega) */}
-      <div className="hidden md:block border-r border-slate-800 bg-slate-900">
+      <div className="hidden md:block border-r border-slate-800 bg-slate-900 shrink-0">
         <Sidebar />
       </div>
 
       {/* 2. MOBILE TOP CATEGORY BAR (redBus Style - Only on Mobile) */}
-      <div className="md:hidden bg-slate-900 text-white z-40 border-b border-slate-800">
+      <div className="md:hidden bg-slate-900 text-white z-40 border-b border-slate-800 shrink-0">
         <div className="p-2.5 text-center font-bold text-xs tracking-wider border-b border-slate-800/80 flex justify-between items-center px-4">
           <span className="text-blue-400 font-extrabold">LNT WITH AI 2.0</span>
           <span className="bg-blue-600/30 text-blue-300 text-[10px] px-2 py-0.5 rounded-full border border-blue-500/30">
@@ -116,13 +116,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </div>
 
-      {/* 3. MIDDLE MAIN CONTENT / FORM AREA (Mobile par top aur bottom bar ke beech me rahega) */}
+      {/* 3. MIDDLE MAIN CONTENT AREA */}
       <main className="flex-1 overflow-y-auto p-3 md:p-6 pb-20 md:pb-6">
         {children}
       </main>
 
-      {/* 4. MOBILE STICKY BOTTOM NAVIGATION */}
-      <MobileBottomNav />
+      {/* 4. MOBILE STICKY BOTTOM NAVIGATION (Only visible on Mobile screens) */}
+      <div className="block md:hidden">
+        <MobileBottomNav />
+      </div>
       
       {/* 5. WHATSAPP HELPDESK BUTTON */}
       <button

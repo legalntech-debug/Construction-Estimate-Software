@@ -25,7 +25,7 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
     firmName: '',
     city: '',
     state: '',
-    walletBonus: '500'
+    walletBonus: '000'
   });
   const [loading, setLoading] = useState(false);
   const [showPanel, setShowPanel] = useState(false);

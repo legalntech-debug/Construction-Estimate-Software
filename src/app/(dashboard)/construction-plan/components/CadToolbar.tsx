@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { CadTool } from "@/lib/constructionPlan/types";
+import { CadTool } from "../engine/planningTypes";
 
 interface CadToolbarProps {
   cadTool: CadTool;

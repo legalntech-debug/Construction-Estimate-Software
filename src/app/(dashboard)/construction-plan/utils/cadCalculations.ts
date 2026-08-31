@@ -1,4 +1,4 @@
-import { PlotDimensions, PlotShape } from "@/lib/constructionPlan/types";
+import { PlotDimensions, PlotShape } from "../engine/planningTypes";
 
 export function sortFloors(floors: string[], floorSequence: string[]): string[] {
   return [...floors].sort(

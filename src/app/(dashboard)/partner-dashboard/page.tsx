@@ -5,8 +5,11 @@ import { createBrowserClient } from '@supabase/ssr';
 import { 
   Wallet, Users, UserPlus, Lock, Search, CreditCard, ArrowUpRight, 
   Landmark, X, PlusCircle, Filter, Eye, EyeOff, LogOut, 
-  AlertTriangle, PhoneCall, UserX, Mail, Link as LinkIcon
+  AlertTriangle, PhoneCall, UserX, ExternalLink, Calculator
 } from 'lucide-react';
+import AddUserModal from './components/AddUserModal';
+import PartnerProfileCard from './components/PartnerProfileCard';
+import PayoutBreakdownModal from './components/PayoutBreakdownModal';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,14 +22,12 @@ export default function PartnerDashboardPage() {
   const [profile, setProfile] = useState<any>(null);
   const [isAdminOrCEO, setIsAdminOrCEO] = useState(false);
 
-  // Tab State & Security
   const [activeTab, setActiveTab] = useState<'network' | 'settlement'>('network');
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [securityPassword, setSecurityPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
 
-  // Partner & Referral States
   const [allPartners, setAllPartners] = useState<any[]>([]);
   const [selectedPartnerId, setSelectedPartnerId] = useState<string>('');
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
@@ -35,18 +36,13 @@ export default function PartnerDashboardPage() {
   const [referralRevenue, setReferralRevenue] = useState<number>(0);
   const [totalSettled, setTotalSettled] = useState<number>(0);
 
-  // Filters
   const [filterMonth, setFilterMonth] = useState<string>('ALL');
   const [filterYear, setFilterYear] = useState<string>('ALL');
   const [showUnpaidOnly, setShowUnpaidOnly] = useState<boolean>(false);
 
-  // Modals & Forms
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserMobile, setNewUserMobile] = useState('');
-  const [newUserPlan, setNewUserPlan] = useState('BASIC PLAN');
+  const [showBreakdownModal, setShowBreakdownModal] = useState(false);
 
   const [payoutAmount, setPayoutAmount] = useState('');
   const [payoutDate, setPayoutDate] = useState('');
@@ -68,7 +64,7 @@ export default function PartnerDashboardPage() {
     const interval = setInterval(() => {
       if (isAdminOrCEO && selectedPartnerId) {
         const selected = allPartners.find((p) => p.partner_id === selectedPartnerId);
-        if (selected) loadPartnerDetails(selectedPartnerId, selected.user_id);
+        if (selected) loadPartnerDetails(selected.partner_id, selected.user_id);
       } else if (partnerProfile) {
         loadPartnerDetails(partnerProfile.partner_id, session.user.id);
       }
@@ -95,17 +91,25 @@ export default function PartnerDashboardPage() {
     if (hasAdminAccess) {
       const { data: partners } = await supabase
         .from('partner_profiles')
-        .select(`*, profiles:user_id (full_name, email, mobile, wallet_balance, user_type)`);
-      const partnerList = partners || [];
+        .select(`*, profiles:user_id (*)`);
+
+      const partnerList = (partners || []).filter((p) => {
+        const role = (p.profiles?.role || '').toLowerCase();
+        const userType = (p.profiles?.user_type || '').toLowerCase();
+        const userCode = (p.profiles?.user_code || '').toLowerCase();
+        return role !== 'admin' && userType !== 'admin' && userCode !== 'admin001';
+      });
+
       setAllPartners(partnerList);
       if (partnerList.length > 0) {
         setSelectedPartnerId(partnerList[0].partner_id);
+        setPartnerProfile(partnerList[0]);
         await loadPartnerDetails(partnerList[0].partner_id, partnerList[0].user_id);
       }
     } else {
       const { data: partnerData } = await supabase
         .from('partner_profiles')
-        .select('*')
+        .select(`*, profiles:user_id (*)`)
         .eq('user_id', session.user.id)
         .maybeSingle();
 
@@ -120,26 +124,39 @@ export default function PartnerDashboardPage() {
   const loadPartnerDetails = async (partnerId: string, userId: string) => {
     const { data: partnerUserData } = await supabase
       .from('profiles')
-      .select('user_code, id, wallet_balance')
+      .select('*')
       .eq('id', userId)
       .maybeSingle();
 
     const userCode = partnerUserData?.user_code || 'U001';
-    let currentWalletBal = Number(partnerUserData?.wallet_balance || 0);
 
-    const { data: directProfiles } = await supabase
+    const { data: rawDirectProfiles } = await supabase
       .from('profiles')
       .select('*')
       .or(`referred_by.eq.${partnerId},referred_by.eq.${userCode},referred_by.eq.${userId}`)
       .neq('id', userId);
 
-    const { data: mappings } = await supabase
+    const directProfiles = (rawDirectProfiles || []).filter((p) => {
+      const role = (p.role || '').toLowerCase();
+      const userType = (p.user_type || '').toLowerCase();
+      const uCode = (p.user_code || '').toLowerCase();
+      return role !== 'admin' && userType !== 'admin' && uCode !== 'admin001';
+    });
+
+    const { data: rawMappings } = await supabase
       .from('partner_user_mapping')
-      .select(`*, profiles:referred_user_id (full_name, email, mobile, created_at, user_type)`)
+      .select(`*, profiles:referred_user_id (id, full_name, email, mobile, created_at, user_type, role, user_code)`)
       .eq('partner_id', partnerId);
 
-    const mappedUserIds = new Set(mappings?.map((m) => m.referred_user_id) || []);
-    const directUserIds = (directProfiles || []).map((p) => p.id);
+    const mappings = (rawMappings || []).filter((m) => {
+      const role = (m.profiles?.role || '').toLowerCase();
+      const userType = (m.profiles?.user_type || '').toLowerCase();
+      const uCode = (m.profiles?.user_code || '').toLowerCase();
+      return role !== 'admin' && userType !== 'admin' && uCode !== 'admin001';
+    });
+
+    const mappedUserIds = new Set(mappings.map((m) => m.referred_user_id));
+    const directUserIds = directProfiles.map((p) => p.id);
     const allReferredUserIds = Array.from(new Set([...Array.from(mappedUserIds), ...directUserIds]));
 
     const revenueMap: Record<string, number> = {};
@@ -177,7 +194,7 @@ export default function PartnerDashboardPage() {
       };
     };
 
-    const formattedDirectUsers = (directProfiles || [])
+    const formattedDirectUsers = directProfiles
       .filter((p) => !mappedUserIds.has(p.id))
       .map((p) => {
         const { rawDate, addedDateStr, expiryDateStr, daysLeft, isExpired, statusLabel } = processUserData(p.created_at);
@@ -197,7 +214,7 @@ export default function PartnerDashboardPage() {
         };
       });
 
-    const formattedMappings = (mappings || []).map((m) => {
+    const formattedMappings = mappings.map((m) => {
       const rawDate = m.profiles?.created_at || m.created_at;
       const { rawDate: dateObj, addedDateStr, expiryDateStr, daysLeft, isExpired, statusLabel } = processUserData(rawDate);
       const paidRevenue = revenueMap[m.referred_user_id] || m.paid_revenue || 0;
@@ -220,7 +237,6 @@ export default function PartnerDashboardPage() {
     const calculatedActiveRevenue = combinedList.reduce((acc, curr) => acc + (curr.earned_commission_3percent || 0), 0);
     setReferralRevenue(calculatedActiveRevenue);
 
-    // Fetch existing payout settlements
     const { data: payouts } = await supabase
       .from('partner_payouts')
       .select('*')
@@ -231,61 +247,6 @@ export default function PartnerDashboardPage() {
     const calculatedTotalSettled = payoutList.reduce((acc, item) => acc + (Number(item.amount_settled) || 0), 0);
     setPayoutHistory(payoutList);
     setTotalSettled(calculatedTotalSettled);
-
-    // ⚡ FIXED: 1ST DATE AUTO WALLET ADJUSTMENT - RUNS ONCE PER MONTH ONLY
-    if (currentWalletBal < 0 && calculatedActiveRevenue > 0) {
-      const grossPayable = Math.max(0, calculatedActiveRevenue - calculatedTotalSettled);
-      const absDeficit = Math.abs(currentWalletBal);
-      const autoAdjustmentAmount = Math.min(absDeficit, grossPayable);
-
-      const today = new Date();
-      const currentMonthStr = today.toLocaleString('default', { month: 'long', year: 'numeric' }).toUpperCase();
-      
-      // Check if auto-adjustment was ALREADY executed for this month
-      const alreadyAdjustedThisMonth = payoutList.some(
-        (p) => p.settlement_month?.toUpperCase() === currentMonthStr && p.payment_mode === '1ST DATE AUTO-ADJUSTMENT'
-      );
-
-      if (autoAdjustmentAmount > 0 && !alreadyAdjustedThisMonth) {
-        const newSyncedWalletBal = currentWalletBal + autoAdjustmentAmount;
-        const formattedDate = `01-${today.toLocaleString('default', { month: 'short' })}-${today.getFullYear()}`.toUpperCase();
-
-        // 1. Record in partner_payouts table so totalSettled increases and loop stops
-        const { data: insertedPayout, error: payoutErr } = await supabase.from('partner_payouts').insert([{
-          partner_id: partnerId,
-          user_id: userId,
-          amount_settled: autoAdjustmentAmount,
-          payout_date: formattedDate,
-          settlement_month: currentMonthStr,
-          payment_mode: '1ST DATE AUTO-ADJUSTMENT',
-          transaction_ref: `AUTO-RECOVERY-(-₹${absDeficit.toFixed(2)})`,
-          notes: `SETTLED AGAINST NEGATIVE WALLET BALANCE. REMAINING WALLET DEFICIT: ₹${(absDeficit - autoAdjustmentAmount).toFixed(2)}`
-        }]).select().single();
-
-        if (!payoutErr && insertedPayout) {
-          // 2. Update Wallet Balance in DB
-          await supabase
-            .from('profiles')
-            .update({ wallet_balance: newSyncedWalletBal })
-            .eq('id', userId);
-
-          // 3. Add Wallet Ledger Record
-          await supabase.from('wallet_ledger').insert([{
-            user_id: userId,
-            amount: autoAdjustmentAmount,
-            transaction_type: 'PAYOUT_AUTO_ADJUSTMENT',
-            previous_balance: currentWalletBal,
-            new_balance: newSyncedWalletBal,
-            description: `AUTO-SETTLED ₹${autoAdjustmentAmount.toFixed(2)} FROM ACTIVE PAYOUT TO CLEAR NEGATIVE BALANCE.`
-          }]);
-
-          // Update State Local
-          setProfile((prev: any) => prev ? { ...prev, wallet_balance: newSyncedWalletBal } : prev);
-          setPayoutHistory((prev) => [insertedPayout, ...prev]);
-          setTotalSettled((prev) => prev + autoAdjustmentAmount);
-        }
-      }
-    }
   };
 
   const filteredReferredUsers = useMemo(() => {
@@ -303,17 +264,18 @@ export default function PartnerDashboardPage() {
   }, [referredUsers, filterMonth, filterYear, showUnpaidOnly]);
 
   const networkStats = useMemo(() => {
-    const rev = filteredReferredUsers.reduce((sum, u) => sum + u.paid_revenue, 0);
-    const payout = filteredReferredUsers.reduce((sum, u) => sum + u.earned_commission_3percent, 0);
+    const rev = filteredReferredUsers.reduce((sum, u) => sum + (u.paid_revenue || 0), 0);
+    const payout = filteredReferredUsers.reduce((sum, u) => sum + (u.earned_commission_3percent || 0), 0);
     const paidCount = filteredReferredUsers.filter((u) => u.paid_revenue > 0).length;
     const unpaidCount = filteredReferredUsers.filter((u) => u.paid_revenue === 0).length;
-    return { rev, payout, paidCount, unpaidCount };
-  }, [filteredReferredUsers]);
+    const totalGeneratedRevenue = referredUsers.reduce((sum, u) => sum + (u.paid_revenue || 0), 0);
+    return { rev, payout, paidCount, unpaidCount, totalGeneratedRevenue };
+  }, [filteredReferredUsers, referredUsers]);
 
   const currentWalletBal = Number(partnerProfile?.profiles?.wallet_balance || profile?.wallet_balance || 0);
   const isNegativeWallet = currentWalletBal < 0;
   const negativeAmountToClear = isNegativeWallet ? Math.abs(currentWalletBal) : 0;
-  const netPayable = Math.max(0, referralRevenue - totalSettled);
+  const netPayable = Math.max(0, referralRevenue - totalSettled - negativeAmountToClear);
 
   const filteredPayoutHistory = useMemo(() => {
     return payoutHistory.filter((item) => {
@@ -330,33 +292,6 @@ export default function PartnerDashboardPage() {
     const { error } = await supabase.auth.signInWithPassword({ email: session.user.email, password: securityPassword });
     if (error) setAuthError('INVALID PASSWORD!');
     else { sessionStorage.setItem('partner_ledger_unlocked', 'true'); setIsUnlocked(true); }
-  };
-
-  const handleAddUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!partnerProfile) return;
-
-    const { data, error } = await supabase.from('profiles').insert([{ 
-      full_name: newUserName, 
-      email: newUserEmail,
-      mobile: newUserMobile, 
-      plan_type: newUserPlan, 
-      referred_by: partnerProfile.partner_id 
-    }]).select().single();
-
-    if (error) {
-      alert('ERROR ADDING USER: ' + error.message);
-    } else {
-      const generatedLink = `${window.location.origin}/register?ref=${partnerProfile.partner_id}&email=${encodeURIComponent(newUserEmail)}`;
-      navigator.clipboard.writeText(generatedLink);
-      alert(`✅ USER CREATED & INVITE LINK COPIED TO CLIPBOARD!\n\nEmail: ${newUserEmail}\nLink: ${generatedLink}`);
-      
-      setShowAddUserModal(false);
-      setNewUserName('');
-      setNewUserEmail('');
-      setNewUserMobile('');
-      await loadPartnerDetails(partnerProfile.partner_id, partnerProfile.user_id);
-    }
   };
 
   const handleAddPayoutSettlement = async (e: React.FormEvent) => {
@@ -414,7 +349,7 @@ export default function PartnerDashboardPage() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-3 md:p-6 space-y-5 uppercase">
       
-      {/* TOP BAR */}
+      {/* HEADER BAR */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center border-b border-slate-800 pb-3 gap-3">
         <div>
           <h1 className="text-lg md:text-xl font-black text-indigo-400 flex items-center gap-2">
@@ -440,7 +375,7 @@ export default function PartnerDashboardPage() {
                 >
                   {allPartners.map((p) => (
                     <option key={p.partner_id} value={p.partner_id}>
-                      {p.profiles?.full_name || 'Partner'} ({p.profiles?.mobile})
+                      {p.profiles?.full_name || 'Partner'} ({p.profiles?.mobile || 'No Mobile'})
                     </option>
                   ))}
                 </select>
@@ -461,63 +396,93 @@ export default function PartnerDashboardPage() {
         </div>
       </div>
 
+      {/* PARTNER PROFILE DETAILS COMPONENT */}
+      <PartnerProfileCard partnerProfile={partnerProfile} />
+
       {/* METRIC CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
           <div>
-            <p className="text-[10px] text-slate-400 font-bold">PREMIUM WALLET</p>
-            <h3 className={`text-xl font-black ${isNegativeWallet ? 'text-red-400' : 'text-emerald-400'}`}>
-              ₹ {currentWalletBal.toFixed(2)}
+            <p className="text-[10px] text-slate-400 font-bold">TOTAL USER REVENUE</p>
+            <h3 className="text-xl font-black text-emerald-400">
+              ₹ {networkStats.totalGeneratedRevenue.toFixed(2)}
             </h3>
-            {isNegativeWallet && <span className="text-[9px] text-red-400 font-bold bg-red-950/80 px-1 rounded border border-red-900 inline-block mt-0.5">DEFICIT / MINUS BAL</span>}
+            <span className="text-[9px] text-slate-400 font-bold block mt-0.5">FROM ALL REFERRED USERS</span>
           </div>
-          <Wallet className={isNegativeWallet ? "text-red-400 w-5 h-5" : "text-emerald-400 w-5 h-5"} />
+          <Wallet className="text-emerald-400 w-5 h-5" />
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
+        <div 
+          onClick={() => setShowBreakdownModal(true)}
+          className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md cursor-pointer hover:border-indigo-500 transition group"
+        >
           <div>
-            <p className="text-[10px] text-slate-400 font-bold">ACTIVE PAYOUT (3%)</p>
+            <div className="flex items-center gap-1">
+              <p className="text-[10px] text-slate-400 font-bold group-hover:text-indigo-300">ACTIVE PAYOUT (3%)</p>
+              <ExternalLink size={10} className="text-indigo-400" />
+            </div>
             <h3 className="text-xl font-black text-indigo-400">₹ {referralRevenue.toFixed(2)}</h3>
+            <span className="text-[9px] text-indigo-400/80 font-bold">CLICK FOR BREAKDOWN</span>
           </div>
-          <ArrowUpRight className="text-indigo-400 w-5 h-5" />
+          <ArrowUpRight className="text-indigo-400 w-5 h-5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition" />
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
+        <div 
+          onClick={() => setActiveTab('settlement')}
+          className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md cursor-pointer hover:border-amber-500 transition group"
+        >
           <div>
-            <p className="text-[10px] text-slate-400 font-bold">SETTLED PAYOUTS</p>
+            <div className="flex items-center gap-1">
+              <p className="text-[10px] text-slate-400 font-bold group-hover:text-amber-300">SETTLED PAYOUTS</p>
+              <ExternalLink size={10} className="text-amber-400" />
+            </div>
             <h3 className="text-xl font-black text-amber-400">₹ {totalSettled.toFixed(2)}</h3>
+            <span className="text-[9px] text-amber-400/80 font-bold">VIEW HISTORY TAB</span>
           </div>
-          <Landmark className="text-amber-400 w-5 h-5" />
+          <Landmark className="text-amber-400 w-5 h-5 group-hover:scale-110 transition" />
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
+        <div 
+          onClick={() => setShowBreakdownModal(true)}
+          className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md cursor-pointer hover:border-cyan-500 transition group"
+        >
           <div>
-            <p className="text-[10px] text-slate-400 font-bold">NET PAYABLE</p>
+            <div className="flex items-center gap-1">
+              <p className="text-[10px] text-slate-400 font-bold group-hover:text-cyan-300">NET PAYABLE</p>
+              <Calculator size={10} className="text-cyan-400" />
+            </div>
             <h3 className="text-xl font-black text-cyan-400">₹ {netPayable.toFixed(2)}</h3>
+            {isNegativeWallet && (
+              <span className="text-[8px] text-red-400 font-bold block">(-₹{negativeAmountToClear.toFixed(0)} WALLET DEDUCTED)</span>
+            )}
           </div>
-          <CreditCard className="text-cyan-400 w-5 h-5" />
+          <CreditCard className="text-cyan-400 w-5 h-5 group-hover:scale-110 transition" />
         </div>
       </div>
 
-      {/* NEGATIVE WALLET BANNER */}
+      {/* NEGATIVE WALLET NOTICE */}
       {isNegativeWallet && (
         <div className="bg-amber-950/40 border border-amber-800/80 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-amber-300 text-[11px]">
           <div className="flex items-center gap-2">
             <AlertTriangle className="text-amber-400 shrink-0 w-5 h-5" />
             <div>
-              <span className="font-bold text-white">NEGATIVE WALLET AUTO-ADJUSTMENT ACTIVE</span>
+              <span className="font-bold text-white">NEGATIVE WALLET DEFICIT AUTO-DEDUCTION INCLUDED</span>
               <p className="text-[10px] text-amber-200">
-                EARNED COMMISSION WAS AUTO-DEDUCTED & SYNCED TO WALLET LEDGER ON 1ST OF MONTH. REMAINING WALLET DEFICIT: <span className="font-bold text-red-400">₹{negativeAmountToClear.toFixed(2)}</span>.
+                CURRENT WALLET BALANCE IS MINUS <span className="font-bold text-red-400">-₹{negativeAmountToClear.toFixed(2)}</span>. THIS DEFICIT HAS BEEN DEDUCTED FROM NET PAYABLE COMMISSION.
               </p>
             </div>
           </div>
-          <span className="bg-amber-900/80 border border-amber-700 px-2 py-1 rounded font-bold text-[9px] shrink-0">WALLET LEDGER SYNCED</span>
+          <button 
+            onClick={() => setShowBreakdownModal(true)}
+            className="bg-amber-900/80 border border-amber-700 hover:bg-amber-800 px-3 py-1 rounded font-bold text-[9px] text-white shrink-0"
+          >
+            SEE DETAILED BREAKDOWN →
+          </button>
         </div>
       )}
 
-      {/* TOOLBAR */}
+      {/* TAB NAVIGATION & TOOLBAR */}
       <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-2xl flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-md">
-        
         <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
           <button
             onClick={() => setActiveTab('network')}
@@ -596,7 +561,7 @@ export default function PartnerDashboardPage() {
         </div>
       </div>
 
-      {/* TABLES */}
+      {/* TABLES VIEW */}
       {activeTab === 'network' ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <div className="p-3 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
@@ -660,6 +625,26 @@ export default function PartnerDashboardPage() {
                   ))
                 )}
               </tbody>
+              
+              {/* SUMMARY TOTAL FOOTER */}
+              {filteredReferredUsers.length > 0 && (
+                <tfoot>
+                  <tr className="bg-slate-950 font-black text-white border-t-2 border-indigo-500 uppercase">
+                    <td colSpan={5} className="p-3 text-right text-indigo-300 text-[11px] font-mono">
+                      TOTAL ({filteredReferredUsers.length} USERS):
+                    </td>
+                    <td className="p-3 text-emerald-400 text-sm font-black font-mono">
+                      ₹ {networkStats.rev.toFixed(2)}
+                    </td>
+                    <td className="p-3 text-amber-400 text-sm font-black font-mono">
+                      ₹ {networkStats.payout.toFixed(2)}
+                    </td>
+                    <td className="p-3 text-slate-400 text-[10px]">
+                      PAID: {networkStats.paidCount} | UNPAID: {networkStats.unpaidCount}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
@@ -712,52 +697,32 @@ export default function PartnerDashboardPage() {
         </div>
       )}
 
-      {/* POPUP MODAL: ADD USER */}
-      {showAddUserModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-md space-y-3 shadow-2xl">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-              <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2"><UserPlus size={16} /> ADD REFERRED USER & SEND INVITE LINK</h3>
-              <button onClick={() => setShowAddUserModal(false)} className="text-slate-400 hover:text-white"><X size={16} /></button>
-            </div>
-            <form onSubmit={handleAddUserSubmit} className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">USER FULL NAME *</label>
-                <input type="text" required placeholder="e.g. Mukesh Sharma" value={newUserName} onChange={(e) => setNewUserName(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none" />
-              </div>
-              
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1">
-                  <Mail size={12} className="text-indigo-400" /> EMAIL ADDRESS *
-                </label>
-                <input type="email" required placeholder="e.g. mukesh@gmail.com" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none" />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">MOBILE NUMBER *</label>
-                <input type="tel" required placeholder="e.g. 98260XXXXX" value={newUserMobile} onChange={(e) => setNewUserMobile(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none" />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">PLAN / CASE TYPE</label>
-                <select value={newUserPlan} onChange={(e) => setNewUserPlan(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none">
-                  <option value="BASIC PLAN">BASIC PLAN</option>
-                  <option value="PREMIUM PLAN">PREMIUM PLAN</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                <button type="button" onClick={() => setShowAddUserModal(false)} className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold">CANCEL</button>
-                <button type="submit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1">
-                  <LinkIcon size={13} /> SAVE USER & COPY INVITE LINK →
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* MODAL: BREAKDOWN POPUP */}
+      {showBreakdownModal && (
+        <PayoutBreakdownModal
+          onClose={() => setShowBreakdownModal(false)}
+          referralRevenue={referralRevenue}
+          totalSettled={totalSettled}
+          currentWalletBal={currentWalletBal}
+          referredUsers={referredUsers}
+          payoutHistory={payoutHistory}
+        />
       )}
 
-      {/* POPUP MODAL: RECORD PAYOUT SETTLEMENT */}
+      {/* MODAL: ADD USER */}
+      {showAddUserModal && (
+        <AddUserModal
+          partnerProfile={partnerProfile}
+          onClose={() => setShowAddUserModal(false)}
+          onSuccess={() => {
+            if (partnerProfile) {
+              loadPartnerDetails(partnerProfile.partner_id, partnerProfile.user_id);
+            }
+          }}
+        />
+      )}
+
+      {/* MODAL: RECORD PAYOUT SETTLEMENT */}
       {showPayoutModal && isAdminOrCEO && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-lg space-y-3 shadow-2xl">

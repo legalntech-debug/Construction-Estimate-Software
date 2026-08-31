@@ -11,7 +11,13 @@ interface WithdrawalModalProps {
   supabaseClient: any;
 }
 
-export default function WithdrawalModal({ isOpen, onClose, profile, onSuccess, supabaseClient }: WithdrawalModalProps) {
+export default function WithdrawalModal({
+  isOpen,
+  onClose,
+  profile,
+  onSuccess,
+  supabaseClient,
+}: WithdrawalModalProps) {
   const [refundAmount, setRefundAmount] = useState<string>('');
   const [bankDetails, setBankDetails] = useState<string>('');
   const [userPassword, setUserPassword] = useState<string>('');
@@ -48,29 +54,46 @@ export default function WithdrawalModal({ isOpen, onClose, profile, onSuccess, s
       return;
     }
 
-    if (userPassword.length < 6) {
-      const newAttempts = userWrongAttempts + 1;
-      setUserWrongAttempts(newAttempts);
-      if (newAttempts >= 5) {
-        const lockTime = Date.now() + 24 * 60 * 60 * 1000;
-        setUserLockedUntil(lockTime);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('wallet_user_lockout', lockTime.toString());
-        }
-        alert('Security Alert: 5 incorrect password attempts reached. Account withdrawal locked for 24 hours.');
-      } else {
-        alert(`Incorrect password. Attempt ${newAttempts} of 5.`);
-      }
-      return;
-    }
-
-    setUserWrongAttempts(0);
     setSubmitting(true);
-    setTimeout(() => {
-      setOtpSent(true);
+
+    try {
+      // Real-time Supabase Auth Password Verification
+      const { error: authError } = await supabaseClient.auth.signInWithPassword({
+        email: profile?.email,
+        password: userPassword,
+      });
+
+      if (authError) {
+        const newAttempts = userWrongAttempts + 1;
+        setUserWrongAttempts(newAttempts);
+
+        if (newAttempts >= 5) {
+          const lockTime = Date.now() + 24 * 60 * 60 * 1000;
+          setUserLockedUntil(lockTime);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('wallet_user_lockout', lockTime.toString());
+          }
+          alert('Security Alert: 5 incorrect password attempts reached. Account withdrawal locked for 24 hours.');
+        } else {
+          alert(`Incorrect password. Attempt ${newAttempts} of 5.`);
+        }
+        setSubmitting(false);
+        return;
+      }
+
+      // Password verified successfully
+      setUserWrongAttempts(0);
+
+      // Trigger OTP flow
+      setTimeout(() => {
+        setOtpSent(true);
+        setSubmitting(false);
+        alert(`Security OTP sent successfully to registered email: ${profile?.email}`);
+      }, 1000);
+    } catch (err: any) {
+      alert('Verification error: ' + (err.message || err));
       setSubmitting(false);
-      alert(`Security OTP sent successfully to registered email: ${profile?.email}`);
-    }, 1000);
+    }
   };
 
   const handleFinalRefundSubmit = async (e: React.FormEvent) => {
@@ -88,7 +111,7 @@ export default function WithdrawalModal({ isOpen, onClose, profile, onSuccess, s
         user_id: session.user.id,
         amount: parseFloat(refundAmount),
         bank_details: bankDetails,
-        status: 'Pending'
+        status: 'Pending',
       });
 
       if (error) {
@@ -105,59 +128,130 @@ export default function WithdrawalModal({ isOpen, onClose, profile, onSuccess, s
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
-        <h3 className="text-lg font-black text-slate-900 uppercase tracking-wide mb-2">Request Unutilized Balance Refund</h3>
-        <p className="text-xs text-slate-500 mb-4">Secure verification via account credentials and email OTP.</p>
+        <h3 className="text-lg font-black text-slate-900 uppercase tracking-wide mb-2">
+          Request Unutilized Balance Refund
+        </h3>
+        <p className="text-xs text-slate-500 mb-4">
+          Secure verification via account credentials and email OTP.
+        </p>
 
         {userLockedUntil && userLockedUntil > Date.now() ? (
           <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-center text-rose-700">
             <AlertTriangle className="mx-auto mb-2 text-rose-600" size={32} />
             <p className="font-bold text-sm">Account Locked</p>
-            <p className="text-xs mt-1">Due to 5 incorrect password attempts, withdrawal requests are locked for 24 hours.</p>
-            <button onClick={onClose} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold">Close</button>
+            <p className="text-xs mt-1">
+              Due to 5 incorrect password attempts, withdrawal requests are locked for 24 hours.
+            </p>
+            <button
+              onClick={onClose}
+              className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold"
+            >
+              Close
+            </button>
           </div>
         ) : !otpSent ? (
           <form onSubmit={handleSendUserOtp} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Refund Amount (₹)</label>
-              <input type="number" step="0.01" max={profile?.wallet_balance || 0} value={refundAmount} onChange={(e) => setRefundAmount(e.target.value)} placeholder="Enter amount" className="w-full px-3 py-2 border rounded-lg text-sm font-semibold outline-none" required />
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                Refund Amount (₹)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                max={profile?.wallet_balance || 0}
+                value={refundAmount}
+                onChange={(e) => setRefundAmount(e.target.value)}
+                placeholder="Enter amount"
+                className="w-full px-3 py-2 border rounded-lg text-sm font-semibold outline-none"
+                required
+              />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Bank / UPI Payout Details</label>
-              <textarea rows={2} value={bankDetails} onChange={(e) => setBankDetails(e.target.value)} placeholder="Account No, IFSC / UPI ID" className="w-full px-3 py-2 border rounded-lg text-sm outline-none resize-none" required />
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                Bank / UPI Payout Details
+              </label>
+              <textarea
+                rows={2}
+                value={bankDetails}
+                onChange={(e) => setBankDetails(e.target.value)}
+                placeholder="Account No, IFSC / UPI ID"
+                className="w-full px-3 py-2 border rounded-lg text-sm outline-none resize-none"
+                required
+              />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">System Account Password</label>
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                System Account Password
+              </label>
               <div className="relative">
-                <input 
-                  type={showUserPassword ? "text" : "password"} 
-                  value={userPassword} 
-                  onChange={(e) => setUserPassword(e.target.value)} 
-                  placeholder="Enter password" 
-                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none pr-10" 
-                  required 
+                <input
+                  type={showUserPassword ? 'text' : 'password'}
+                  value={userPassword}
+                  onChange={(e) => setUserPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="w-full px-3 py-2 border rounded-lg text-sm outline-none pr-10"
+                  required
                 />
-                <button type="button" onClick={() => setShowUserPassword(!showUserPassword)} className="absolute right-3 top-2.5 text-slate-500">
+                <button
+                  type="button"
+                  onClick={() => setShowUserPassword(!showUserPassword)}
+                  className="absolute right-3 top-2.5 text-slate-500"
+                >
                   {showUserPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
-              {userWrongAttempts > 0 && <span className="text-[10px] text-rose-600 font-bold">Failed attempts: {userWrongAttempts}/5</span>}
+              {userWrongAttempts > 0 && (
+                <span className="text-[10px] text-rose-600 font-bold">
+                  Failed attempts: {userWrongAttempts}/5
+                </span>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold">Cancel</button>
-              <button type="submit" disabled={submitting} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold">
-                {submitting ? 'Sending...' : 'Send OTP to Email'}
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold disabled:opacity-50"
+              >
+                {submitting ? 'Verifying...' : 'Send OTP to Email'}
               </button>
             </div>
           </form>
         ) : (
           <form onSubmit={handleFinalRefundSubmit} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Enter 6-Digit OTP Sent to Email</label>
-              <input type="text" maxLength={6} value={userOtp} onChange={(e) => setUserOtp(e.target.value)} placeholder="Enter 6-digit OTP" className="w-full px-3 py-2 border rounded-lg text-lg font-mono tracking-widest text-center outline-none" required />
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                Enter 6-Digit OTP Sent to Email
+              </label>
+              <input
+                type="text"
+                maxLength={6}
+                value={userOtp}
+                onChange={(e) => setUserOtp(e.target.value)}
+                placeholder="Enter 6-digit OTP"
+                className="w-full px-3 py-2 border rounded-lg text-lg font-mono tracking-widest text-center outline-none"
+                required
+              />
             </div>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setOtpSent(false)} className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold">Back</button>
-              <button type="submit" disabled={submitting} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold">
+              <button
+                type="button"
+                onClick={() => setOtpSent(false)}
+                className="px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-bold"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-bold disabled:opacity-50"
+              >
                 {submitting ? 'Verifying...' : 'Verify & Submit'}
               </button>
             </div>

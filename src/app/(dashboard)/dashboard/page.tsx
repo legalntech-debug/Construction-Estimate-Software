@@ -105,14 +105,41 @@ export default function DashboardPage() {
       alert('Please enter a valid recharge amount');
       return;
     }
+    if (!rechargeUTR || rechargeUTR.trim() === '') {
+      alert('Please enter UTR No / UPI Transaction Reference');
+      return;
+    }
+
     setRechargeLoading(true);
     try {
+      const cleanUTR = rechargeUTR.trim();
+
+      // Duplicate Check via UTR No
+      const { data: existingReq, error: checkError } = await supabase
+        .from('wallet_recharges')
+        .select('id, status, utr_no')
+        .eq('utr_no', cleanUTR)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking duplicate entry:', checkError);
+      }
+
+      if (existingReq) {
+        alert(
+          '⚠️ This entry is already submitted! Please wait for approval.\n\n' +
+          'If you have any query, please raise a query on Helpline / WhatsApp No: 7987561396.'
+        );
+        setRechargeLoading(false);
+        return;
+      }
+
       const { error } = await supabase.from('wallet_recharges').insert({
         user_id: userData.uuid,
         user_email: userData.email,
         user_name: userData.name,
         amount: Number(rechargeAmount),
-        utr_no: rechargeUTR || 'N/A',
+        utr_no: cleanUTR,
         status: 'PENDING',
         created_at: new Date().toISOString()
       });
@@ -204,8 +231,7 @@ export default function DashboardPage() {
   // Admin & Premium users are NEVER locked or restricted for low balance
   const isAccountLocked = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isAfterLockDate && isWalletLow;
   
-  // Low wallet warning banner (Excludes Admin, Premium users, and 21-day grace period users)
-  // BUT Premium users get a special bill clearance alert on the 1st of every month.
+  // Low wallet warning banner
   const showLowWalletWarning = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isWalletLow;
   const showPremiumBillClearAlert = isPremiumUser && isFirstDateOfMonth;
 
@@ -336,7 +362,7 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-3">
           
-          {/* PROFESSIONAL NOTIFICATION BELL BUTTON WITH DROPDOWN */}
+          {/* NOTIFICATION BELL BUTTON */}
           <div className="relative">
             <button
               onClick={async () => {
@@ -359,7 +385,7 @@ export default function DashboardPage() {
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-600 rounded-full ring-2 ring-white"></span>
             </button>
 
-            {/* NOTIFICATION MESSAGE DROPDOWN */}
+            {/* NOTIFICATION DROPDOWN */}
             {showNotifications && (
               <div className="absolute right-0 mt-3 w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
                 <div className="bg-slate-900 p-3 text-white flex justify-between items-center">
@@ -484,7 +510,6 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     
-                    {/* RECHARGE & LEDGER ACCESSIBLE FROM PROFILE DROPDOWN */}
                     <div className="flex items-center gap-1.5">
                       <button 
                         onClick={() => {
@@ -560,7 +585,6 @@ export default function DashboardPage() {
                     <p className="text-slate-500">Amount: <span className="font-black text-emerald-600">₹{req.amount}</span> | UTR / Ref: <span className="font-mono font-bold text-blue-600">{req.utr_no}</span></p>
                   </div>
                   
-                  {/* APPROVE & REJECT BUTTONS */}
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleAdminApproveRecharge(req.id, req.user_id, req.amount)}
@@ -779,14 +803,17 @@ export default function DashboardPage() {
               </div>
               
               <p className="text-[11px] text-slate-500 font-medium">
-                UPI ID: <strong className="text-slate-800 font-mono">your-9669562719-3@axl</strong> (or 9669562719-3@axl)
+                UPI ID: <strong className="text-slate-800 font-mono">9669562719-3@axl</strong>
+              </p>
+              <p className="text-[11px] text-slate-600 font-bold">
+                Helpline / WhatsApp Support: <span className="text-blue-600">7987561396</span>
               </p>
             </div>
 
             <form onSubmit={handleRequestRecharge} className="space-y-4 text-xs">
               <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-blue-800">
                 <p className="font-bold">Instructions:</p>
-                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at 7987561396 for quick Admin approval.</p>
+                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at <strong>7987561396</strong> for quick Admin approval.</p>
               </div>
 
               <div>

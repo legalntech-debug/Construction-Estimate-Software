@@ -3,10 +3,19 @@ import PlotCadCanvas from "./PlotCadCanvas";
 import PlotPolygonRenderer from "./PlotPolygonRenderer";
 import BoundaryLabels from "./BoundaryLabels";
 import RoadRenderer from "./RoadRenderer";
-import { PlotDimensions, CadObject } from "@/lib/constructionPlan/types";
+import { PlotDimensions, FloorData, FloorRoom, FloorPlanningSettings, PlanningMode } from "../engine/planningTypes";
+import { getRoadOrientation } from "../engine/roadOrientation";
 import CadFloorElevationRenderer from "./CadFloorElevationRenderer";
 import CadToolbarSection from "./CadToolbarSection";
 import CadSidebarDimensions from "./CadSidebarDimensions";
+
+export interface CadObject {
+  id: string;
+  type: string;
+  points: { x: number; y: number }[];
+  rotation?: number;
+  text?: string;
+}
 
 type CadTool = 
   | "SELECT" | "LINE" | "PLINE" | "RECTANGLE" | "OFFSET" 
@@ -81,7 +90,13 @@ interface CadModalViewProps {
   totalFloors?: number;
   selectedFloors?: string[];
   floorBuiltUpAreas?: { [key: string]: number };
-  floorData?: Record<string, { length: number; width: number; area: number }>;
+  floorData?: Record<string, FloorData | any>;
+
+  // Newly Added Floor & Room Planning Props
+  floorRooms?: Record<string, Record<string, FloorRoom>>;
+  floorSettings?: Record<string, FloorPlanningSettings>;
+  floorBhkConfig?: Record<string, string>;
+  planningMode?: PlanningMode;
 }
 
 export default function CadModalView({
@@ -151,6 +166,10 @@ export default function CadModalView({
   selectedFloors = [],
   floorBuiltUpAreas = {},
   floorData = {},
+  floorRooms,
+  floorSettings,
+  floorBhkConfig,
+  planningMode,
 }: CadModalViewProps) {
   
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
@@ -336,38 +355,46 @@ export default function CadModalView({
     if (setRoadWidthWest) setRoadWidthWest(cleanVal);
   };
 
+  useEffect(() => {
+    if (isCadModalOpen) {
+      console.log("--- CAD MODAL DATA CHECK ---");
+      console.log("1. Plot Dimensions:", plotDimensions);
+      console.log("2. Selected Floors:", selectedFloors);
+      console.log("3. Floor Data:", floorData);
+      console.log("4. Road Facing:", roadFacingOption);
+      console.log("5. Floor Rooms:", floorRooms);
+      console.log("6. Planning Mode:", planningMode);
+    }
+  }, [isCadModalOpen, plotDimensions, selectedFloors, floorData, roadFacingOption, floorRooms, planningMode]);
+
   if (!isCadModalOpen) return null;
 
   const isSimpleRect = (plotShape === "RECTANGLE" || plotShape === "SQUARE") && !isMultiDimShape;
 
-  let dimA = Number(plotDimensions?.A) || 20;
-  let dimB = isSimpleRect ? dimA : (Number(plotDimensions?.B) || dimA);
-  let dimC = Number(plotDimensions?.C) || 50;
-  let dimD = isSimpleRect ? dimC : (Number(plotDimensions?.D) || dimC);
+  const plotDims = plotDimensions as Record<string, any>;
+  let dimA = Number(plotDims?.A) || 20;
+  let dimB = isSimpleRect ? dimA : (Number(plotDims?.B) || dimA);
+  let dimC = Number(plotDims?.C) || 50;
+  let dimD = isSimpleRect ? dimC : (Number(plotDims?.D) || dimC);
 
-  // 👉 Strict Ground & Upper Floor Dimensions Normalization for CAD Elevation View
-  const normalizedFloorData: Record<string, { length: number; width: number; area: number }> = {};
-  if (floorData) {
-    Object.keys(floorData).forEach(floorKey => {
-      const fData = floorData[floorKey];
-      if (fData) {
-        let fW = Number(fData.width) || dimA;
-        let fL = Number(fData.length) || dimC;
-        
-        // Prevent accidental swap if width > length on a standard rectangular plot
-        if (floorKey.toUpperCase().includes("GROUND") && fW > fL && fL <= dimA) {
-          const temp = fW;
-          fW = fL;
-          fL = temp;
-        }
-        normalizedFloorData[floorKey] = {
-          width: fW,
-          length: fL,
-          area: Number(fData.area) || (fW * fL)
-        };
-      }
-    });
-  }
+  const normalizedFloorData = Object.entries(floorData || {}).reduce((acc, [floorKey, fData]) => {
+    if (!fData) return acc;
+    let fW = Number(fData.width) || dimA;
+    let fL = Number(fData.length) || dimC;
+    
+    if (floorKey.toUpperCase().includes("GROUND") && fW > fL && fL <= dimA) {
+      const temp = fW;
+      fW = fL;
+      fL = temp;
+    }
+    acc[floorKey] = {
+      ...fData,
+      width: fW,
+      length: fL,
+      area: Number(fData.area) || (fW * fL),
+    };
+    return acc;
+  }, {} as Record<string, FloorData | any>);
 
   const scale = 5.5; 
   const bottomWidth = dimA * scale;
@@ -567,20 +594,14 @@ export default function CadModalView({
             >
               {/* North Badge Direction */}
               {(() => {
-                let badgePos = "top-2 left-2";
-                const opt = (roadFacingOption || "").toUpperCase();
-                
-                if (opt.includes("EAST")) {
-                  badgePos = "top-2 left-2";
-                } else if (opt.includes("WEST")) {
-                  badgePos = "top-2 right-2";
-                } else if (opt.includes("NORTH")) {
-                  badgePos = "bottom-2 left-2";
-                }
-
+                const opt = (roadFacingOption || "1 SIDE ROAD (SOUTH)").toUpperCase();
+                let northArrow = "↑";
+                if (opt.includes("NORTH")) northArrow = "↓";
+                else if (opt.includes("EAST")) northArrow = "→";
+                else if (opt.includes("WEST")) northArrow = "←";
                 return (
-                  <div className={`absolute ${badgePos} z-10 bg-yellow-300 border border-black px-1.5 py-0.5 text-[8px] font-black flex items-center gap-1 shadow-sm pointer-events-none`}>
-                    <span>NORTH</span>
+                  <div className="absolute top-2 left-2 z-10 bg-yellow-300 border border-black px-1.5 py-0.5 text-[8px] font-black flex items-center gap-1 shadow-sm pointer-events-none">
+                    <span>NORTH {northArrow}</span>
                   </div>
                 );
               })()}
@@ -693,16 +714,25 @@ export default function CadModalView({
                       handlePolygonClick={() => {}}
                     />
 
-                    {/* RENDER SELECTED FLOORS ELEVATION SIDE-BY-SIDE WITH NORMALIZED FLOOR DATA */}
+                    {/* RENDER SELECTED FLOORS ELEVATION SIDE-BY-SIDE WITH PRESERVED NORMALIZED FLOOR DATA */}
                     <CadFloorElevationRenderer
                       totalFloors={totalFloors}
                       builtUpPoints={builtUpPoints}
                       scale={scale}
                       selectedFloors={selectedFloors}
-                      roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
+                      roadWidth={(() => {
+                        const main = getRoadOrientation(roadFacingOption || "1 SIDE ROAD (SOUTH)").mainRoad;
+                        if (main === "NORTH") return currentNorthRoad;
+                        if (main === "EAST") return currentEastRoad;
+                        if (main === "WEST") return currentWestRoad;
+                        return currentSouthRoad;
+                      })()}
                       roadFacingOption={roadFacingOption}
                       floorBuiltUpAreas={floorBuiltUpAreas}
                       floorData={normalizedFloorData}
+                      frontMos={sideMos.A ?? frontMos}
+                      backMos={sideMos.B ?? rearMos}
+                      measurementUnit={measurementUnit}
                     />
 
                     <g>
@@ -716,7 +746,8 @@ export default function CadModalView({
                         points={builtUpPoints.map(p => `${p.x},${p.y}`).join(" ")}
                         fill="none"
                         stroke={isFullPlot ? "transparent" : "red"}
-                        strokeWidth="1.5"
+                        strokeWidth="1"
+                        vectorEffect="non-scaling-stroke"
                         strokeDasharray="4 2"
                       />
 
@@ -842,7 +873,13 @@ export default function CadModalView({
                       minX={minX}
                       maxX={maxX}
                       roadFacingOption={roadFacingOption}
-                      roadWidth={activeSouth ? currentSouthRoad : (activeNorth ? currentNorthRoad : 15)}
+                      roadWidth={(() => {
+                        const main = getRoadOrientation(roadFacingOption || "1 SIDE ROAD (SOUTH)").mainRoad;
+                        if (main === "NORTH") return currentNorthRoad;
+                        if (main === "EAST") return currentEastRoad;
+                        if (main === "WEST") return currentWestRoad;
+                        return currentSouthRoad;
+                      })()}
                     />
 
                     <RoadRenderer
@@ -887,8 +924,8 @@ export default function CadModalView({
 
               {cadObjects?.map((obj) => {
                 const isSelected = selectedCadObjectIds?.includes(obj.id);
-                const strokeColor = isSelected ? "red" : "black";
-                const strokeW = 2;
+                const strokeColor = isSelected ? "red" : "#ffffff";
+                const strokeW = 1;
 
                 if (obj.type === "LINE" && obj.points?.length >= 2) {
                   return (
@@ -900,6 +937,7 @@ export default function CadModalView({
                       y2={obj.points[1].y}
                       stroke={strokeColor}
                       strokeWidth={strokeW}
+                      vectorEffect="non-scaling-stroke"
                       onClick={(e) => { e.stopPropagation(); toggleCadSelection(obj.id); }}
                       className="cursor-pointer"
                     />
@@ -913,6 +951,7 @@ export default function CadModalView({
                       fill="none"
                       stroke={strokeColor}
                       strokeWidth={strokeW}
+                      vectorEffect="non-scaling-stroke"
                       onClick={(e) => { e.stopPropagation(); toggleCadSelection(obj.id); }}
                       className="cursor-pointer"
                     />

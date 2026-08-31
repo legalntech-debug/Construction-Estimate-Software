@@ -14,6 +14,7 @@ interface FloorDetail {
   gateOffsetX?: number; 
   gateWidth?: number;
   gateHeight?: number;
+  autoRooms?: string[];
 }
 
 interface CadFloorElevationRendererProps {
@@ -31,6 +32,11 @@ interface CadFloorElevationRendererProps {
   backMos?: number;
 }
 
+// Helper to strip extra descriptions like "(KITCHEN & LIVING)" for robust lookup matching
+const normalizeFloorKey = (name: string) => {
+  return name.split("(")[0].trim().toUpperCase();
+};
+
 export default function CadFloorElevationRenderer({
   totalFloors,
   builtUpPoints,
@@ -47,7 +53,6 @@ export default function CadFloorElevationRenderer({
 }: CadFloorElevationRendererProps) {
   
   const MANUAL_ELEV_Y_OFFSET = -25 * scale; 
-  const MANUAL_TABLE_X_OFFSET = 130 * scale; 
   const MANUAL_TABLE_Y_OFFSET = -55 * scale; 
 
   const MANUAL_TOWER_DIM_X_OFFSET = +14.5 * scale; 
@@ -55,10 +60,37 @@ export default function CadFloorElevationRenderer({
 
   const adjustedBuiltUpPoints = React.useMemo(() => {
     if (!builtUpPoints || builtUpPoints.length < 4) return builtUpPoints;
-    return builtUpPoints;
+    return builtUpPoints.map(p => ({
+      x: Number(p.x) || 0,
+      y: Number(p.y) || 0,
+    }));
   }, [builtUpPoints]);
 
-  if (!adjustedBuiltUpPoints || adjustedBuiltUpPoints.length < 4) return null;
+  const baseBuiltUpWidth = Math.abs((adjustedBuiltUpPoints?.[1]?.x || 0) - (adjustedBuiltUpPoints?.[0]?.x || 0));
+  const baseBuiltUpHeight = Math.abs((adjustedBuiltUpPoints?.[3]?.y || 0) - (adjustedBuiltUpPoints?.[0]?.y || 0));
+
+  // --- Robust Floor Data & Area Matcher ---
+  const getFloorDataItem = React.useCallback((floorName: string) => {
+    if (!floorData) return undefined;
+    const targetKey = normalizeFloorKey(floorName);
+    const match = Object.keys(floorData).find(
+      (k) => normalizeFloorKey(k) === targetKey || k.trim().toUpperCase() === floorName.trim().toUpperCase()
+    );
+    return match ? floorData[match] : undefined;
+  }, [floorData]);
+
+  const getFloorAreaItem = React.useCallback((floorName: string) => {
+    if (!floorBuiltUpAreas) return undefined;
+    const targetKey = normalizeFloorKey(floorName);
+    const match = Object.keys(floorBuiltUpAreas).find(
+      (k) => normalizeFloorKey(k) === targetKey || k.trim().toUpperCase() === floorName.trim().toUpperCase()
+    );
+    return match ? floorBuiltUpAreas[match] : undefined;
+  }, [floorBuiltUpAreas]);
+
+  if (!adjustedBuiltUpPoints || adjustedBuiltUpPoints.length < 4 || baseBuiltUpWidth === 0 || baseBuiltUpHeight === 0) {
+    return null;
+  }
 
   const parsedTotalFloors = Number(totalFloors) || selectedFloors.length || 1;
 
@@ -76,22 +108,32 @@ export default function CadFloorElevationRenderer({
       if (upper.includes("THIRD")) return 4;
       if (upper.includes("FOURTH")) return 5;
       if (upper.includes("FIFTH")) return 6;
-      if (upper.includes("SIXTH")) return 7;
-      if (upper.includes("SEVENTH")) return 8;
-      if (upper.includes("EIGHTH")) return 9;
-      if (upper.includes("NINTH")) return 10;
-      if (upper.includes("TENTH")) return 11;
       if (upper.includes("TOWER")) return 999;
 
       const match = upper.match(/(\d+)/);
-      if (match) {
-        return parseInt(match[1], 10) + 1;
-      }
-      return 50;
+      return match ? parseInt(match[1], 10) + 1 : 50;
     };
 
     return [...selectedFloors].sort((a, b) => getFloorRank(a) - getFloorRank(b));
   }, [selectedFloors, parsedTotalFloors]);
+
+  const normalizedFloorData = React.useMemo(() => {
+    const result: Record<string, FloorDetail> = {};
+    processedFloors.forEach((fName) => {
+      const item = getFloorDataItem(fName);
+      if (item) result[fName] = item;
+    });
+    return result;
+  }, [processedFloors, getFloorDataItem]);
+
+  const normalizedFloorAreas = React.useMemo(() => {
+    const result: Record<string, number> = {};
+    processedFloors.forEach((fName) => {
+      const area = getFloorAreaItem(fName);
+      if (area !== undefined) result[fName] = area;
+    });
+    return result;
+  }, [processedFloors, getFloorAreaItem]);
 
   const hasBasement = processedFloors.some(f => f.toUpperCase().includes("BASEMENT"));
   
@@ -100,7 +142,6 @@ export default function CadFloorElevationRenderer({
   }, [processedFloors]);
 
   const hasTowerSelected = aboveGroundFloors.some(f => f.toUpperCase().includes("TOWER"));
-  
   const mainBuildingFloors = aboveGroundFloors.filter(f => !f.toUpperCase().includes("TOWER"));
   const effectiveMainFloorsCount = mainBuildingFloors.length > 0 ? mainBuildingFloors.length : parsedTotalFloors;
   const FLOOR_H = 10 * scale; 
@@ -114,24 +155,18 @@ export default function CadFloorElevationRenderer({
 
   const opt = (roadFacingOption || "").toUpperCase();
   const hasLeftRoad = opt.includes("4 SIDE") || opt.includes("3 SIDE") || opt.includes("WEST") || opt.includes("LEFT");
-
   const numericRoadWidth = Number(roadWidth) || 20;
   const baseGap = 60 * scale; 
   const roadOffset = hasLeftRoad ? (numericRoadWidth * scale * 0.8) : 0;
   const plotGap = baseGap + roadOffset;
 
-  const baseBuiltUpWidth = Math.abs(adjustedBuiltUpPoints[1].x - adjustedBuiltUpPoints[0].x);
-  const baseBuiltUpHeight = Math.abs(adjustedBuiltUpPoints[3].y - adjustedBuiltUpPoints[0].y);
   const baseArea = Math.round((baseBuiltUpWidth / scale) * (baseBuiltUpHeight / scale));
-
   const interFloorGap = 15 * scale;
   const rowHeightGap = baseBuiltUpHeight + 25 * scale;
-
   const itemsPerRow = processedFloors.length > 6 ? 4 : 3;
 
   const plotWidthFeet = baseBuiltUpWidth / scale;
   const plotDepthFeet = baseBuiltUpHeight / scale;
-
   const widthColumnCount = Math.max(2, Math.round(plotWidthFeet / 10) + 1);
   const depthColumnCount = Math.max(2, Math.round(plotDepthFeet / 10) + 1);
 
@@ -143,15 +178,13 @@ export default function CadFloorElevationRenderer({
 
   const getFloorPoints = (floorName: string) => {
     const isTowerFloor = floorName.toUpperCase().includes("TOWER");
-    if (isTowerFloor) {
-      return adjustedBuiltUpPoints;
-    }
+    if (isTowerFloor) return adjustedBuiltUpPoints;
 
-    const floorInfo = floorData && floorData[floorName];
+    const floorInfo = getFloorDataItem(floorName);
     const targetWidth = floorInfo?.width ? floorInfo.width * scale : null;
     const targetLength = floorInfo?.length ? floorInfo.length * scale : null;
     
-    const rawArea = floorBuiltUpAreas && floorBuiltUpAreas[floorName];
+    const rawArea = getFloorAreaItem(floorName);
     const targetArea = (rawArea !== undefined && rawArea > 0) ? Number(rawArea) : baseArea;
 
     const p0 = adjustedBuiltUpPoints[0];
@@ -193,17 +226,18 @@ export default function CadFloorElevationRenderer({
       const isParapet = fIdx === totalRenderedLevels - 1;
       const isTowerLevel = hasTowerSelected && fIdx === effectiveMainFloorsCount;
       const currentH = isParapet ? 3 * scale : (isTowerLevel ? 8 * scale : FLOOR_H);
-      const floorTopY = - (accumulatedHeight + currentH + SLAB_H);
-      const slabMidY = floorTopY + SLAB_H / 2;
+      
+      const slabMidY = -(accumulatedHeight + currentH + SLAB_H);
       accumulatedHeight += currentH + SLAB_H;
+
       const floorLabel = processedFloors[fIdx] || `FLOOR ${fIdx + 1}`;
       const slabThicknessLabel = isParapet ? "3'-0\" Parapet" : formatDim(SLAB_H, scale, measurementUnit);
 
       return (
         <g key={fIdx}>
-          <line x1={startX + width} y1={slabMidY} x2={extX} y2={slabMidY} stroke="#00aaff" strokeWidth="0.5" strokeDasharray="2" />
-          <circle cx={startX + width} cy={slabMidY} r={1.2} fill="#00aaff" />
-          <rect x={extX} y={slabMidY - boxH / 2} width={boxW} height={boxH} fill="#000000" fillOpacity="0.92" stroke="#00aaff" strokeWidth="0.5" rx="2" />
+          <line x1={startX + width} y1={slabMidY} x2={extX} y2={slabMidY} stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2" />
+          <circle cx={startX + width} cy={slabMidY} r={1.5} fill="#00aaff" />
+          <rect x={extX} y={slabMidY - boxH / 2} width={boxW} height={boxH} fill="#000000" fillOpacity="0.92" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" rx="2" />
           <text x={extX + boxW / 2} y={slabMidY} fill="#00aaff" fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
             {isParapet ? `PARAPET (${formatDim(3 * scale, scale, measurementUnit)})` : `${floorLabel} (${slabThicknessLabel})`}
           </text>
@@ -214,9 +248,9 @@ export default function CadFloorElevationRenderer({
     const plinthSlabMidY = PLINTH_H / 2;
     const plinthLabelElement = (
       <g key="plinth-slab-label">
-        <line x1={startX + width} y1={plinthSlabMidY} x2={extX} y2={plinthSlabMidY} stroke="#00aaff" strokeWidth="0.5" strokeDasharray="2" />
-        <circle cx={startX + width} cy={plinthSlabMidY} r={1.2} fill="#00aaff" />
-        <rect x={extX} y={plinthSlabMidY - boxH / 2} width={boxW} height={boxH} fill="#000000" fillOpacity="0.92" stroke="#00aaff" strokeWidth="0.5" rx="2" />
+        <line x1={startX + width} y1={plinthSlabMidY} x2={extX} y2={plinthSlabMidY} stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2" />
+        <circle cx={startX + width} cy={plinthSlabMidY} r={1.5} fill="#00aaff" />
+        <rect x={extX} y={plinthSlabMidY - boxH / 2} width={boxW} height={boxH} fill="#000000" fillOpacity="0.92" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" rx="2" />
         <text x={extX + boxW / 2} y={plinthSlabMidY} fill="#00aaff" fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
           PLINTH HEIGHT ({formatDim(PLINTH_H, scale, measurementUnit)})
         </text>
@@ -229,11 +263,9 @@ export default function CadFloorElevationRenderer({
   const renderBuildingStructure = (startX: number, totalWidth: number, colCount: number, isSection: boolean, showDims: boolean) => {
     const BEAM_D = (10 / 12) * scale;
     const COL_W = WALL_THICKNESS;
-    
     const colBottom = hasBasement ? PLINTH_H + BASEMENT_H + FOOTING_DEPTH : PLINTH_H + FOOTING_DEPTH;
     
     const elements: React.ReactElement[] = [];
-
     let roofTopY = 0;
     let tempY = SLAB_H;
     for (let i = 0; i < effectiveMainFloorsCount; i++) {
@@ -247,77 +279,21 @@ export default function CadFloorElevationRenderer({
       const colTop = roofTopY + SLAB_H; 
       
       if (!isSection) {
-        // 1. Sub-structure column (solid)
         elements.push(
-          <rect
-            key={`col-${cIdx}-sub`}
-            x={colX}
-            y={0}
-            width={COL_W}
-            height={colBottom - 1.2 * scale}
-            fill="none"
-            stroke="#00aaff"
-            strokeWidth="0.5"
-          />
+          <rect key={`col-${cIdx}-sub`} x={colX} y={0} width={COL_W} height={colBottom - 1.2 * scale} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         );
 
-        // 2. Ground floor column segment (solid)
-        elements.push(
-          <rect
-            key={`col-${cIdx}-ground`}
-            x={colX}
-            y={-(FLOOR_H + SLAB_H)}
-            width={COL_W}
-            height={FLOOR_H + SLAB_H}
-            fill="none"
-            stroke="#00aaff"
-            strokeWidth="0.5"
-          />
-        );
-
-        // 3. First Floor column segment (solid, no hidden lines)
-        elements.push(
-          <rect
-            key={`col-${cIdx}-f1`}
-            x={colX}
-            y={-2 * (FLOOR_H + SLAB_H)}
-            width={COL_W}
-            height={FLOOR_H + SLAB_H}
-            fill="none"
-            stroke="#00aaff"
-            strokeWidth="0.5"
-          />
-        );
-
-        // 4. Upper floors column segment (solid) above 1st floor
-        const upperTop = roofTopY + SLAB_H;
-        const firstFloorTopY = -2 * (FLOOR_H + SLAB_H);
-        if (upperTop < firstFloorTopY) {
+        let currentColY = 0;
+        Array.from({ length: effectiveMainFloorsCount }).forEach((_, fIdx) => {
+          const colTopY = -(currentColY + FLOOR_H + SLAB_H);
           elements.push(
-            <rect
-              key={`col-${cIdx}-upper`}
-              x={colX}
-              y={upperTop}
-              width={COL_W}
-              height={Math.abs(upperTop - firstFloorTopY)}
-              fill="none"
-              stroke="#00aaff"
-              strokeWidth="0.5"
-            />
+            <rect key={`col-${cIdx}-f${fIdx}`} x={colX} y={colTopY} width={COL_W} height={FLOOR_H + SLAB_H} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           );
-        }
+          currentColY += FLOOR_H + SLAB_H;
+        });
       } else {
         elements.push(
-          <rect
-            key={`col-${cIdx}`}
-            x={colX}
-            y={colTop}
-            width={COL_W}
-            height={colBottom - colTop - 1.2 * scale}
-            fill="none"
-            stroke="#00aaff"
-            strokeWidth="0.5"
-          />
+          <rect key={`col-${cIdx}`} x={colX} y={colTop} width={COL_W} height={colBottom - colTop - 1.2 * scale} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         );
       }
 
@@ -337,42 +313,29 @@ export default function CadFloorElevationRenderer({
       const y4 = padTopY;
 
       elements.push(
-        <rect
-          key={`pcc-${cIdx}`}
-          x={x1 - 0.3 * scale}
-          y={padBottomY}
-          width={baseW + 0.6 * scale}
-          height={0.5 * scale}
-          fill="none"
-          stroke="#00aaff"
-          strokeWidth="0.4"
-        />
+        <rect key={`pcc-${cIdx}`} x={x1 - 0.3 * scale} y={padBottomY} width={baseW + 0.6 * scale} height={0.5 * scale} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       );
 
       elements.push(
-        <polygon
-          key={`footing-pad-${cIdx}`}
-          points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`}
-          fill="none"
-          stroke="#00aaff"
-          strokeWidth="0.5"
-        />
+        <polygon key={`footing-pad-${cIdx}`} points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       );
     });
 
     const showTower = hasTowerSelected && isSection;
-
     let towerRoofY = roofTopY;
     let towerWidth = 10 * scale;
     const mainAreaCenter = startX + (totalWidth / 2);
     let towerStartX = mainAreaCenter - (towerWidth / 2);
     
     const towerFloorName = processedFloors.find(f => f.toUpperCase().includes("TOWER")) || "TOWER";
-    const towerInfo = floorData && floorData[towerFloorName];
+    const towerInfo = getFloorDataItem(towerFloorName);
     if (towerInfo) {
-      if (towerInfo.length) towerWidth = towerInfo.length * scale; 
+      if (towerInfo.length && towerInfo.length * scale <= totalWidth) {
+        towerWidth = towerInfo.length * scale; 
+      }
       if (towerInfo.y !== undefined) {
-        towerStartX = (startX + totalWidth) - (towerInfo.y * scale) - towerWidth;
+        const computedX = (startX + totalWidth) - (towerInfo.y * scale) - towerWidth;
+        towerStartX = Math.max(startX, Math.min(computedX, startX + totalWidth - towerWidth));
       }
     }
 
@@ -385,22 +348,12 @@ export default function CadFloorElevationRenderer({
         const colX = startX + ratio * (totalWidth - COL_W);
         if (colX >= towerStartX - COL_W && colX <= towerStartX + towerWidth) {
           elements.push(
-            <rect
-              key={`col-tower-${cIdx}`}
-              x={colX}
-              y={towerRoofY + SLAB_H}
-              width={COL_W}
-              height={towerH}
-              fill="none"
-              stroke="#00aaff"
-              strokeWidth="0.5"
-            />
+            <rect key={`col-tower-${cIdx}`} x={colX} y={towerRoofY + SLAB_H} width={COL_W} height={towerH} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           );
         }
       });
     }
 
-    // Plinth Beams (Single bottom line)
     Array.from({ length: colCount - 1 }).forEach((_, cIdx) => {
       const ratio1 = cIdx / (colCount - 1);
       const ratio2 = (cIdx + 1) / (colCount - 1);
@@ -408,46 +361,20 @@ export default function CadFloorElevationRenderer({
       const spanWidth = (startX + ratio2 * (totalWidth - COL_W)) - spanStart;
 
       elements.push(
-        <line
-          key={`pb-${cIdx}`}
-          x1={spanStart}
-          y1={BEAM_D}
-          x2={spanStart + spanWidth}
-          y2={BEAM_D}
-          stroke="#00aaff"
-          strokeWidth="0.5"
-        />
+        <line key={`pb-${cIdx}`} x1={spanStart} y1={BEAM_D} x2={spanStart + spanWidth} y2={BEAM_D} stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       );
 
       const brickH = PLINTH_H - BEAM_D;
       if (brickH > 0) {
         elements.push(
-          <rect
-            key={`pw-${cIdx}`}
-            x={spanStart}
-            y={BEAM_D}
-            width={spanWidth}
-            height={brickH}
-            fill="url(#wallHatch)"
-            stroke="#00aaff"
-            strokeWidth="0.4"
-          />
+          <rect key={`pw-${cIdx}`} x={spanStart} y={BEAM_D} width={spanWidth} height={brickH} fill="url(#wallHatch)" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         );
       }
     });
 
     let currentY = 0;
-    
     elements.push(
-      <line
-        key="plinth-slab"
-        x1={startX}
-        y1={0}
-        x2={startX + totalWidth}
-        y2={0}
-        stroke="#00aaff"
-        strokeWidth="0.6"
-      />
+      <line key="plinth-slab" x1={startX} y1={0} x2={startX + totalWidth} y2={0} stroke="#00aaff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
     );
     currentY += SLAB_H;
 
@@ -470,7 +397,7 @@ export default function CadFloorElevationRenderer({
         ? Math.abs(fPoints[3].y - fPoints[0].y) 
         : Math.abs(fPoints[1].x - fPoints[0].x);
 
-      const fInfo = floorData && floorData[floorName];
+      const fInfo = getFloorDataItem(floorName);
       let floorXOffset = startX;
       
       if (isSection) {
@@ -490,18 +417,9 @@ export default function CadFloorElevationRenderer({
       }
 
       elements.push(
-        <line
-          key={`slab-${fIdx}`}
-          x1={floorXOffset}
-          y1={floorTopY}
-          x2={floorXOffset + floorSpanWidth}
-          y2={floorTopY}
-          stroke="#00aaff"
-          strokeWidth="0.6"
-        />
+        <line key={`slab-${fIdx}`} x1={floorXOffset} y1={floorTopY} x2={floorXOffset + floorSpanWidth} y2={floorTopY} stroke="#00aaff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
       );
 
-      // Floor Beams (Single bottom line)
       Array.from({ length: colCount - 1 }).forEach((_, cIdx) => {
         const ratio1 = cIdx / (colCount - 1);
         const ratio2 = (cIdx + 1) / (colCount - 1);
@@ -511,15 +429,7 @@ export default function CadFloorElevationRenderer({
         const hangH = BEAM_D - SLAB_H;
         if (hangH > 0 && spanWidth > 0) {
           elements.push(
-            <line
-              key={`fb-${fIdx}-${cIdx}`}
-              x1={spanStart}
-              y1={floorTopY + BEAM_D}
-              x2={spanStart + spanWidth}
-              y2={floorTopY + BEAM_D}
-              stroke="#00aaff"
-              strokeWidth="0.5"
-            />
+            <line key={`fb-${fIdx}-${cIdx}`} x1={spanStart} y1={floorTopY + BEAM_D} x2={spanStart + spanWidth} y2={floorTopY + BEAM_D} stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
           );
         }
       });
@@ -532,41 +442,15 @@ export default function CadFloorElevationRenderer({
       const extendedTowerW = towerWidth + (2 * overhang);
 
       elements.push(
-        <line
-          key="tower-roof-slab"
-          x1={extendedTowerX}
-          y1={towerRoofY}
-          x2={extendedTowerX + extendedTowerW}
-          y2={towerRoofY}
-          stroke="#00aaff"
-          strokeWidth="0.6"
-        />
+        <line key="tower-roof-slab" x1={extendedTowerX} y1={towerRoofY} x2={extendedTowerX + extendedTowerW} y2={towerRoofY} stroke="#00aaff" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
       );
 
       elements.push(
-        <rect
-          key="tower-parapet"
-          x={extendedTowerX}
-          y={roofTopY - parapetH}
-          width={extendedTowerW}
-          height={parapetH}
-          fill="none"
-          stroke="#00aaff"
-          strokeWidth="0.4"
-        />
+        <rect key="tower-parapet" x={extendedTowerX} y={roofTopY - parapetH} width={extendedTowerW} height={parapetH} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       );
     } else {
       elements.push(
-        <rect
-          key="standard-parapet"
-          x={startX}
-          y={roofTopY - parapetH}
-          width={totalWidth}
-          height={parapetH}
-          fill="none"
-          stroke="#00aaff"
-          strokeWidth="0.4"
-        />
+        <rect key="standard-parapet" x={startX} y={roofTopY - parapetH} width={totalWidth} height={parapetH} fill="none" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
       );
     }
 
@@ -621,6 +505,7 @@ export default function CadFloorElevationRenderer({
   const elevationRowStartY = topmostY + MANUAL_ELEV_Y_OFFSET;
 
   const tableTotalWidth = baseBuiltUpWidth + 50 * scale;
+  const dynamicTableXOffset = baseBuiltUpWidth + baseBuiltUpHeight + 70 * scale;
 
   const footingSpec = effectiveMainFloorsCount <= 3 
     ? "4'-0\" x 4'-0\" (Sloped Isolated RCC Footing)" 
@@ -652,10 +537,10 @@ export default function CadFloorElevationRenderer({
     <g>
       <defs>
         <pattern id="wallHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="6" stroke="#666666" strokeWidth="0.6" />
+          <line x1="0" y1="0" x2="0" y2="6" stroke="#666666" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         </pattern>
         <pattern id="plinthBeamHatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <line x1="0" y1="0" x2="0" y2="4" stroke="#00aaff" strokeWidth="0.4" />
+          <line x1="0" y1="0" x2="0" y2="4" stroke="#00aaff" strokeWidth="1" vectorEffect="non-scaling-stroke" />
         </pattern>
       </defs>
 
@@ -668,9 +553,12 @@ export default function CadFloorElevationRenderer({
         rowHeightGap={rowHeightGap}
         scale={scale}
         getFloorPoints={getFloorPoints}
-        floorBuiltUpAreas={floorBuiltUpAreas}
+        floorBuiltUpAreas={normalizedFloorAreas}
         baseArea={baseArea}
-        floorData={floorData}
+        floorData={normalizedFloorData}
+        roadOrientation={(roadFacingOption || "1 SIDE ROAD (SOUTH)").toUpperCase().includes("NORTH") ? "NORTH" :
+          (roadFacingOption || "").toUpperCase().includes("EAST") ? "EAST" :
+          (roadFacingOption || "").toUpperCase().includes("WEST") ? "WEST" : "SOUTH"}
         measurementUnit={measurementUnit}
         MANUAL_TOWER_DIM_X_OFFSET={MANUAL_TOWER_DIM_X_OFFSET}
         MANUAL_TOWER_DIM_Y_OFFSET={MANUAL_TOWER_DIM_Y_OFFSET}
@@ -686,7 +574,7 @@ export default function CadFloorElevationRenderer({
           baseBuiltUpHeight={baseBuiltUpHeight}
           scale={scale}
           processedFloors={processedFloors}
-          floorData={floorData}
+          floorData={normalizedFloorData}
           hasBasement={hasBasement}
           basementHeight={basementHeight}
           frontMos={frontMos}
@@ -708,7 +596,7 @@ export default function CadFloorElevationRenderer({
         scale={scale}
         elevationStartX={elevationStartX}
         elevationRowStartY={elevationRowStartY}
-        MANUAL_TABLE_X_OFFSET={MANUAL_TABLE_X_OFFSET}
+        MANUAL_TABLE_X_OFFSET={dynamicTableXOffset}
         MANUAL_TABLE_Y_OFFSET={MANUAL_TABLE_Y_OFFSET}
       />
     </g>

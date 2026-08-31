@@ -1,4 +1,5 @@
 import React from "react";
+import { getRoadOrientation } from "../engine/roadOrientation";
 
 interface RoadRendererProps {
   roadFacingOption: string;
@@ -37,40 +38,14 @@ export default function RoadRenderer({
   roadWidth = 15,
 }: RoadRendererProps) {
   const opt = (roadFacingOption || "").toUpperCase();
+  const orientation = getRoadOrientation(opt);
+  const mainRoad = orientation.mainRoad;
+  const activeDirs = [mainRoad, ...orientation.sideRoads];
 
   const isFourSide = opt.includes("4 SIDE");
   const isThreeSide = opt.includes("3 SIDE");
   const isTwoSide = opt.includes("2 SIDE") || opt.includes("FRONT & REAR");
 
-  const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
-  const foundDirs: { dir: string; index: number }[] = [];
-
-  allDirs.forEach((dir) => {
-    const idx = opt.indexOf(dir);
-    if (idx !== -1) {
-      foundDirs.push({ dir, index: idx });
-    }
-  });
-
-  foundDirs.sort((a, b) => a.index - b.index);
-
-  let mainRoad = "SOUTH";
-  if (foundDirs.length > 0) {
-    mainRoad = foundDirs[0].dir;
-  }
-
-  const compassMap: Record<
-    string,
-    { top: string; left: string; right: string }
-  > = {
-    NORTH: { top: "SOUTH", left: "EAST", right: "WEST" },
-    SOUTH: { top: "NORTH", left: "WEST", right: "EAST" },
-    EAST: { top: "WEST", left: "SOUTH", right: "NORTH" },
-    WEST: { top: "EAST", left: "NORTH", right: "SOUTH" },
-  };
-
-  const currentCompass = compassMap[mainRoad] || compassMap["SOUTH"];
-  const activeDirs = foundDirs.map((d) => d.dir);
 
   let hasBottomRoad = false;
   let hasTopRoad = false;
@@ -83,20 +58,20 @@ export default function RoadRenderer({
     hasLeftRoad = true;
     hasRightRoad = true;
   } else if (isThreeSide) {
-    hasBottomRoad = activeDirs.includes(mainRoad) || foundDirs.length >= 1;
-    hasTopRoad    = activeDirs.includes(currentCompass.top);
-    hasLeftRoad   = activeDirs.includes(currentCompass.left);
-    hasRightRoad  = activeDirs.includes(currentCompass.right);
+    hasBottomRoad = activeDirs.includes(mainRoad) || orientation.sideRoads.length >= 1;
+    hasTopRoad    = activeDirs.includes(orientation.topCardinal);
+    hasLeftRoad   = activeDirs.includes(orientation.leftCardinal);
+    hasRightRoad  = activeDirs.includes(orientation.rightCardinal);
   } else if (isTwoSide || opt.includes("FRONT & REAR")) {
     hasBottomRoad = activeDirs.includes(mainRoad);
-    hasTopRoad    = activeDirs.includes(currentCompass.top);
+    hasTopRoad    = activeDirs.includes(orientation.topCardinal);
     hasLeftRoad   = false;
     hasRightRoad  = false;
-  } else if (opt.includes("CORNER") || (foundDirs.length === 2 && !opt.includes("FRONT & REAR"))) {
+  } else if (opt.includes("CORNER") || (activeDirs.length === 2 && !opt.includes("FRONT & REAR"))) {
     hasBottomRoad = activeDirs.includes(mainRoad);
     hasTopRoad    = false;
-    hasLeftRoad   = activeDirs.includes(currentCompass.left);
-    hasRightRoad  = activeDirs.includes(currentCompass.right);
+    hasLeftRoad   = activeDirs.includes(orientation.leftCardinal);
+    hasRightRoad  = activeDirs.includes(orientation.rightCardinal);
   } else {
     hasBottomRoad = true;
     hasTopRoad    = false;
@@ -114,9 +89,9 @@ export default function RoadRenderer({
   };
 
   const bottomDirHeight = getWidthForDir(mainRoad);
-  const topDirHeight    = getWidthForDir(currentCompass.top);
-  const leftDirHeight   = getWidthForDir(currentCompass.left);
-  const rightDirHeight  = getWidthForDir(currentCompass.right);
+  const topDirHeight    = getWidthForDir(orientation.topCardinal);
+  const leftDirHeight   = getWidthForDir(orientation.leftCardinal);
+  const rightDirHeight  = getWidthForDir(orientation.rightCardinal);
 
   const ext = 6 * SCALE;
   const siteLayoutY = pBottomLeft.y + bottomDirHeight + SITE_LAYOUT_GAP;

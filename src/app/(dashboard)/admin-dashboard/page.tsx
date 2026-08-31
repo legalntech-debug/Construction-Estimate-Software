@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
-import DashboardChart from '@/app/components/DashboardChart';
+import DashboardChart from './components/DashboardChart';
 import SystemAlerts from '../../components/SystemAlerts';
 import InactiveUsersModal from '@/app/components/InactiveUsersModal';
 import RazorpayRevenueChart from '@/app/components/RazorpayRevenueChart';
@@ -15,7 +15,8 @@ import AdminBroadcastWidget from './components/AdminBroadcastWidget';
 import AdminCreateUserWidget from './components/AdminCreateUserWidget';
 import AdminPendingApprovalsWidget from './components/AdminPendingApprovalsWidget';
 import AdminRefundRequestsWidget from './components/AdminRefundRequestsWidget';
-import PremiumBillingWidget from './components/PremiumBillingWidget'; // <-- Added Premium Billing Widget
+import PremiumBillingWidget from './components/PremiumBillingWidget'; 
+import BusinessProfitSharingWidget from './components/BusinessProfitSharingWidget';
 
 export default function AdminDashboardPage(props: { 
   searchParams: Promise<{ filter?: string; inactiveDays?: string }> 
@@ -25,23 +26,33 @@ export default function AdminDashboardPage(props: {
 
   const [userTableSearch, setUserTableSearch] = useState('');
 
+  // --- DROPDOWN FILTER FOR DASHBOARD FEATURES ---
+  // Default selected feature is set to 'RBAC'
+  const [activeFeatureFilter, setActiveFeatureFilter] = useState<string>('RBAC');
+
   const [hiddenSections, setHiddenSections] = useState<{ [key: string]: boolean }>({
     gstManager: true,
     gatewayAnalytics: true,
     recharge: true,
     health: true,
     kpi: true,
-    rbac: true,
+    rbac: false,
     audit: true,
     inactive: true,
     razorpayChart: true,
     mis: true,
     gateway: true,
-    premiumBilling: false, // <-- State for Premium Billing Widget section toggle
+    premiumBilling: true, 
+    profitSharing: true,
   });
 
   const toggleSection = (key: string) => {
     setHiddenSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const isSectionVisible = (key: string) => {
+    if (activeFeatureFilter === 'ALL') return true;
+    return activeFeatureFilter === key;
   };
 
   const [selectedUserForEstimates, setSelectedUserForEstimates] = useState<any>(null);
@@ -69,6 +80,28 @@ export default function AdminDashboardPage(props: {
   const [selectedGatewayDate, setSelectedGatewayDate] = useState(new Date().toISOString().slice(0, 10));
   const [selectedGatewayYear, setSelectedGatewayYear] = useState(new Date().getFullYear().toString());
   const [selectedGatewayFY, setSelectedGatewayFY] = useState('2026-27');
+  const [rechargeFilterMode, setRechargeFilterMode] = useState<'all' | 'month'>('all');
+  const [selectedRechargeMonth, setSelectedRechargeMonth] = useState(new Date().toISOString().slice(0, 7));
+  const filteredRechargeRequests = rechargeRequests.filter((req: any) => {
+    if (rechargeFilterMode === 'month') {
+      const reqDateStr = req.created_at ? new Date(req.created_at).toISOString().slice(0, 7) : '';
+      return reqDateStr === selectedRechargeMonth;
+    }
+    return true;
+  });
+
+  // Calculate totals separately by status
+  const totalApprovedAmount = filteredRechargeRequests
+    .filter((req: any) => req.status === 'APPROVED')
+    .reduce((sum: number, req: any) => sum + (Number(req.amount) || 0), 0);
+
+  const totalRejectedAmount = filteredRechargeRequests
+    .filter((req: any) => req.status === 'REJECTED')
+    .reduce((sum: number, req: any) => sum + (Number(req.amount) || 0), 0);
+
+  const totalPendingAmount = filteredRechargeRequests
+    .filter((req: any) => req.status === 'PENDING')
+    .reduce((sum: number, req: any) => sum + (Number(req.amount) || 0), 0);
 
   const [dashboardData, setDashboardData] = useState<any>({
     records: [],
@@ -446,13 +479,6 @@ export default function AdminDashboardPage(props: {
     return name.includes(query) || email.includes(query) || mobile.includes(query);
   }) || [];
 
-  const totalUserWalletsAmount = filteredProfiles.reduce((sum: number, p: any) => sum + Number(p.wallet_balance || 0), 0);
-  const totalUserEstimatesCount = filteredProfiles.reduce((sum: number, p: any) => sum + Number(p.estimates_count || 0), 0);
-  const totalUserRevenueSum = filteredProfiles.reduce((sum: number, p: any) => sum + Number(p.total_revenue || 0), 0);
-  
-  const activeUsersCount = filteredProfiles.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
-  const suspendedUsersCount = filteredProfiles.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
-
   const filteredModalEstimates = userEstimatesList.filter((est: any) => {
     if (!est.created_at) return true;
     const estDate = new Date(est.created_at);
@@ -493,6 +519,32 @@ export default function AdminDashboardPage(props: {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-between lg:justify-end">
+            
+            {/* --- FEATURE SELECTION DROPDOWN --- */}
+            <div className="flex items-center gap-2 bg-blue-50/60 p-1.5 rounded-2xl border border-blue-100">
+              <span className="text-xs font-extrabold text-blue-800 uppercase px-2">Show Feature:</span>
+              <select
+                value={activeFeatureFilter}
+                onChange={(e) => setActiveFeatureFilter(e.target.value)}
+                className="bg-white text-xs font-bold text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
+              >
+                <option value="RBAC">RBAC Table & User Management (Default)</option>
+                <option value="PROFIT_SHARING">Business Profit Sharing & Equity</option>
+                <option value="PREMIUM_BILLING">Premium Billing & Passbook</option>
+                <option value="GATEWAY_INSPECTOR">Payment Gateway Inspector</option>
+                <option value="GST_MANAGER">GST Filing & Income Management</option>
+                <option value="WALLET_RECHARGE">Wallet Recharge Panel</option>
+                <option value="SYSTEM_HEALTH">System Telemetry & Health</option>
+                <option value="KPI">Key Performance Indicators (KPI)</option>
+                <option value="AUDIT_TRAIL">Audit Trail & Security Compliance</option>
+                <option value="INACTIVE_USERS">Dead User Engagement Analysis</option>
+                <option value="RAZORPAY_CHART">Razorpay Revenue Analytics</option>
+                <option value="MIS_METRICS">MIS Metrics & Geographic Cases</option>
+                <option value="GATEWAY_OPERATIONS">Razorpay Live API Hook Table</option>
+                <option value="ALL">Show All Features</option>
+              </select>
+            </div>
+
             <div className="flex bg-slate-100 p-1.5 rounded-2xl overflow-x-auto">
               {['day', 'week', 'month', 'year', 'fy'].map((f) => (
                 <Link 
@@ -518,426 +570,746 @@ export default function AdminDashboardPage(props: {
         <AdminPendingApprovalsWidget onActionComplete={fetchDashboardData} />
         <AdminRefundRequestsWidget refundRequests={refundRequests} onUpdate={fetchDashboardData} />
 
-        {/* --- PREMIUM BILLING REPORT WIDGET --- */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">Premium Subscribers Billing & Passbook</h3>
-              <p className="text-xs text-slate-500">Monitor active Premium Plan members and track cumulative debited usage bills.</p>
-            </div>
-            <button 
-              onClick={() => toggleSection('premiumBilling')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.premiumBilling ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-
-          {!hiddenSections.premiumBilling && (
-            <PremiumBillingWidget />
-          )}
-        </div>
-
-        {/* --- ADVANCED GATEWAY REVENUE INSPECTOR WITH DYNAMIC FILTERS & EXCEL DOWNLOAD --- */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">Payment Gateway Advanced Income & Earnings Inspector</h3>
-              <p className="text-xs text-slate-500">Filter online gateway revenue dynamically by Date, Month, Year, or Financial Year with Excel export support.</p>
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <button 
-                onClick={handleExportGatewayExcel}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-              >
-                <span>📊 Download Excel (CSV)</span>
-              </button>
-              <button 
-                onClick={() => toggleSection('gatewayAnalytics')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-              >
-                {hiddenSections.gatewayAnalytics ? 'Show [+]' : 'Hide [-]'}
-              </button>
-            </div>
-          </div>
-
-          {!hiddenSections.gatewayAnalytics && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex-wrap">
-                <span className="text-xs font-bold text-slate-500 uppercase px-2">Filter By:</span>
-                {(['month', 'date', 'year', 'fy'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setGatewayFilterMode(mode)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${gatewayFilterMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 border hover:bg-slate-100'}`}
-                  >
-                    {mode.toUpperCase()} WISE
-                  </button>
-                ))}
-
-                <div className="ml-auto flex items-center gap-2">
-                  {gatewayFilterMode === 'month' && (
-                    <input 
-                      type="month"
-                      value={selectedGatewayMonth}
-                      onChange={(e) => setSelectedGatewayMonth(e.target.value)}
-                      className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
-                    />
-                  )}
-                  {gatewayFilterMode === 'date' && (
-                    <input 
-                      type="date"
-                      value={selectedGatewayDate}
-                      onChange={(e) => setSelectedGatewayDate(e.target.value)}
-                      className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
-                    />
-                  )}
-                  {gatewayFilterMode === 'year' && (
-                    <select
-                      value={selectedGatewayYear}
-                      onChange={(e) => setSelectedGatewayYear(e.target.value)}
-                      className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
-                    >
-                      <option value="2026">2026</option>
-                      <option value="2025">2025</option>
-                      <option value="2024">2024</option>
-                    </select>
-                  )}
-                  {gatewayFilterMode === 'fy' && (
-                    <select
-                      value={selectedGatewayFY}
-                      onChange={(e) => setSelectedGatewayFY(e.target.value)}
-                      className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
-                    >
-                      <option value="2026-27">FY 2026-27</option>
-                      <option value="2025-26">FY 2025-26</option>
-                      <option value="2024-25">FY 2024-25</option>
-                    </select>
-                  )}
-                </div>
+        {/* --- RBAC TABLE CODE (DEFAULT ACTIVE) --- */}
+        {isSectionVisible('RBAC') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">User Role, Wallet & Estimates Tracking (RBAC)</h3>
+                <p className="text-xs text-slate-500">Filter user activity by date or month to calculate precise fee dues and estimate counts.</p>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Filtered Gateway Revenue ({gatewayFilterMode.toUpperCase()})</span>
-                  <p className="text-2xl font-black text-blue-600 mt-1">₹ {activeGatewayRevenue.toLocaleString('en-IN')}</p>
-                  <span className="text-[10px] text-slate-400 mt-1 block">{filteredGatewayTxns.length} matching transactions</span>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase">All-Time Gateway Revenue</span>
-                  <p className="text-2xl font-black text-slate-900 mt-1">₹ {totalGatewayRevenueAllTime.toLocaleString('en-IN')}</p>
-                  <span className="text-[10px] text-slate-400 mt-1 block">{gatewayTxns.length} total fetched transactions</span>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-slate-400 uppercase">Actionable Note</span>
-                    <p className="text-xs text-slate-600 mt-1">Convert current filtered earnings directly into monthly GST filings.</p>
-                  </div>
-                  <button
-                    onClick={handleGenerateMonthlyConsolidatedGST}
-                    className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                  >
-                    ⚡ Convert Filtered Period to GST
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* --- GST & INCOME MANAGEMENT PANEL --- */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">GST Filing & Income Management System</h3>
-              <p className="text-xs text-slate-500">Record B2B/B2C invoices or auto-consolidate direct gateway payments for streamlined monthly accounting.</p>
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <button
-                onClick={handleGenerateMonthlyConsolidatedGST}
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
-              >
-                <span>⚡ Auto-Consolidate Gateway Sales</span>
-              </button>
-              <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-xl font-bold border border-emerald-200">
-                Total GST Liability: ₹ {totalGstCollected.toLocaleString('en-IN')}
-              </span>
-              <button 
-                onClick={() => toggleSection('gstManager')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-              >
-                {hiddenSections.gstManager ? 'Show [+]' : 'Hide [-]'}
-              </button>
-            </div>
-          </div>
-
-          {!hiddenSections.gstManager && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Total Taxable Income</span>
-                  <p className="text-xl font-black text-slate-900 mt-1">₹ {totalTaxableIncome.toLocaleString('en-IN')}</p>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Total GST Collected</span>
-                  <p className="text-xl font-black text-emerald-600 mt-1">₹ {totalGstCollected.toLocaleString('en-IN')}</p>
-                </div>
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase">Gross Revenue (Inc. GST)</span>
-                  <p className="text-xl font-black text-blue-600 mt-1">₹ {totalGrossIncome.toLocaleString('en-IN')}</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleAddIncomeSubmit} className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Client / Customer Name</label>
+              
+              {/* Date & Month Filters Bar */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">From:</span>
                   <input 
-                    type="text" 
-                    required
-                    placeholder="e.g. ABC Corp"
-                    value={incomeForm.client_name}
-                    onChange={(e) => setIncomeForm({...incomeForm, client_name: e.target.value})}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    type="date" 
+                    value={modalSelectedDate && modalFilterType === 'date' ? modalSelectedDate : ''} 
+                    onChange={(e) => { setModalSelectedDate(e.target.value); setModalFilterType('date'); }}
+                    className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Invoice Number</label>
+                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase">Month:</span>
                   <input 
-                    type="text" 
-                    placeholder="e.g. INV-2026-001"
-                    value={incomeForm.invoice_no}
-                    onChange={(e) => setIncomeForm({...incomeForm, invoice_no: e.target.value})}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    type="month" 
+                    value={modalSelectedMonth} 
+                    onChange={(e) => { setModalSelectedMonth(e.target.value); setModalFilterType('month'); }}
+                    className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Taxable Amount (₹)</label>
-                  <input 
-                    type="number" 
-                    required
-                    placeholder="10000"
-                    value={incomeForm.taxable_amount}
-                    onChange={(e) => setIncomeForm({...incomeForm, taxable_amount: e.target.value})}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">GST Rate (%)</label>
-                  <select
-                    value={incomeForm.gst_rate}
-                    onChange={(e) => setIncomeForm({...incomeForm, gst_rate: e.target.value})}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="5">5% GST</option>
-                    <option value="12">12% GST</option>
-                    <option value="18">18% GST</option>
-                    <option value="28">28% GST</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">GST Type</label>
-                  <select
-                    value={incomeForm.gst_type}
-                    onChange={(e) => setIncomeForm({...incomeForm, gst_type: e.target.value})}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="INTRA">Intra-State (CGST + SGST)</option>
-                    <option value="INTER">Inter-State (IGST)</option>
-                  </select>
-                </div>
-
-                <div>
+                {(modalSelectedDate || modalSelectedMonth || userTableSearch) && (
                   <button 
-                    type="submit"
-                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    onClick={() => { setModalSelectedDate(''); setModalSelectedMonth(''); setUserTableSearch(''); setModalFilterType('all'); }}
+                    className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-100 transition"
                   >
-                    + Record Income & Calculate GST
+                    Reset Filters
                   </button>
-                </div>
-              </form>
+                )}
+              </div>
+            </div>
 
-              <div className="overflow-x-auto">
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-2">
+              <div className="w-full sm:w-72">
+                <input 
+                  type="text"
+                  placeholder="🔍 Search name, email or mobile..."
+                  value={userTableSearch}
+                  onChange={(e) => setUserTableSearch(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+                />
+              </div>
+              <button 
+                onClick={() => toggleSection('rbac')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
+              >
+                {hiddenSections.rbac ? 'Show [+]' : 'Hide [-]'}
+              </button>
+            </div>
+
+            {!hiddenSections.rbac && (
+              <div className="overflow-x-auto pt-2">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
                     <tr>
-                      <th className="p-3 rounded-l-xl">Invoice / Date</th>
-                      <th className="p-3">Client Name</th>
-                      <th className="p-3">Taxable (₹)</th>
-                      <th className="p-3">GST Split</th>
-                      <th className="p-3 text-right">Total Amount (₹)</th>
+                      <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
+                      <th className="p-3">Mobile No.</th>
+                      <th className="p-3 text-center">Wallet Balance</th>
+                      <th className="p-3 text-center">Lock Status</th>
+                      <th className="p-3 text-center">Total Estimates</th>
+                      <th className="p-3">Total Revenue (Fee)</th>
+                      <th className="p-3">Assigned Role</th>
+                      <th className="p-3">Account Status</th>
+                      <th className="p-3 rounded-r-xl text-right">Quick Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {incomes.length > 0 ? (
-                      incomes.map((inc: any, idx: number) => (
-                        <tr key={idx} className="hover:bg-slate-50/50 transition text-xs">
-                          <td className="p-3">
-                            <div className="font-mono font-bold text-blue-600">{inc.invoice_no || 'N/A'}</div>
-                            <div className="text-[10px] text-slate-400">{new Date(inc.created_at || Date.now()).toLocaleDateString()}</div>
-                          </td>
-                          <td className="p-3 font-semibold text-slate-900">{inc.client_name}</td>
-                          <td className="p-3 font-medium text-slate-700">₹ {Number(inc.taxable_amount || 0).toLocaleString('en-IN')}</td>
-                          <td className="p-3 text-[11px] text-slate-600">
-                            {inc.igst > 0 ? (
-                              <span>IGST: ₹{inc.igst}</span>
-                            ) : (
-                              <span>CGST: ₹{inc.cgst} | SGST: ₹{inc.sgst}</span>
-                            )}
-                          </td>
-                          <td className="p-3 text-right font-black text-emerald-600">₹ {Number(inc.total_amount || 0).toLocaleString('en-IN')}</td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="p-6 text-center text-slate-400 text-xs">No income records found.</td>
-                      </tr>
-                    )}
+                    {(() => {
+                      const processedProfiles = filteredProfiles.map((p: any) => {
+                        let estCount = p.estimates_count || 0;
+                        let userRevenue = p.total_revenue || 0;
+
+                        if (modalSelectedDate || modalSelectedMonth) {
+                          const matchingEstimates = (p.estimates_list || []).filter((est: any) => {
+                            if (!est.created_at) return false;
+                            const estDate = new Date(est.created_at);
+                            if (modalFilterType === 'date' && modalSelectedDate) {
+                              return estDate.toISOString().split('T')[0] === modalSelectedDate;
+                            }
+                            if (modalFilterType === 'month' && modalSelectedMonth) {
+                              const estMonthStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, '0')}`;
+                              return estMonthStr === modalSelectedMonth;
+                            }
+                            return true;
+                          });
+                          estCount = matchingEstimates.length;
+                          userRevenue = estCount * 21;
+                        }
+
+                        return { ...p, calculatedEstCount: estCount, calculatedRevenue: userRevenue };
+                      }).filter((p: any) => {
+                        if (!modalSelectedDate && !modalSelectedMonth) return true;
+                        return p.calculatedEstCount > 0;
+                      });
+
+                      (window as any).__tempFilteredProfiles = processedProfiles;
+
+                      if (processedProfiles.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
+                          </tr>
+                        );
+                      }
+
+                      return processedProfiles.map((p: any) => {
+                        const userId = p.id;
+                        const userWalletBalance = Number(p.wallet_balance ?? 0);
+                        const userPlan = (p.plan_type || '').toUpperCase();
+                        
+                        // Check explicitly if user is Admin or has a Premium plan
+                        const isAdminUser = p.role === 'admin' || (p.email || '').toLowerCase() === 'legalntech@gmail.com';
+                        const isPremium = userPlan.includes('PREMIUM');
+
+                        // Lock Condition: Admin aur Premium ko chhod kar agar balance < 100 hai toh Locked
+                        const isUserLocked = !isAdminUser && !isPremium && userWalletBalance < 100;
+
+                        return (
+                          <tr key={userId} className="hover:bg-slate-50/50 transition">
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900">{p.full_name || 'N/A'}</div>
+                              <div className="text-xs text-slate-500">{p.email || 'No Email'}</div>
+                            </td>
+
+                            <td className="p-3 text-slate-700 font-medium">
+                              {p.mobile || 'N/A'}
+                            </td>
+
+                            <td className="p-3 text-center">
+                              <span className={`px-3 py-1 rounded-xl font-black text-xs border ${
+                                userWalletBalance < 0 
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                                  : userWalletBalance === 0 
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200' 
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {userWalletBalance < 0 ? `- ₹ ${Math.abs(userWalletBalance).toLocaleString('en-IN')}` : `₹ ${userWalletBalance.toLocaleString('en-IN')}`}
+                              </span>
+                            </td>
+
+                            {/* --- LOCK STATUS COLUMN --- */}
+                            <td className="p-3 text-center">
+                              {isAdminUser ? (
+                                <span className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg text-[10px] font-extrabold uppercase">Admin</span>
+                              ) : isPremium ? (
+                                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-extrabold uppercase">Exempt</span>
+                              ) : isUserLocked ? (
+                                <span className="px-2.5 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">
+                                  🔒 Locked
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-extrabold uppercase">
+                                  🟢 Active
+                                </span>
+                              )}
+                            </td>
+
+                            <td className="p-3 text-center">
+                              <button 
+                                onClick={() => handleOpenUserEstimates(p)}
+                                className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-black text-xs transition shadow-sm border border-blue-200 inline-flex items-center gap-1.5"
+                              >
+                                <span>📊 {p.calculatedEstCount} {p.calculatedEstCount === 1 ? 'Estimate' : 'Estimates'}</span>
+                              </button>
+                            </td>
+
+                            <td className="p-3 font-semibold text-emerald-600">
+                              ₹ {Number(p.calculatedRevenue).toLocaleString('en-IN')}
+                            </td>
+
+                            <td className="p-3">
+                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                                p.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 
+                                p.role === 'premium' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 
+                                'bg-slate-100 text-slate-600'
+                              }`}>
+                                {p.role || 'user'}
+                              </span>
+                            </td>
+
+                            <td className="p-3">
+                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.status === 'suspended' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                {p.status || 'Active'}
+                              </span>
+                            </td>
+
+                            <td className="p-3 text-right">
+                              <form action="/api/admin/update-role" method="POST" className="inline-flex gap-2">
+                                <input type="hidden" name="user_id" value={p.user_id || p.id} />
+                                <button type="submit" name="action" value="toggle_role" className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
+                                  Toggle Role
+                                </button>
+                                <button type="submit" name="action" value="toggle_status" className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-lg transition">
+                                  {p.status === 'suspended' ? 'Activate' : 'Suspend'}
+                                </button>
+                              </form>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
+                  <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold text-slate-900 text-xs">
+                    {(() => {
+                      const currentList = (window as any).__tempFilteredProfiles || [];
+                      const filteredActiveCount = currentList.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
+                      const filteredSuspendedCount = currentList.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
+                      const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance ?? 0), 0);
+                      const filteredEstCountSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedEstCount || 0), 0);
+                      const filteredRevenueSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedRevenue || 0), 0);
+
+                      return (
+                        <tr><td colSpan={2} className="p-3"><div className="flex flex-col gap-1"><span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span><span className="text-slate-500 font-medium">Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong></span></div></td><td className={`p-3 text-center rounded-lg align-middle border ${filteredWalletSum < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : filteredWalletSum === 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{filteredWalletSum < 0 ? `- ₹ ${Math.abs(filteredWalletSum).toLocaleString('en-IN')}` : `₹ ${filteredWalletSum.toLocaleString('en-IN')}`}</td><td className="p-3"></td><td className="p-3 text-center text-blue-700 align-middle">{filteredEstCountSum} Estimates</td><td colSpan={4} className="p-3 text-emerald-700 align-middle">₹ {filteredRevenueSum.toLocaleString('en-IN')}</td></tr>
+                      );
+                    })()}
+                  </tfoot>
                 </table>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
-        {/* --- WALLET RECHARGE PANEL --- */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">Wallet Recharge Management Panel</h3>
-              <p className="text-xs text-slate-500">Review pending recharge history requests, approve them, or reject/revert if approved by mistake.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-xl font-bold border border-blue-200">
-                {rechargeRequests.length} Total Requests
-              </span>
+        {/* --- BUSINESS PROFIT SHARING WIDGET --- */}
+        {isSectionVisible('PROFIT_SHARING') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Business Profit Sharing & Equity Distribution</h3>
+                <p className="text-xs text-slate-500">Track and calculate total net income distribution across shareholders and partners.</p>
+              </div>
               <button 
-                onClick={() => toggleSection('recharge')}
+                onClick={() => toggleSection('profitSharing')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
-                {hiddenSections.recharge ? 'Show [+]' : 'Hide [-]'}
+                {hiddenSections.profitSharing ? 'Show [+]' : 'Hide [-]'}
               </button>
             </div>
+
+            {!hiddenSections.profitSharing && (
+              <BusinessProfitSharingWidget />
+            )}
           </div>
+        )}
 
-          {!hiddenSections.recharge && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
-                  <tr>
-                    <th className="p-3 rounded-l-xl">User Name / Email</th>
-                    <th className="p-3">Amount</th>
-                    <th className="p-3">UTR / UPI Ref No.</th>
-                    <th className="p-3">Request Date</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3 rounded-r-xl text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {rechargeRequests.length > 0 ? (
-                    rechargeRequests.map((req: any) => (
-                      <tr key={req.id} className="hover:bg-slate-50/50 transition text-xs">
-                        <td className="p-3">
-                          <div className="font-bold text-slate-900">{req.user_name || 'N/A'}</div>
-                          <div className="text-[11px] text-slate-500">{req.user_email || 'N/A'}</div>
-                        </td>
-                        <td className="p-3 font-black text-emerald-600 text-sm">₹ {Number(req.amount).toLocaleString('en-IN')}</td>
-                        <td className="p-3 font-mono font-bold text-blue-600">{req.utr_no}</td>
-                        <td className="p-3 text-slate-600">{new Date(req.created_at).toLocaleString('en-IN')}</td>
-                        <td className="p-3">
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
-                            req.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
-                            req.status === 'REJECTED' ? 'bg-rose-100 text-rose-700' :
-                            'bg-amber-100 text-amber-700'
-                          }`}>
-                            {req.status}
-                          </span>
-                        </td>
-                        <td className="p-3 text-right space-x-1 whitespace-nowrap">
-                          {req.status === 'PENDING' && (
-                            <>
-                              <button
-                                onClick={() => handleApproveRecharge(req.id, req.user_id, req.amount)}
-                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => handleUpdateRechargeStatus(req.id, req.user_id, req.amount, req.status, 'REJECTED')}
-                                className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
-                              >
-                                Reject
-                              </button>
-                            </>
-                          )}
-
-                          {req.status === 'APPROVED' && (
-                            <button
-                              onClick={() => handleUpdateRechargeStatus(req.id, req.user_id, req.amount, req.status, 'REJECTED')}
-                              className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
-                            >
-                              Revoke / Reject
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="p-6 text-center text-slate-400 text-xs">No recharge requests found.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+        {/* --- PREMIUM BILLING REPORT WIDGET --- */}
+        {isSectionVisible('PREMIUM_BILLING') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Premium Subscribers Billing & Passbook</h3>
+                <p className="text-xs text-slate-500">Monitor active Premium Plan members and track cumulative debited usage bills.</p>
+              </div>
+              <button 
+                onClick={() => toggleSection('premiumBilling')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.premiumBilling ? 'Show [+]' : 'Hide [-]'}
+              </button>
             </div>
-          )}
-        </div>
+
+            {!hiddenSections.premiumBilling && (
+              <PremiumBillingWidget />
+            )}
+          </div>
+        )}
+
+        {/* --- ADVANCED GATEWAY REVENUE INSPECTOR WITH DYNAMIC FILTERS & EXCEL DOWNLOAD --- */}
+        {isSectionVisible('GATEWAY_INSPECTOR') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Payment Gateway Advanced Income & Earnings Inspector</h3>
+                <p className="text-xs text-slate-500">Filter online gateway revenue dynamically by Date, Month, Year, or Financial Year with Excel export support.</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button 
+                  onClick={handleExportGatewayExcel}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+                >
+                  <span>📊 Download Excel (CSV)</span>
+                </button>
+                <button 
+                  onClick={() => toggleSection('gatewayAnalytics')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  {hiddenSections.gatewayAnalytics ? 'Show [+]' : 'Hide [-]'}
+                </button>
+              </div>
+            </div>
+
+            {!hiddenSections.gatewayAnalytics && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex-wrap">
+                  <span className="text-xs font-bold text-slate-500 uppercase px-2">Filter By:</span>
+                  {(['month', 'date', 'year', 'fy'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => setGatewayFilterMode(mode)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${gatewayFilterMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 border hover:bg-slate-100'}`}
+                    >
+                      {mode.toUpperCase()} WISE
+                    </button>
+                  ))}
+
+                  <div className="ml-auto flex items-center gap-2">
+                    {gatewayFilterMode === 'month' && (
+                      <input 
+                        type="month"
+                        value={selectedGatewayMonth}
+                        onChange={(e) => setSelectedGatewayMonth(e.target.value)}
+                        className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                      />
+                    )}
+                    {gatewayFilterMode === 'date' && (
+                      <input 
+                        type="date"
+                        value={selectedGatewayDate}
+                        onChange={(e) => setSelectedGatewayDate(e.target.value)}
+                        className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                      />
+                    )}
+                    {gatewayFilterMode === 'year' && (
+                      <select
+                        value={selectedGatewayYear}
+                        onChange={(e) => setSelectedGatewayYear(e.target.value)}
+                        className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                      >
+                        <option value="2026">2026</option>
+                        <option value="2025">2025</option>
+                        <option value="2024">2024</option>
+                      </select>
+                    )}
+                    {gatewayFilterMode === 'fy' && (
+                      <select
+                        value={selectedGatewayFY}
+                        onChange={(e) => setSelectedGatewayFY(e.target.value)}
+                        className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                      >
+                        <option value="2026-27">FY 2026-27</option>
+                        <option value="2025-26">FY 2025-26</option>
+                        <option value="2024-25">FY 2024-25</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-xs font-bold text-slate-400 uppercase">Filtered Gateway Revenue ({gatewayFilterMode.toUpperCase()})</span>
+                    <p className="text-2xl font-black text-blue-600 mt-1">₹ {activeGatewayRevenue.toLocaleString('en-IN')}</p>
+                    <span className="text-[10px] text-slate-400 mt-1 block">{filteredGatewayTxns.length} matching transactions</span>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-xs font-bold text-slate-400 uppercase">All-Time Gateway Revenue</span>
+                    <p className="text-2xl font-black text-slate-900 mt-1">₹ {totalGatewayRevenueAllTime.toLocaleString('en-IN')}</p>
+                    <span className="text-[10px] text-slate-400 mt-1 block">{gatewayTxns.length} total fetched transactions</span>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-slate-400 uppercase">Actionable Note</span>
+                      <p className="text-xs text-slate-600 mt-1">Convert current filtered earnings directly into monthly GST filings.</p>
+                    </div>
+                    <button
+                      onClick={handleGenerateMonthlyConsolidatedGST}
+                      className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      ⚡ Convert Filtered Period to GST
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* --- GST & INCOME MANAGEMENT PANEL --- */}
+        {isSectionVisible('GST_MANAGER') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">GST Filing & Income Management System</h3>
+                <p className="text-xs text-slate-500">Record B2B/B2C invoices or auto-consolidate direct gateway payments for streamlined monthly accounting.</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <button
+                  onClick={handleGenerateMonthlyConsolidatedGST}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                >
+                  <span>⚡ Auto-Consolidate Gateway Sales</span>
+                </button>
+                <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-xl font-bold border border-emerald-200">
+                  Total GST Liability: ₹ {totalGstCollected.toLocaleString('en-IN')}
+                </span>
+                <button 
+                  onClick={() => toggleSection('gstManager')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  {hiddenSections.gstManager ? 'Show [+]' : 'Hide [-]'}
+                </button>
+              </div>
+            </div>
+
+            {!hiddenSections.gstManager && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-xs font-bold text-slate-400 uppercase">Total Taxable Income</span>
+                    <p className="text-xl font-black text-slate-900 mt-1">₹ {totalTaxableIncome.toLocaleString('en-IN')}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-xs font-bold text-slate-400 uppercase">Total GST Collected</span>
+                    <p className="text-xl font-black text-emerald-600 mt-1">₹ {totalGstCollected.toLocaleString('en-IN')}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <span className="text-xs font-bold text-slate-400 uppercase">Gross Revenue (Inc. GST)</span>
+                    <p className="text-xl font-black text-blue-600 mt-1">₹ {totalGrossIncome.toLocaleString('en-IN')}</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleAddIncomeSubmit} className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Client / Customer Name</label>
+                    <input 
+                      type="text" 
+                      required
+                      placeholder="e.g. ABC Corp"
+                      value={incomeForm.client_name}
+                      onChange={(e) => setIncomeForm({...incomeForm, client_name: e.target.value})}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Invoice Number</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. INV-2026-001"
+                      value={incomeForm.invoice_no}
+                      onChange={(e) => setIncomeForm({...incomeForm, invoice_no: e.target.value})}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Taxable Amount (₹)</label>
+                    <input 
+                      type="number" 
+                      required
+                      placeholder="10000"
+                      value={incomeForm.taxable_amount}
+                      onChange={(e) => setIncomeForm({...incomeForm, taxable_amount: e.target.value})}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">GST Rate (%)</label>
+                    <select
+                      value={incomeForm.gst_rate}
+                      onChange={(e) => setIncomeForm({...incomeForm, gst_rate: e.target.value})}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="5">5% GST</option>
+                      <option value="12">12% GST</option>
+                      <option value="18">18% GST</option>
+                      <option value="28">28% GST</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">GST Type</label>
+                    <select
+                      value={incomeForm.gst_type}
+                      onChange={(e) => setIncomeForm({...incomeForm, gst_type: e.target.value})}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="INTRA">Intra-State (CGST + SGST)</option>
+                      <option value="INTER">Inter-State (IGST)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <button 
+                      type="submit"
+                      className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      + Record Income & Calculate GST
+                    </button>
+                  </div>
+                </form>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
+                      <tr>
+                        <th className="p-3 rounded-l-xl">Invoice / Date</th>
+                        <th className="p-3">Client Name</th>
+                        <th className="p-3">Taxable (₹)</th>
+                        <th className="p-3">GST Split</th>
+                        <th className="p-3 text-right">Total Amount (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {incomes.length > 0 ? (
+                        incomes.map((inc: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-slate-50/50 transition text-xs">
+                            <td className="p-3">
+                              <div className="font-mono font-bold text-blue-600">{inc.invoice_no || 'N/A'}</div>
+                              <div className="text-[10px] text-slate-400">{new Date(inc.created_at || Date.now()).toLocaleDateString()}</div>
+                            </td>
+                            <td className="p-3 font-semibold text-slate-900">{inc.client_name}</td>
+                            <td className="p-3 font-medium text-slate-700">₹ {Number(inc.taxable_amount || 0).toLocaleString('en-IN')}</td>
+                            <td className="p-3 text-[11px] text-slate-600">
+                              {inc.igst > 0 ? (
+                                <span>IGST: ₹{inc.igst}</span>
+                              ) : (
+                                <span>CGST: ₹{inc.cgst} | SGST: ₹{inc.sgst}</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-right font-black text-emerald-600">₹ {Number(inc.total_amount || 0).toLocaleString('en-IN')}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-slate-400 text-xs">No income records found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* --- WALLET RECHARGE PANEL --- */}
+        {isSectionVisible('WALLET_RECHARGE') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Wallet Recharge Management Panel</h3>
+                <p className="text-xs text-slate-500">Review pending recharge history requests, approve them, or reject/revert if approved by mistake.</p>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+                  <button
+                    onClick={() => setRechargeFilterMode('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${rechargeFilterMode === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    ALL
+                  </button>
+                  <button
+                    onClick={() => setRechargeFilterMode('month')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${rechargeFilterMode === 'month' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-100'}`}
+                  >
+                    MONTH WISE
+                  </button>
+                  {rechargeFilterMode === 'month' && (
+                    <input 
+                      type="month"
+                      value={selectedRechargeMonth}
+                      onChange={(e) => setSelectedRechargeMonth(e.target.value)}
+                      className="bg-white px-2 py-1 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                    />
+                  )}
+                </div>
+
+                <button 
+                  onClick={() => toggleSection('recharge')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  {hiddenSections.recharge ? 'Show [+]' : 'Hide [-]'}
+                </button>
+              </div>
+            </div>
+
+            {!hiddenSections.recharge && (
+              <div className="space-y-4">
+                {/* --- STATUS-WISE TOTALS SUMMARY CARDS --- */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Approved Total */}
+                  <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
+                      Total Approved Amount
+                    </span>
+                    <p className="text-xl font-black text-emerald-700 mt-1">
+                      ₹ {totalApprovedAmount.toLocaleString('en-IN')}
+                    </p>
+                  </div>
+
+                  {/* Rejected Total */}
+                  <div className="bg-rose-50/60 p-4 rounded-2xl border border-rose-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider">
+                      Total Rejected Amount
+                    </span>
+                    <p className="text-xl font-black text-rose-700 mt-1">
+                      ₹ {totalRejectedAmount.toLocaleString('en-IN')}
+                    </p>
+                  </div>
+
+                  {/* Pending Total */}
+                  <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-100 flex flex-col justify-between">
+                    <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">
+                      Total Pending Amount
+                    </span>
+                    <p className="text-xl font-black text-amber-700 mt-1">
+                      ₹ {totalPendingAmount.toLocaleString('en-IN')}
+                    </p>
+                  </div>
+                </div>
+
+                {/* --- TABLE --- */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
+                      <tr>
+                        <th className="p-3 rounded-l-xl">User Name / Email</th>
+                        <th className="p-3">Amount</th>
+                        <th className="p-3">UTR / UPI Ref No.</th>
+                        <th className="p-3">Request Date</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 rounded-r-xl text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredRechargeRequests.length > 0 ? (
+                        filteredRechargeRequests.map((req: any) => (
+                          <tr key={req.id} className="hover:bg-slate-50/50 transition text-xs">
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900">{req.user_name || 'N/A'}</div>
+                              <div className="text-[11px] text-slate-500">{req.user_email || 'N/A'}</div>
+                            </td>
+                            <td className="p-3 font-black text-emerald-600 text-sm">₹ {Number(req.amount).toLocaleString('en-IN')}</td>
+                            <td className="p-3 font-mono font-bold text-blue-600">{req.utr_no}</td>
+                            <td className="p-3 text-slate-600">{new Date(req.created_at).toLocaleString('en-IN')}</td>
+                            <td className="p-3">
+                              <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                                req.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
+                                req.status === 'REJECTED' ? 'bg-rose-100 text-rose-700' :
+                                'bg-amber-100 text-amber-700'
+                              }`}>
+                                {req.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-right space-x-1 whitespace-nowrap">
+                              {req.status === 'PENDING' && (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveRecharge(req.id, req.user_id, req.amount)}
+                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateRechargeStatus(req.id, req.user_id, req.amount, req.status, 'REJECTED')}
+                                    className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
+                                  >
+                                    Reject
+                                  </button>
+                                </>
+                              )}
+
+                              {req.status === 'APPROVED' && (
+                                <button
+                                  onClick={() => handleUpdateRechargeStatus(req.id, req.user_id, req.amount, req.status, 'REJECTED')}
+                                  className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-sm transition uppercase text-[10px]"
+                                >
+                                  Revoke / Reject
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="p-6 text-center text-slate-400 text-xs">No recharge requests found for the selected filter.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* System Health */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-800 text-base">System Telemetry & Health</h3>
-            <button 
-              onClick={() => toggleSection('health')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.health ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-
-          {!hiddenSections.health && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Storage Bucket Usage</p>
-                  <p className="text-xl font-black text-slate-800 mt-1">{totalStorageMB} MB <span className="text-xs font-normal text-slate-500">(Live Files)</span></p>
-                </div>
-                <div className="h-10 w-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold text-sm">📦</div>
-              </div>
-
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Database Query Latency</p>
-                  <p className={`text-xl font-black mt-1 ${queryLatency > 300 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                    {queryLatency} ms <span className="text-xs font-normal text-slate-500">(Optimal)</span>
-                  </p>
-                </div>
-                <div className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center font-bold text-sm">⚡</div>
-              </div>
-
-              <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active System Error Rate</p>
-                  <p className="text-xl font-black text-emerald-600 mt-1">0.00% <span className="text-xs font-normal text-slate-500">(Zero crashes)</span></p>
-                </div>
-                <div className="h-10 w-10 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-bold text-sm">🛡️</div>
-              </div>
+        {isSectionVisible('SYSTEM_HEALTH') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-slate-800 text-base">System Telemetry & Health</h3>
+              <button 
+                onClick={() => toggleSection('health')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.health ? 'Show [+]' : 'Hide [-]'}
+              </button>
             </div>
-          )}
-        </div>
+
+            {!hiddenSections.health && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Storage Bucket Usage</p>
+                    <p className="text-xl font-black text-slate-800 mt-1">{totalStorageMB} MB <span className="text-xs font-normal text-slate-500">(Live Files)</span></p>
+                  </div>
+                  <div className="h-10 w-10 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center font-bold text-sm">📦</div>
+                </div>
+
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Database Query Latency</p>
+                    <p className={`text-xl font-black mt-1 ${queryLatency > 300 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                      {queryLatency} ms <span className="text-xs font-normal text-slate-500">(Optimal)</span>
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center font-bold text-sm">⚡</div>
+                </div>
+
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Active System Error Rate</p>
+                    <p className="text-xl font-black text-emerald-600 mt-1">0.00% <span className="text-xs font-normal text-slate-500">(Zero crashes)</span></p>
+                  </div>
+                  <div className="h-10 w-10 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-bold text-sm">🛡️</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Action Bar */}
         <div className="flex justify-between items-center bg-gradient-to-r from-blue-900 to-indigo-900 p-6 rounded-3xl text-white shadow-md">
@@ -957,281 +1329,53 @@ export default function AdminDashboardPage(props: {
         </div>
 
         {/* Core KPI Cards */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-800 text-base">Key Performance Indicators</h3>
-            <button 
-              onClick={() => toggleSection('kpi')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.kpi ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-
-          {!hiddenSections.kpi && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Total Registered Users</h3>
-                    <p className="text-3xl font-black text-slate-900 mt-2">{dashboardData.totalUsers ?? 0}</p>
-                  </div>
-                  <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">👥</div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-slate-500 gap-1 font-medium">
-                  <span className="text-emerald-600 font-bold">100%</span> Database synced (A-Z Sorted)
-                </div>
-              </div>
-              
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Active Now (Online)</h3>
-                    <p className="text-3xl font-black text-emerald-600 mt-2">{dashboardData.liveOnlineCount ?? 0}</p>
-                  </div>
-                  <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">🟢</div>
-                </div>
-                <div className="mt-4 flex items-center text-xs text-emerald-600 gap-1 font-medium">
-                  <span>Live socket connection active</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                <InactiveUsersModal users={Array.isArray(dashboardData.inactiveUsers) ? dashboardData.inactiveUsers : []} />
-              </div>
+        {isSectionVisible('KPI') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-slate-800 text-base">Key Performance Indicators</h3>
+              <button 
+                onClick={() => toggleSection('kpi')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.kpi ? 'Show [+]' : 'Hide [-]'}
+              </button>
             </div>
-          )}
-        </div>
 
-      {/* RBAC Table Code */}
-<div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-  <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-    <div>
-      <h3 className="font-bold text-slate-800 text-base">User Role, Wallet & Estimates Tracking (RBAC)</h3>
-      <p className="text-xs text-slate-500">Filter user activity by date or month to calculate precise fee dues and estimate counts.</p>
-    </div>
-    
-    {/* Date & Month Filters Bar */}
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-        <span className="text-[10px] font-bold text-slate-500 uppercase">From:</span>
-        <input 
-          type="date" 
-          value={modalSelectedDate && modalFilterType === 'date' ? modalSelectedDate : ''} 
-          onChange={(e) => { setModalSelectedDate(e.target.value); setModalFilterType('date'); }}
-          className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
-        />
-      </div>
+            {!hiddenSections.kpi && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Total Registered Users</h3>
+                      <p className="text-3xl font-black text-slate-900 mt-2">{dashboardData.totalUsers ?? 0}</p>
+                    </div>
+                    <div className="p-3 bg-blue-50 text-blue-600 rounded-2xl">👥</div>
+                  </div>
+                  <div className="mt-4 flex items-center text-xs text-slate-500 gap-1 font-medium">
+                    <span className="text-emerald-600 font-bold">100%</span> Database synced (A-Z Sorted)
+                  </div>
+                </div>
+                
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider">Active Now (Online)</h3>
+                      <p className="text-3xl font-black text-emerald-600 mt-2">{dashboardData.liveOnlineCount ?? 0}</p>
+                    </div>
+                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">🟢</div>
+                  </div>
+                  <div className="mt-4 flex items-center text-xs text-emerald-600 gap-1 font-medium">
+                    <span>Live socket connection active</span>
+                  </div>
+                </div>
 
-      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-        <span className="text-[10px] font-bold text-slate-500 uppercase">Month:</span>
-        <input 
-          type="month" 
-          value={modalSelectedMonth} 
-          onChange={(e) => { setModalSelectedMonth(e.target.value); setModalFilterType('month'); }}
-          className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
-        />
-      </div>
-
-      {(modalSelectedDate || modalSelectedMonth || userTableSearch) && (
-        <button 
-          onClick={() => { setModalSelectedDate(''); setModalSelectedMonth(''); setUserTableSearch(''); setModalFilterType('all'); }}
-          className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-100 transition"
-        >
-          Reset Filters
-        </button>
-      )}
-    </div>
-  </div>
-
-  <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-2">
-    <div className="w-full sm:w-72">
-      <input 
-        type="text"
-        placeholder="🔍 Search name, email or mobile..."
-        value={userTableSearch}
-        onChange={(e) => setUserTableSearch(e.target.value)}
-        className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-      />
-    </div>
-    <button 
-      onClick={() => toggleSection('rbac')}
-      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
-    >
-      {hiddenSections.rbac ? 'Show [+]' : 'Hide [-]'}
-    </button>
-  </div>
-
-  {!hiddenSections.rbac && (
-    <div className="overflow-x-auto pt-2">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
-          <tr>
-            <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
-            <th className="p-3">Mobile No.</th>
-            <th className="p-3 text-center">Wallet Balance</th>
-            <th className="p-3 text-center">Lock Status</th>
-            <th className="p-3 text-center">Total Estimates</th>
-            <th className="p-3">Total Revenue (Fee)</th>
-            <th className="p-3">Assigned Role</th>
-            <th className="p-3">Account Status</th>
-            <th className="p-3 rounded-r-xl text-right">Quick Action</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {(() => {
-            const processedProfiles = filteredProfiles.map((p: any) => {
-              let estCount = p.estimates_count || 0;
-              let userRevenue = p.total_revenue || 0;
-
-              if (modalSelectedDate || modalSelectedMonth) {
-                const matchingEstimates = (p.estimates_list || []).filter((est: any) => {
-                  if (!est.created_at) return false;
-                  const estDate = new Date(est.created_at);
-                  if (modalFilterType === 'date' && modalSelectedDate) {
-                    return estDate.toISOString().split('T')[0] === modalSelectedDate;
-                  }
-                  if (modalFilterType === 'month' && modalSelectedMonth) {
-                    const estMonthStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, '0')}`;
-                    return estMonthStr === modalSelectedMonth;
-                  }
-                  return true;
-                });
-                estCount = matchingEstimates.length;
-                userRevenue = estCount * 21;
-              }
-
-              return { ...p, calculatedEstCount: estCount, calculatedRevenue: userRevenue };
-            }).filter((p: any) => {
-              if (!modalSelectedDate && !modalSelectedMonth) return true;
-              return p.calculatedEstCount > 0;
-            });
-
-            (window as any).__tempFilteredProfiles = processedProfiles;
-
-            if (processedProfiles.length === 0) {
-              return (
-                <tr>
-                  <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
-                </tr>
-              );
-            }
-
-            return processedProfiles.map((p: any) => {
-              const userId = p.id;
-              const userWalletBalance = Number(p.wallet_balance ?? 0);
-              const userPlan = (p.plan_type || '').toUpperCase();
-              
-              // Check explicitly if user is Admin or has a Premium plan
-              const isAdminUser = p.role === 'admin' || (p.email || '').toLowerCase() === 'legalntech@gmail.com';
-              const isPremium = userPlan.includes('PREMIUM');
-
-              // Strict Lock Condition: Admin aur Premium ko chhod kar agar balance < 100 hai toh Locked!
-              const isUserLocked = !isAdminUser && !isPremium && userWalletBalance < 100;
-
-              return (
-                <tr key={userId} className="hover:bg-slate-50/50 transition">
-                  <td className="p-3">
-                    <div className="font-bold text-slate-900">{p.full_name || 'N/A'}</div>
-                    <div className="text-xs text-slate-500">{p.email || 'No Email'}</div>
-                  </td>
-
-                  <td className="p-3 text-slate-700 font-medium">
-                    {p.mobile || 'N/A'}
-                  </td>
-
-                  <td className="p-3 text-center">
-                    <span className={`px-3 py-1 rounded-xl font-black text-xs border ${
-                      userWalletBalance < 0 
-                        ? 'bg-rose-50 text-rose-700 border-rose-200' 
-                        : userWalletBalance === 0 
-                        ? 'bg-amber-50 text-amber-700 border-amber-200' 
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    }`}>
-                      {userWalletBalance < 0 ? `- ₹ ${Math.abs(userWalletBalance).toLocaleString('en-IN')}` : `₹ ${userWalletBalance.toLocaleString('en-IN')}`}
-                    </span>
-                  </td>
-
-                  {/* --- LOCK STATUS COLUMN --- */}
-                  <td className="p-3 text-center">
-                    {isAdminUser ? (
-                      <span className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg text-[10px] font-extrabold uppercase">Admin</span>
-                    ) : isPremium ? (
-                      <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-extrabold uppercase">Exempt</span>
-                    ) : isUserLocked ? (
-                      <span className="px-2.5 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">
-                        🔒 Locked
-                      </span>
-                    ) : (
-                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-extrabold uppercase">
-                        🟢 Active
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="p-3 text-center">
-                    <button 
-                      onClick={() => handleOpenUserEstimates(p)}
-                      className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-black text-xs transition shadow-sm border border-blue-200 inline-flex items-center gap-1.5"
-                    >
-                      <span>📊 {p.calculatedEstCount} {p.calculatedEstCount === 1 ? 'Estimate' : 'Estimates'}</span>
-                    </button>
-                  </td>
-
-                  <td className="p-3 font-semibold text-emerald-600">
-                    ₹ {Number(p.calculatedRevenue).toLocaleString('en-IN')}
-                  </td>
-
-                  <td className="p-3">
-                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                      p.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 
-                      p.role === 'premium' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 
-                      'bg-slate-100 text-slate-600'
-                    }`}>
-                      {p.role || 'user'}
-                    </span>
-                  </td>
-
-                  <td className="p-3">
-                    <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.status === 'suspended' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                      {p.status || 'Active'}
-                    </span>
-                  </td>
-
-                  <td className="p-3 text-right">
-                    <form action="/api/admin/update-role" method="POST" className="inline-flex gap-2">
-                      <input type="hidden" name="user_id" value={p.user_id || p.id} />
-                      <button type="submit" name="action" value="toggle_role" className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
-                        Toggle Role
-                      </button>
-                      <button type="submit" name="action" value="toggle_status" className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-lg transition">
-                        {p.status === 'suspended' ? 'Activate' : 'Suspend'}
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              );
-            });
-          })()}
-        </tbody>
-        <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold text-slate-900 text-xs">
-          {(() => {
-            const currentList = (window as any).__tempFilteredProfiles || [];
-            const filteredActiveCount = currentList.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
-            const filteredSuspendedCount = currentList.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
-            const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance ?? 0), 0);
-            const filteredEstCountSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedEstCount || 0), 0);
-            const filteredRevenueSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedRevenue || 0), 0);
-
-            return (
-              <tr><td colSpan={2} className="p-3"><div className="flex flex-col gap-1"><span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span><span className="text-slate-500 font-medium">Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong></span></div></td><td className={`p-3 text-center rounded-lg align-middle border ${filteredWalletSum < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : filteredWalletSum === 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{filteredWalletSum < 0 ? `- ₹ ${Math.abs(filteredWalletSum).toLocaleString('en-IN')}` : `₹ ${filteredWalletSum.toLocaleString('en-IN')}`}</td><td className="p-3"></td><td className="p-3 text-center text-blue-700 align-middle">{filteredEstCountSum} Estimates</td><td colSpan={4} className="p-3 text-emerald-700 align-middle">₹ {filteredRevenueSum.toLocaleString('en-IN')}</td></tr>
-            );
-          })()}
-        </tfoot>
-      </table>
-    </div>
-  )}
-</div>
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex flex-col justify-between">
+                  <InactiveUsersModal users={Array.isArray(dashboardData.inactiveUsers) ? dashboardData.inactiveUsers : []} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* --- USER ESTIMATES MODAL --- */}
         {selectedUserForEstimates && (
@@ -1418,201 +1562,211 @@ export default function AdminDashboardPage(props: {
         )}
 
         {/* Audit Logs */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">System Audit Trail & Security Compliance</h3>
-              <p className="text-xs text-slate-500">Chronological telemetry log of database changes, CRUD operations, and administrative actions.</p>
-            </div>
-            <button 
-              onClick={() => toggleSection('audit')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.audit ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-
-          {!hiddenSections.audit && (
-            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-              {dashboardData.auditLogs && dashboardData.auditLogs.length > 0 ? (
-                dashboardData.auditLogs.map((log: any, idx: number) => (
-                  <div key={idx} className="flex justify-between items-center p-3 bg-slate-50/70 border border-slate-100 rounded-2xl text-xs">
-                    <div className="flex items-center gap-3">
-                      <span className="px-2 py-1 bg-blue-100 text-blue-700 font-bold rounded-lg uppercase">{log.action_type || 'UPDATE'}</span>
-                      <span className="text-slate-700 font-medium">{log.description || log.table_name || 'System record modified'}</span>
-                    </div>
-                    <span className="text-slate-400">{new Date(log.created_at || Date.now()).toLocaleString()}</span>
-                  </div>
-                ))
-              ) : (
-                <div className="p-6 text-center text-slate-400 text-sm">No audit logs found.</div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Inactive Users */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">Dead User Engagement Analysis</h3>
-              <p className="text-xs text-slate-500">Monitor dormant user accounts based on custom inactivity thresholds.</p>
-            </div>
-            
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-              <div className="flex flex-wrap gap-1.5 bg-slate-50 p-1.5 rounded-2xl border">
-                {[10, 20, 30, 60, 90].map(d => (
-                  <Link 
-                    href={`/admin-dashboard?inactiveDays=${d}`} 
-                    key={d} 
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${inactiveDays === d ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'}`}
-                  >
-                    {d} Days
-                  </Link>
-                ))}
+        {isSectionVisible('AUDIT_TRAIL') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">System Audit Trail & Security Compliance</h3>
+                <p className="text-xs text-slate-500">Chronological telemetry log of database changes, CRUD operations, and administrative actions.</p>
               </div>
               <button 
-                onClick={() => toggleSection('inactive')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
+                onClick={() => toggleSection('audit')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
-                {hiddenSections.inactive ? 'Show [+]' : 'Hide [-]'}
+                {hiddenSections.audit ? 'Show [+]' : 'Hide [-]'}
               </button>
             </div>
-          </div>
-          
-          {!hiddenSections.inactive && (
-            <div className="max-h-64 overflow-y-auto pr-2 divide-y divide-slate-100">
-              {dashboardData.inactiveUsers && dashboardData.inactiveUsers.length > 0 ? (
-                dashboardData.inactiveUsers.map((u: any) => (
-                  <div key={u.user_id} className="flex justify-between items-center py-3 text-sm">
-                    <span className="text-slate-700 font-medium">{u.email}</span>
-                    <span className="text-xs px-2.5 py-1 bg-slate-100 text-slate-500 rounded-lg font-medium">
-                      Last login: {new Date(u.last_login).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="py-8 text-center text-slate-400 text-sm">No inactive users found for this threshold.</div>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* Razorpay Revenue Chart */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-800 text-base">Razorpay Revenue Analytics</h3>
-            <button 
-              onClick={() => toggleSection('razorpayChart')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.razorpayChart ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-          {!hiddenSections.razorpayChart && (
-            <RazorpayRevenueChart transactions={dashboardData.razorpayTransactions || []} />
-          )}
-        </div>
-
-        {/* MIS Metrics */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-slate-800 text-base">MIS & Financial Telemetry Metrics</h3>
-            <button 
-              onClick={() => toggleSection('mis')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.mis ? 'Show [+]' : 'Hide [-]'}
-            </button>
-          </div>
-
-          {!hiddenSections.mis && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
-                  <span>Cases (Month-wise)</span>
-                  <span className="text-xs text-slate-400 font-normal">Aggregated metrics</span>
-                </h3>
-                <div className="space-y-2">
-                  {dashboardData.monthlyCases?.map((item: any) => (
-                    <div key={item.month_name} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
-                      <span className="text-slate-600 font-medium">{item.month_name}</span>
-                      <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">{item.case_count} Cases</span>
+            {!hiddenSections.audit && (
+              <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                {dashboardData.auditLogs && dashboardData.auditLogs.length > 0 ? (
+                  dashboardData.auditLogs.map((log: any, idx: number) => (
+                    <div key={idx} className="flex justify-between items-center p-3 bg-slate-50/70 border border-slate-100 rounded-2xl text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className="px-2 py-1 bg-blue-100 text-blue-700 font-bold rounded-lg uppercase">{log.action_type || 'UPDATE'}</span>
+                        <span className="text-slate-700 font-medium">{log.description || log.table_name || 'System record modified'}</span>
+                      </div>
+                      <span className="text-slate-400">{new Date(log.created_at || Date.now()).toLocaleString()}</span>
                     </div>
-                  ))}
-                </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center text-slate-400 text-sm">No audit logs found.</div>
+                )}
               </div>
+            )}
+          </div>
+        )}
 
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
-                  <span>Cases (State-wise)</span>
-                  <span className="text-xs text-slate-400 font-normal">Geographic spread</span>
-                </h3>
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {stateCases && stateCases.length > 0 ? (
-                    stateCases.map((item: any, idx: number) => {
-                      const stateName = item.state_name || 'Not Specified';
-                      const caseCount = item.case_count ?? 0;
-
-                      return (
-                        <div key={idx} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
-                          <span className="text-slate-600 font-medium">{stateName}</span>
-                          <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">
-                            {caseCount} {caseCount === 1 ? 'Case' : 'Cases'}
-                          </span>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
-                      <span className="text-slate-600 font-medium">Not Specified</span>
-                      <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">0 Cases</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                 <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
-                  <span>Revenue (FY-wise)</span>
-                  <span className="text-xs text-slate-400 font-normal">Fiscal telemetry</span>
-                 </h3>
-                <div className="space-y-2">
-                  {dashboardData.fyData?.map((item: any) => (
-                    <div key={item.fy_label} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
-                      <span className="text-slate-600 font-medium">FY {item.fy_label}</span>
-                      <span className="font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-xl text-xs border border-emerald-100">₹ {Number(item.revenue).toLocaleString()}</span>
-                    </div>
-                  ))}
-                </div>
+        {/* Inactive Users */}
+        {isSectionVisible('INACTIVE_USERS') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Dead User Engagement Analysis</h3>
+                <p className="text-xs text-slate-500">Monitor dormant user accounts based on custom inactivity thresholds.</p>
               </div>
               
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                 <h3 className="font-bold text-slate-800 mb-4">Revenue Trend Line</h3>
-                 <DashboardChart data={dashboardData.records || []} />
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+                <div className="flex flex-wrap gap-1.5 bg-slate-50 p-1.5 rounded-2xl border">
+                  {[10, 20, 30, 60, 90].map(d => (
+                    <Link 
+                      href={`/admin-dashboard?inactiveDays=${d}`} 
+                      key={d} 
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${inactiveDays === d ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'}`}
+                    >
+                      {d} Days
+                    </Link>
+                  ))}
+                </div>
+                <button 
+                  onClick={() => toggleSection('inactive')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
+                >
+                  {hiddenSections.inactive ? 'Show [+]' : 'Hide [-]'}
+                </button>
               </div>
             </div>
-          )}
-        </div>
+            
+            {!hiddenSections.inactive && (
+              <div className="max-h-64 overflow-y-auto pr-2 divide-y divide-slate-100">
+                {dashboardData.inactiveUsers && dashboardData.inactiveUsers.length > 0 ? (
+                  dashboardData.inactiveUsers.map((u: any) => (
+                    <div key={u.user_id} className="flex justify-between items-center py-3 text-sm">
+                      <span className="text-slate-700 font-medium">{u.email}</span>
+                      <span className="text-xs px-2.5 py-1 bg-slate-100 text-slate-500 rounded-lg font-medium">
+                        Last login: {new Date(u.last_login).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-slate-400 text-sm">No inactive users found for this threshold.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Razorpay Revenue Chart */}
+        {isSectionVisible('RAZORPAY_CHART') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-slate-800 text-base">Razorpay Revenue Analytics</h3>
+              <button 
+                onClick={() => toggleSection('razorpayChart')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.razorpayChart ? 'Show [+]' : 'Hide [-]'}
+              </button>
+            </div>
+            {!hiddenSections.razorpayChart && (
+              <RazorpayRevenueChart transactions={dashboardData.razorpayTransactions || []} />
+            )}
+          </div>
+        )}
+
+        {/* MIS Metrics */}
+        {isSectionVisible('MIS_METRICS') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h3 className="font-bold text-slate-800 text-base">MIS & Financial Telemetry Metrics</h3>
+              <button 
+                onClick={() => toggleSection('mis')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.mis ? 'Show [+]' : 'Hide [-]'}
+              </button>
+            </div>
+
+            {!hiddenSections.mis && (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
+                    <span>Cases (Month-wise)</span>
+                    <span className="text-xs text-slate-400 font-normal">Aggregated metrics</span>
+                  </h3>
+                  <div className="space-y-2">
+                    {dashboardData.monthlyCases?.map((item: any) => (
+                      <div key={item.month_name} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
+                        <span className="text-slate-600 font-medium">{item.month_name}</span>
+                        <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">{item.case_count} Cases</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
+                    <span>Cases (State-wise)</span>
+                    <span className="text-xs text-slate-400 font-normal">Geographic spread</span>
+                  </h3>
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {stateCases && stateCases.length > 0 ? (
+                      stateCases.map((item: any, idx: number) => {
+                        const stateName = item.state_name || 'Not Specified';
+                        const caseCount = item.case_count ?? 0;
+
+                        return (
+                          <div key={idx} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
+                            <span className="text-slate-600 font-medium">{stateName}</span>
+                            <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">
+                              {caseCount} {caseCount === 1 ? 'Case' : 'Cases'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
+                        <span className="text-slate-600 font-medium">Not Specified</span>
+                        <span className="font-bold text-slate-900 bg-white px-3 py-1 rounded-xl text-xs border">0 Cases</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                   <h3 className="font-bold text-slate-800 mb-4 flex items-center justify-between">
+                    <span>Revenue (FY-wise)</span>
+                    <span className="text-xs text-slate-400 font-normal">Fiscal telemetry</span>
+                   </h3>
+                  <div className="space-y-2">
+                    {dashboardData.fyData?.map((item: any) => (
+                      <div key={item.fy_label} className="flex justify-between items-center py-2.5 border-b border-slate-200/50 text-sm">
+                        <span className="text-slate-600 font-medium">FY {item.fy_label}</span>
+                        <span className="font-bold text-emerald-600 bg-emerald-50 px-3 py-1 rounded-xl text-xs border border-emerald-100">₹ {Number(item.revenue).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                   <h3 className="font-bold text-slate-800 mb-4">Revenue Trend Line</h3>
+                   <DashboardChart data={dashboardData.records || []} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Razorpay Transactions Table */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">Payment Gateway & Dispute Operations</h3>
-              <span className="text-xs text-slate-400">Razorpay Live API Hook</span>
+        {isSectionVisible('GATEWAY_OPERATIONS') && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Payment Gateway & Dispute Operations</h3>
+                <span className="text-xs text-slate-400">Razorpay Live API Hook</span>
+              </div>
+              <button 
+                onClick={() => toggleSection('gateway')}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                {hiddenSections.gateway ? 'Show [+]' : 'Hide [-]'}
+              </button>
             </div>
-            <button 
-              onClick={() => toggleSection('gateway')}
-              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-            >
-              {hiddenSections.gateway ? 'Show [+]' : 'Hide [-]'}
-            </button>
+            {!hiddenSections.gateway && (
+              <RazorpayTableWithFilter transactions={dashboardData.razorpayTransactions || []} />
+            )}
           </div>
-          {!hiddenSections.gateway && (
-            <RazorpayTableWithFilter transactions={dashboardData.razorpayTransactions || []} />
-          )}
-        </div>
+        )}
 
       </div>
     </>

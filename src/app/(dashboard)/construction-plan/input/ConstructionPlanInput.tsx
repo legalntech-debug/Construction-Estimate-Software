@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import ClientDetailsSection from "../components/ClientDetailsSection";
 import PlotConfigSection from "../components/PlotConfigSection";
 import FloorManagerSection from "../components/FloorManagerSection";
+import FloorPlanningSettings from "../components/FloorPlanningSettings";
 import CadModalView from "../components/CadModalView";
-import { FloorData, FloorRoom, PlotDimensions, PlotShape } from "@/lib/constructionPlan/types";
-import { calculateSetbacks } from "@/lib/constructionPlan/setbackRules";
-import { generateCompleteConstructionPlan } from "@/lib/constructionPlan/planGenerator";
-import { generateCadVectorBlueprint } from "@/lib/constructionPlan/cad/cadRenderer";
+import { DEFAULT_FLOOR_PLANNING_SETTINGS, FloorData, FloorPlanningSettings as FloorPlanningSettingsType, FloorRoom, PlanningMode, PlotDimensions, PlotShape } from "../engine/planningTypes";
+import { calculateSetbacks } from "../engine/setbackRules";
+import { generateCompleteConstructionPlan } from "../engine/planGenerator";
+import { generateCadVectorBlueprint } from "../engine/cad/cadRenderer";
 import { supabase } from "@/lib/supabase";
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
@@ -50,10 +51,6 @@ export default function ConstructionPlanInput() {
   const [cadRotation, setCadRotation] = useState(0);
   const [cadText, setCadText] = useState("");
   const [panOffset] = useState({ x: 0, y: 0 });
-
-  // Combined CAD Modal State for "VIEW CONSTRUCTION PLAN"
-  const [isCombinedCadModalOpen, setIsCombinedCadModalOpen] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(0.85);
 
   const [measurementUnit, setMeasurementUnit] = useState<"FEET" | "METERS">("FEET");
   const [roadFacingOption, setRoadFacingOption] = useState("");
@@ -119,33 +116,32 @@ export default function ConstructionPlanInput() {
 
   const [floorData, setFloorData] = useState<Record<string, FloorData>>({
     "GROUND FLOOR": { 
-      width: frontWidthFt, 
-      length: depthFt, 
-      area: plotArea 
+      width: frontWidthFt > 0 ? frontWidthFt : 30, 
+      length: depthFt > 0 ? depthFt : 50, 
+      area: (frontWidthFt > 0 ? frontWidthFt : 30) * (depthFt > 0 ? depthFt : 50) 
     }
   });
 
-  // 👉 Ground Floor ke liye width = frontWidthFt, length = depthFt sync logic
+  // Ground Floor width = frontWidthFt, length = depthFt sync logic
   useEffect(() => {
+    if (frontWidthFt <= 0 || depthFt <= 0) return;
+
     const currentWidth = frontWidthFt;
     const currentLength = depthFt;
-    const calculatedArea = currentWidth * currentLength;
+    const calculatedArea = Number((currentWidth * currentLength).toFixed(2));
 
     setFloorData(prev => {
       const updated = { ...prev };
       selectedFloors.forEach(floor => {
         if (floor === "GROUND FLOOR") {
-          const isUnset = !updated[floor] || updated[floor].width === 0 || updated[floor].length === 0;
-          if (isUnset) {
-            updated[floor] = {
-              width: currentWidth,
-              length: currentLength,
-              area: calculatedArea > 0 ? calculatedArea : 0
-            };
-          }
+          updated[floor] = {
+            width: currentWidth,
+            length: currentLength,
+            area: calculatedArea
+          };
         } else {
           if (!updated[floor]) {
-            updated[floor] = { width: 0, length: 0, area: 0 };
+            updated[floor] = { width: currentWidth, length: currentLength, area: calculatedArea };
           }
         }
       });
@@ -206,7 +202,6 @@ export default function ConstructionPlanInput() {
     }));
   };
 
-  // 👉 Setbacks minus hone ke baad net dimensions update karna
   useEffect(() => {
     const rules = calculateSetbacks(
       plotArea,
@@ -239,10 +234,25 @@ export default function ConstructionPlanInput() {
   ]);
 
   const [floorBhkConfig, setFloorBhkConfig] = useState<Record<string, string>>({
-    "GROUND FLOOR": "CUSTOM"
+    "GROUND FLOOR": "AUTO"
   });
   const [roomEditorFloor, setRoomEditorFloor] = useState<string | null>(null);
   const [floorRooms, setFloorRooms] = useState<Record<string, Record<string, FloorRoom>>>({});
+  const [planningMode, setPlanningMode] = useState<PlanningMode>("AUTO");
+  const [floorSettings, setFloorSettings] = useState<Record<string, FloorPlanningSettingsType>>({
+    "GROUND FLOOR": { ...DEFAULT_FLOOR_PLANNING_SETTINGS },
+  });
+  const [settingsFloor, setSettingsFloor] = useState<string | null>(null);
+
+  useEffect(() => {
+    setFloorSettings(prev => {
+      const next = { ...prev };
+      selectedFloors.forEach(floor => {
+        if (!next[floor]) next[floor] = { ...DEFAULT_FLOOR_PLANNING_SETTINGS, planningMode };
+      });
+      return next;
+    });
+  }, [selectedFloors, planningMode]);
 
   const ROAD_FACING_OPTIONS = [
     "1 SIDE ROAD (NORTH)", "1 SIDE ROAD (SOUTH)", "1 SIDE ROAD (EAST)", "1 SIDE ROAD (WEST)",
@@ -260,7 +270,7 @@ export default function ConstructionPlanInput() {
     "L-SHAPE (TYPE 5: LEFT-RECESSED)", "L-SHAPE (TYPE 6: RIGHT-RECESSED)",
   ] as const;
 
-  const BHK_CONFIGURATIONS = ["CUSTOM", "1 BHK", "2 BHK", "3 BHK", "DUPLEX"];
+  const BHK_CONFIGURATIONS = ["AUTO", "CUSTOM", "1 BHK", "2 BHK", "3 BHK", "4 BHK", "DUPLEX"];
 
   const handleClientChange = (name: string) => {
     setSelectedClientName(name);
@@ -335,6 +345,20 @@ export default function ConstructionPlanInput() {
     setPlotShape("");
   };
 
+  const ensureFloorSettings = (floor: string) => {
+    setFloorSettings(prev => prev[floor] ? prev : { ...prev, [floor]: { ...DEFAULT_FLOOR_PLANNING_SETTINGS, planningMode } });
+  };
+
+  const updateFloorSettings = (floor: string, settings: Partial<FloorPlanningSettingsType> | FloorPlanningSettingsType) => {
+    setFloorSettings(prev => ({
+      ...prev,
+      [floor]: {
+        ...(prev[floor] || DEFAULT_FLOOR_PLANNING_SETTINGS),
+        ...settings,
+      }
+    }));
+  };
+
   const applyBhkTemplate = (floor: string, bhkType: string) => {
     setFloorBhkConfig(prev => ({ ...prev, [floor]: bhkType }));
   };
@@ -382,8 +406,11 @@ export default function ConstructionPlanInput() {
     setPlotShape("");
     handleResetDimensions();
     setSelectedFloors(DEFAULT_FLOORS);
-    setFloorData({ "GROUND FLOOR": { width: 0, length: 0, area: 0 } });
+    setFloorData({ "GROUND FLOOR": { width: 30, length: 50, area: 1500 } });
     setFloorRooms({});
+    setPlanningMode("AUTO");
+    setFloorSettings({ "GROUND FLOOR": { ...DEFAULT_FLOOR_PLANNING_SETTINGS } });
+    setSettingsFloor(null);
     setBoundaryNorth("");
     setBoundarySouth("");
     setBoundaryEast("");
@@ -392,31 +419,42 @@ export default function ConstructionPlanInput() {
   };
 
   const handleGeneratePlan = () => {
-    const payload = {
-      caseType,
-      customerName,
-      propertyAddress,
-      selectedClientName,
-      representative,
-      measurementUnit,
-      roadFacingOption,
-      plotShape,
-      plotArea,
-      coverageType,
-      plotDimensions,
-      dimDetails,
-      setbackInputs,
-      boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
-      selectedFloors,
-      floorData,
-      floorBhkConfig,
-      floorRooms,
-      createdAt: new Date().toISOString()
-    };
+    try {
+      const inputPayload = {
+        caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
+        selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
+        plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
+        boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
+        selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
+        createdAt: new Date().toISOString(),
+      };
 
-    localStorage.setItem("construction_plan_preview_data", JSON.stringify(payload));
-    alert("Construction Plan generated successfully! Redirecting to preview...");
-    router.push("/construction-plan-preview");
+      // IMPORTANT: Generate the architectural model ONCE here.
+      // The preview receives these exact room x/y/w/h values, so no second/fallback
+      // planner is allowed to move the rooms after this button is clicked.
+      const generated = generateCompleteConstructionPlan(inputPayload);
+
+      const previewPayload = {
+        ...inputPayload,
+        floorData: generated.floorData,
+        floorRooms: generated.floorRooms,
+        generatedFloorPlans: generated.floors,
+        generatedConstructionPlan: generated,
+        plotGeometry: generated.plotGeometry,
+        buildableGeometry: generated.buildableGeometry,
+        setbackRules: generated.setbackRules,
+        elevation: generated.elevation,
+        section: generated.section,
+        generatedAt: generated.generatedAt,
+        previewVersion: 2,
+      };
+
+      localStorage.setItem("construction_plan_preview_data", JSON.stringify(previewPayload));
+      router.push("/construction-plan-preview");
+    } catch (error) {
+      console.error("Construction plan generation failed:", error);
+      alert("Plan generation failed. Please check plot, floor size and room requirements.");
+    }
   };
 
   const currentPayload = useMemo(() => {
@@ -426,77 +464,56 @@ export default function ConstructionPlanInput() {
       room_details: floorRooms,
       selected_floors: selectedFloors,
       road_side: roadFacingOption,
-      boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest }
+      boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
+      planning_mode: planningMode,
+      floor_settings: floorSettings
     };
-  }, [plotDimensions, floorData, floorRooms, selectedFloors, roadFacingOption, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
+  }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
 
-  const completePlan = useMemo(() => {
+  // SINGLE SOURCE OF TRUTH FOR LIVE CAD: use the exact same master generator
+  // used by the final GENERATE PLAN action. This prevents CAD and Preview from
+  // inventing different room positions.
+  const liveGeneratedPlan = useMemo(() => {
     try {
-      return generateCompleteConstructionPlan(currentPayload as any);
-    } catch {
-      return { plotArea: plotArea };
-    }
-  }, [currentPayload, plotArea]);
-
-  const cadBlueprint = useMemo(() => {
-    try {
-      return generateCadVectorBlueprint(
-        plotDimensions,
-        (completePlan as any).footprint || {},
-        floorData,
-        floorRooms,
-        (selectedFloors[0] || "GROUND FLOOR") as any,
-        roadFacingOption
-      );
-    } catch {
+      return generateCompleteConstructionPlan({
+        caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
+        selectedClientName, representative, measurementUnit,
+        roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
+        plotShape: plotShape || "RECTANGULAR",
+        plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
+        boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
+        selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
+      });
+    } catch (error) {
+      console.warn("Live construction-plan generation preview fallback:", error);
       return null;
     }
-  }, [plotDimensions, completePlan, floorData, floorRooms, selectedFloors, roadFacingOption]);
+  }, [
+    caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
+    selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
+    plotArea, coverageType, plotDimensions, dimDetails, setbackInputs, boundaryNorth,
+    boundarySouth, boundaryEast, boundaryWest, selectedFloors, floorData, floorBhkConfig,
+    floorRooms, planningMode, floorSettings
+  ]);
 
-  const hasTower = selectedFloors.includes("TOWER");
+  const enrichedFloorData = useMemo(() => {
+    if (liveGeneratedPlan?.floorData) return liveGeneratedPlan.floorData;
+    const result: Record<string, any> = {};
+    selectedFloors.forEach((floor) => {
+      result[floor] = floorData[floor] || { width: frontWidthFt || 30, length: depthFt || 50, area: plotArea || 1500, rooms: [] };
+    });
+    return result;
+  }, [liveGeneratedPlan, selectedFloors, floorData, frontWidthFt, depthFt, plotArea]);
 
-  const renderModalFloorPlan = (floorName: string) => {
-    if (!cadBlueprint) return null;
-    const rooms = cadBlueprint.getRoomsForFloor(floorName);
-
-    return (
-      <svg viewBox={cadBlueprint.viewBox} className="w-full h-[320px] bg-white">
-        <rect x="20" y="20" width={cadBlueprint.plotWidth} height={cadBlueprint.plotDepth} fill="white" stroke="black" strokeWidth="2" />
-        {rooms.map((room: any, index: number) => {
-          if (room.isOpen) return null;
-          return (
-            <g key={`modal-room-${room.key}-${index}`}>
-              <rect x={room.x} y={room.y} width={room.w} height={room.h} fill="white" stroke="black" strokeWidth="1" />
-              <text x={room.x + room.w / 2} y={room.y + room.h / 2 - 4} textAnchor="middle" dominantBaseline="middle" fontSize="6" fontWeight="900">{room.name}</text>
-              <text x={room.x + room.w / 2} y={room.y + room.h / 2 + 7} textAnchor="middle" dominantBaseline="middle" fontSize="5" fontWeight="700">{room.area} SQ.FT</text>
-            </g>
-          );
-        })}
-        <text x={cadBlueprint.plotWidth / 2 + 20} y="12" textAnchor="middle" fontSize="8" fontWeight="900">NORTH ↑</text>
-      </svg>
-    );
-  };
-
-  const renderModalFrontElevation = () => (
-    <svg viewBox="0 0 300 320" className="w-full h-[320px] bg-white">
-      <rect x="50" y="80" width="200" height="200" fill="white" stroke="black" strokeWidth="2" />
-      <line x1="30" y1="280" x2="270" y2="280" stroke="black" strokeWidth="3" />
-      <polygon points="50,80 150,20 250,80" fill="white" stroke="black" strokeWidth="2" />
-      <rect x="130" y="210" width="40" height="70" fill="white" stroke="black" strokeWidth="1.5" />
-      <text x="150" y="305" textAnchor="middle" fontSize="9" fontWeight="900">FRONT ELEVATION</text>
-    </svg>
-  );
-
-  const renderModalSectionView = () => (
-    <svg viewBox="0 0 300 320" className="w-full h-[320px] bg-white">
-      <rect x="80" y="60" width="140" height="220" fill="white" stroke="black" strokeWidth="2" />
-      <line x1="30" y1="280" x2="270" y2="280" stroke="black" strokeWidth="3" />
-      <line x1="80" y1="170" x2="220" y2="170" stroke="black" strokeWidth="1.5" strokeDasharray="4" />
-      <text x="150" y="120" textAnchor="middle" fontSize="8" fontWeight="700">FIRST FLOOR SLAB</text>
-      <text x="150" y="230" textAnchor="middle" fontSize="8" fontWeight="700">GROUND FLOOR SLAB</text>
-      <text x="150" y="305" textAnchor="middle" fontSize="9" fontWeight="900">SECTION VIEW (A-A' )</text>
-    </svg>
-  );
+  // CAD receives the exact generated x/y/w/h geometry from the master engine.
+  const generatedCadFloorRooms = useMemo(() => {
+    if (liveGeneratedPlan?.floorRooms) return liveGeneratedPlan.floorRooms;
+    const result: Record<string, FloorRoom[]> = {};
+    selectedFloors.forEach((floor) => {
+      result[floor] = Array.isArray(enrichedFloorData[floor]?.rooms) ? enrichedFloorData[floor].rooms as FloorRoom[] : [];
+    });
+    return result;
+  }, [liveGeneratedPlan, selectedFloors, enrichedFloorData]);
 
   const isMultiDimShape = typeof plotShape === "string" && plotShape.includes("L-SHAPE");
 
@@ -572,11 +589,17 @@ export default function ConstructionPlanInput() {
       />
 
       <FloorManagerSection
-        selectedFloors={selectedFloors}
-        floorData={floorData}
-        floorBhkConfig={floorBhkConfig}
+        selectedFloors={selectedFloors || []}
+        floorData={floorData || {}}
+        floorBhkConfig={floorBhkConfig || {}}
         roomEditorFloor={roomEditorFloor}
-        floorRooms={floorRooms}
+        floorRooms={floorRooms || {}}
+        planningMode={planningMode}
+        setPlanningMode={setPlanningMode}
+        floorSettings={floorSettings || {}}
+        settingsFloor={settingsFloor}
+        setSettingsFloor={(floor) => { if (floor) ensureFloorSettings(floor); setSettingsFloor(floor); }}
+        updateFloorSettings={updateFloorSettings}
         updateFloorAreaDirect={updateFloorAreaDirect}
         updateFloorDimensions={updateFloorDimensions}
         applyBhkTemplate={applyBhkTemplate}
@@ -591,14 +614,29 @@ export default function ConstructionPlanInput() {
         groundCoverage={coverageType}
       />
 
-      <div className="flex gap-2 border-t-2 border-black pt-3">
-        <button type="button" onClick={() => setIsCadModalOpen(true)} className="bg-blue-700 text-white px-6 py-3 text-xs font-black cursor-pointer">
+      <div className="flex flex-wrap gap-2 border-t-2 border-black pt-3">
+        <button 
+          type="button" 
+          onClick={() => {
+            console.log("======== 🔍 INPUT PAGE PAYLOAD DEBUG START ========");
+            console.log("► Plot Dimensions:", plotDimensions);
+            console.log("► Dim Details (A,B,C,D):", dimDetails);
+            console.log("► Front Width (Ft):", frontWidthFt, "| Depth (Ft):", depthFt);
+            console.log("► Floor Data Sync State:", floorData);
+            console.log("► Floor BHK Config:", floorBhkConfig);
+            console.log("► Floor Rooms Selection:", floorRooms);
+            console.log("► Setbacks / MOS:", setbackInputs);
+            console.log("======== 🔍 INPUT PAGE PAYLOAD DEBUG END ========");
+            setIsCadModalOpen(true);
+          }} 
+          className="bg-blue-700 hover:bg-blue-800 text-white px-6 py-3 text-xs font-black cursor-pointer uppercase transition"
+        >
           OPEN CAD LAYOUT
         </button>
-        <button type="button" onClick={handleGeneratePlan} className="bg-black text-white px-6 py-3 text-xs font-black cursor-pointer">
+        <button type="button" onClick={handleGeneratePlan} className="bg-black hover:bg-zinc-800 text-white px-6 py-3 text-xs font-black cursor-pointer uppercase transition">
           GENERATE PLAN
         </button>
-        <button type="button" onClick={handleClearForm} className="bg-red-600 text-white px-6 py-3 text-xs font-black cursor-pointer">
+        <button type="button" onClick={handleClearForm} className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 text-xs font-black cursor-pointer uppercase transition">
           CLEAR DATA
         </button>
       </div>
@@ -652,7 +690,7 @@ export default function ConstructionPlanInput() {
         totalFloors={selectedFloors.length}
         selectedFloors={selectedFloors}
         floorBuiltUpAreas={floorBuiltUpAreas}
-        floorData={floorData}
+        floorData={enrichedFloorData}
         
         frontMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.front}
         rearMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.rear}
@@ -662,84 +700,12 @@ export default function ConstructionPlanInput() {
         setRearMos={(val) => setSetbackInputs(prev => ({ ...prev, rear: val }))}
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
+
+        floorRooms={generatedCadFloorRooms}
+        floorSettings={floorSettings}
+        floorBhkConfig={floorBhkConfig}
+        planningMode={planningMode}
       />
-
-      {/* COMBINED CAD MODAL VIEWER */}
-      {isCombinedCadModalOpen && cadBlueprint && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
-          <div className="w-full max-w-[1500px] flex justify-between items-center bg-white p-3 border-2 border-black mb-2 shadow-md">
-            <h3 className="font-black text-sm">COMBINED CAD ARCHITECTURAL DRAWINGS SHEET</h3>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] font-black">ZOOM</span>
-              <button type="button" onClick={() => setZoomLevel((v) => Math.max(0.5, v - 0.1))} className="px-3 py-1 bg-gray-200 border border-black font-black cursor-pointer">−</button>
-              <span className="w-12 text-center text-xs font-black">{Math.round(zoomLevel * 100)}%</span>
-              <button type="button" onClick={() => setZoomLevel((v) => Math.min(1.5, v + 0.1))} className="px-3 py-1 bg-gray-200 border border-black font-black cursor-pointer">+</button>
-              <button type="button" onClick={() => setZoomLevel(0.85)} className="px-3 py-1 bg-black text-white font-black text-xs cursor-pointer">RESET</button>
-              <button type="button" onClick={() => setIsCombinedCadModalOpen(false)} className="bg-red-600 text-white px-4 py-2 text-xs font-black cursor-pointer hover:bg-red-700">CLOSE VIEWER</button>
-            </div>
-          </div>
-
-          <div className="w-full overflow-auto flex justify-center py-2 max-h-[85vh] bg-gray-200">
-            <div style={{ transform: `scale(${zoomLevel})`, transformOrigin: "top center" }} className="border-2 border-black w-[1450px] bg-white text-[9px] p-6 shadow-2xl shrink-0 flex flex-col gap-6 uppercase">
-              <div className="border-b-2 border-black pb-3">
-                <div className="text-center font-black text-base tracking-wide">PROPOSED RESIDENTIAL BUILDING ON {selectedFloors.join(" + ")}</div>
-                <div className="text-center text-[9px] font-bold mt-1 tracking-wider text-gray-700">PLOT AREA: {plotArea} SQ.FT | DIMENSIONS: {plotDimensions.A}' × {plotDimensions.C}' | ROAD: {roadFacingOption || "NOT SPECIFIED"}</div>
-              </div>
-
-              <div className="grid grid-cols-4 gap-6 items-end pb-4">
-                {selectedFloors.map((floorName: string) => {
-                  const fArea = Number(floorData?.[floorName]?.area || 0);
-                  return (
-                    <div key={floorName} className="flex flex-col bg-white border border-black p-2 relative shadow-sm">
-                      <div className="border border-black mb-2">{renderModalFloorPlan(floorName)}</div>
-                      <div className="text-center pt-1 border-t border-black bg-gray-50">
-                        <div className="font-black text-[10px]">{floorName}</div>
-                        <div className="font-bold text-[8px] text-gray-800">{fArea.toFixed(2)} SQ.FT BUILT-UP</div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {!hasTower && (
-                  <>
-                    <div className="flex flex-col bg-white border border-black p-2 relative shadow-sm">
-                      <div className="border border-black mb-2">{renderModalFrontElevation()}</div>
-                      <div className="text-center pt-1 border-t border-black bg-gray-50">
-                        <div className="font-black text-[10px]">FRONT ELEVATION</div>
-                        <div className="font-bold text-[8px] text-gray-800">ARCHITECTURAL VIEW</div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col bg-white border border-black p-2 relative shadow-sm">
-                      <div className="border border-black mb-2">{renderModalSectionView()}</div>
-                      <div className="text-center pt-1 border-t border-black bg-gray-50">
-                        <div className="font-black text-[10px]">SECTION VIEW</div>
-                        <div className="font-bold text-[8px] text-gray-800">CROSS SECTION (A-A')</div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div className="flex flex-col bg-white border border-black p-2 relative shadow-sm">
-                  <div className="border border-black mb-2">
-                    <svg viewBox={`0 0 ${cadBlueprint.plotWidth + 120} ${cadBlueprint.plotDepth + 80}`} className="w-full h-[320px] bg-white">
-                      <text x={40 + cadBlueprint.plotWidth / 2} y="15" textAnchor="middle" fontSize="8" fontWeight="900">NORTH ↑</text>
-                      <rect x="40" y="30" width={cadBlueprint.plotWidth} height={cadBlueprint.plotDepth} fill="white" stroke="black" strokeWidth="2" />
-                      <text x={40 + cadBlueprint.plotWidth / 2} y={30 + cadBlueprint.plotDepth / 2} textAnchor="middle" dominantBaseline="middle" fontSize="9" fontWeight="900">PROPOSED SITE</text>
-                      <text x={40 + cadBlueprint.plotWidth / 2} y={30 + cadBlueprint.plotDepth + 15} textAnchor="middle" fontSize="7" fontWeight="900">{boundarySouth || "ROAD"}</text>
-                      <rect x="40" y={30 + cadBlueprint.plotDepth + 20} width={cadBlueprint.plotWidth} height="15" fill="#e2e8f0" stroke="black" />
-                      <text x={40 + cadBlueprint.plotWidth / 2} y={30 + cadBlueprint.plotDepth + 30} textAnchor="middle" fontSize="7" fontWeight="900">ROAD</text>
-                    </svg>
-                  </div>
-                  <div className="text-center pt-1 border-t border-black bg-gray-50">
-                    <div className="font-black text-[10px]">SITE LAYOUT</div>
-                    <div className="font-bold text-[8px] text-gray-800">PLOT: {plotArea} SQ.FT</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Floor Selection Modal */}
       {isFloorModalOpen && (

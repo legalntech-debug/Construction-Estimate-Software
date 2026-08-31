@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { PlotDimensions, PlotShape } from "@/lib/constructionPlan/types";
+import { PlotDimensions, PlotShape } from "../engine/planningTypes";
 
 
 interface PlotConfigSectionProps {

@@ -1,5 +1,5 @@
 import React from "react";
-import { PlotDimensions } from "@/lib/constructionPlan/types";
+import { PlotDimensions } from "../engine/planningTypes";
 
 interface CadSidebarDimensionsProps {
   editModeToggle: "PLOT" | "MOS";
@@ -154,15 +154,15 @@ export default function CadSidebarDimensions({
                     type="number"
                     value={displayLength}
                     onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (side === "B") {
-                        updateDimensionPart("A", "ft", val);
-                      } else if (side === "D") {
-                        updateDimensionPart("C", "ft", val);
-                      } else {
-                        updateDimensionPart(side as any, "ft", val);
-                      }
-                    }}
+  const val = Number(e.target.value);
+  if (side === "B") {
+    updateDimensionPart("A" as keyof PlotDimensions, "ft", val);
+  } else if (side === "D") {
+    updateDimensionPart("C" as keyof PlotDimensions, "ft", val);
+  } else {
+    updateDimensionPart(side as any, "ft", val);
+  }
+}}
                     className="w-full bg-transparent text-center font-black text-[9px] text-black outline-none"
                   />
                 </div>

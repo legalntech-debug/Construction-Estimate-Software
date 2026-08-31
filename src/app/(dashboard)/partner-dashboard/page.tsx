@@ -5,11 +5,12 @@ import { createBrowserClient } from '@supabase/ssr';
 import { 
   Wallet, Users, UserPlus, Lock, Search, CreditCard, ArrowUpRight, 
   Landmark, X, PlusCircle, Filter, Eye, EyeOff, LogOut, 
-  AlertTriangle, PhoneCall, UserX, ExternalLink, Calculator
+  AlertTriangle, PhoneCall, UserX, ExternalLink, Calculator, CheckCircle
 } from 'lucide-react';
 import AddUserModal from './components/AddUserModal';
 import PartnerProfileCard from './components/PartnerProfileCard';
 import PayoutBreakdownModal from './components/PayoutBreakdownModal';
+import PartnerApprovalLockModal from './components/PartnerApprovalLockModal';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,6 +22,13 @@ export default function PartnerDashboardPage() {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [isAdminOrCEO, setIsAdminOrCEO] = useState(false);
+  const [isLevel1Approver, setIsLevel1Approver] = useState(false);
+
+  // Approval Verification State
+  const [hasPartnerAccount, setHasPartnerAccount] = useState<boolean>(true);
+  const [approvalStatus, setApprovalStatus] = useState<string>('PENDING');
+  const [approvedByLevel1, setApprovedByLevel1] = useState<string | null>(null);
+  const [approvedByAdmin, setApprovedByAdmin] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'network' | 'settlement'>('network');
   const [isUnlocked, setIsUnlocked] = useState(false);
@@ -86,7 +94,10 @@ export default function PartnerDashboardPage() {
 
     setProfile(userProfile);
     const hasAdminAccess = ['Admin', 'admin', 'CEO', 'ceo'].includes(userProfile?.user_type || userProfile?.role);
+    const isL1 = ['Co-Partner', 'CO PARTNER', 'ENGINEER', 'CEO', 'Admin'].includes(userProfile?.role || userProfile?.user_type);
+    
     setIsAdminOrCEO(hasAdminAccess);
+    setIsLevel1Approver(isL1);
 
     if (hasAdminAccess) {
       const { data: partners } = await supabase
@@ -104,6 +115,9 @@ export default function PartnerDashboardPage() {
       if (partnerList.length > 0) {
         setSelectedPartnerId(partnerList[0].partner_id);
         setPartnerProfile(partnerList[0]);
+        setApprovalStatus(partnerList[0].approval_status || 'PENDING');
+        setApprovedByLevel1(partnerList[0].approved_by_level1);
+        setApprovedByAdmin(partnerList[0].approved_by_admin);
         await loadPartnerDetails(partnerList[0].partner_id, partnerList[0].user_id);
       }
     } else {
@@ -113,9 +127,17 @@ export default function PartnerDashboardPage() {
         .eq('user_id', session.user.id)
         .maybeSingle();
 
-      if (partnerData) {
+      if (!partnerData) {
+        setHasPartnerAccount(false);
+      } else {
+        setHasPartnerAccount(true);
         setPartnerProfile(partnerData);
-        await loadPartnerDetails(partnerData.partner_id, session.user.id);
+        setApprovalStatus(partnerData.approval_status || 'PENDING');
+        setApprovedByLevel1(partnerData.approved_by_level1);
+        setApprovedByAdmin(partnerData.approved_by_admin);
+        if (partnerData.approval_status === 'APPROVED') {
+          await loadPartnerDetails(partnerData.partner_id, session.user.id);
+        }
       }
     }
     setLoading(false);
@@ -249,6 +271,33 @@ export default function PartnerDashboardPage() {
     setTotalSettled(calculatedTotalSettled);
   };
 
+  // Inside handleApprovePartner function in PartnerDashboardPage.tsx:
+
+const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | 'ADMIN') => {
+  const approverName = profile?.full_name || (level === 'LEVEL1' ? 'LEVEL_1_APPROVER' : 'ADMIN');
+  const updatePayload: any = {};
+
+  if (level === 'LEVEL1') {
+    // Madhusmita or Jayant Approval
+    updatePayload.approved_by_level1 = approverName;
+  } else if (level === 'ADMIN') {
+    // DRC Consultant Final Approval
+    updatePayload.approved_by_admin = approverName;
+    updatePayload.approval_status = 'APPROVED';
+  }
+
+  const { error } = await supabase
+    .from('partner_profiles')
+    .update(updatePayload)
+    .eq('partner_id', targetPartnerId);
+
+  if (!error) {
+    await fetchInitialData();
+  } else {
+    alert('Approval Error: ' + error.message);
+  }
+};
+
   const filteredReferredUsers = useMemo(() => {
     return referredUsers.filter((u) => {
       const uDate = u.rawDate ? new Date(u.rawDate) : new Date();
@@ -317,6 +366,21 @@ export default function PartnerDashboardPage() {
 
   if (loading) return <div className="p-8 text-center text-slate-300 bg-slate-950 min-h-screen font-mono">LOADING LEDGER...</div>;
 
+  // 1. APPROVAL LOCK GUARD (IF NOT APPROVED & NOT ADMIN)
+  if ((!hasPartnerAccount || approvalStatus !== 'APPROVED') && !isAdminOrCEO) {
+    return (
+      <PartnerApprovalLockModal
+        userId={session.user.id}
+        hasAccount={hasPartnerAccount}
+        approvalStatus={approvalStatus}
+        approvedByLevel1={approvedByLevel1}
+        approvedByAdmin={approvedByAdmin}
+        onRefresh={fetchInitialData}
+      />
+    );
+  }
+
+  // 2. SECURITY PASSWORD LOCK GUARD
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -369,17 +433,42 @@ export default function PartnerDashboardPage() {
                   onChange={(e) => {
                     setSelectedPartnerId(e.target.value);
                     const selected = allPartners.find((p) => p.partner_id === e.target.value);
-                    if (selected) { setPartnerProfile(selected); loadPartnerDetails(selected.partner_id, selected.user_id); }
+                    if (selected) { 
+                      setPartnerProfile(selected); 
+                      setApprovalStatus(selected.approval_status || 'PENDING');
+                      setApprovedByLevel1(selected.approved_by_level1);
+                      setApprovedByAdmin(selected.approved_by_admin);
+                      loadPartnerDetails(selected.partner_id, selected.user_id); 
+                    }
                   }}
                   className="bg-slate-950 text-white text-xs p-1.5 rounded-lg border border-slate-700 focus:outline-none"
                 >
                   {allPartners.map((p) => (
                     <option key={p.partner_id} value={p.partner_id}>
-                      {p.profiles?.full_name || 'Partner'} ({p.profiles?.mobile || 'No Mobile'})
+                      {p.profiles?.full_name || 'Partner'} ({p.approval_status || 'PENDING'})
                     </option>
                   ))}
                 </select>
               </div>
+
+              {partnerProfile && partnerProfile.approval_status !== 'APPROVED' && (
+                <div className="flex items-center gap-1.5">
+                  {!partnerProfile.approved_by_level1 && (
+                    <button 
+                      onClick={() => handleApprovePartner(partnerProfile.partner_id, 'LEVEL1')}
+                      className="bg-indigo-700 hover:bg-indigo-600 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1"
+                    >
+                      <CheckCircle size={12} /> APPROVE (LEVEL 1)
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => handleApprovePartner(partnerProfile.partner_id, 'ADMIN')}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
+                  >
+                    <CheckCircle size={12} /> FINAL ADMIN APPROVAL
+                  </button>
+                </div>
+              )}
 
               <button 
                 onClick={() => setShowPayoutModal(true)}
@@ -396,10 +485,8 @@ export default function PartnerDashboardPage() {
         </div>
       </div>
 
-      {/* PARTNER PROFILE DETAILS COMPONENT */}
       <PartnerProfileCard partnerProfile={partnerProfile} />
 
-      {/* METRIC CARDS */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
           <div>
@@ -460,7 +547,6 @@ export default function PartnerDashboardPage() {
         </div>
       </div>
 
-      {/* NEGATIVE WALLET NOTICE */}
       {isNegativeWallet && (
         <div className="bg-amber-950/40 border border-amber-800/80 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-amber-300 text-[11px]">
           <div className="flex items-center gap-2">
@@ -481,7 +567,6 @@ export default function PartnerDashboardPage() {
         </div>
       )}
 
-      {/* TAB NAVIGATION & TOOLBAR */}
       <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-2xl flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-md">
         <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 shrink-0">
           <button
@@ -561,7 +646,6 @@ export default function PartnerDashboardPage() {
         </div>
       </div>
 
-      {/* TABLES VIEW */}
       {activeTab === 'network' ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <div className="p-3 border-b border-slate-800 bg-slate-900/60 flex items-center justify-between">
@@ -626,7 +710,6 @@ export default function PartnerDashboardPage() {
                 )}
               </tbody>
               
-              {/* SUMMARY TOTAL FOOTER */}
               {filteredReferredUsers.length > 0 && (
                 <tfoot>
                   <tr className="bg-slate-950 font-black text-white border-t-2 border-indigo-500 uppercase">
@@ -697,7 +780,6 @@ export default function PartnerDashboardPage() {
         </div>
       )}
 
-      {/* MODAL: BREAKDOWN POPUP */}
       {showBreakdownModal && (
         <PayoutBreakdownModal
           onClose={() => setShowBreakdownModal(false)}
@@ -709,7 +791,6 @@ export default function PartnerDashboardPage() {
         />
       )}
 
-      {/* MODAL: ADD USER */}
       {showAddUserModal && (
         <AddUserModal
           partnerProfile={partnerProfile}
@@ -722,7 +803,6 @@ export default function PartnerDashboardPage() {
         />
       )}
 
-      {/* MODAL: RECORD PAYOUT SETTLEMENT */}
       {showPayoutModal && isAdminOrCEO && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-lg space-y-3 shadow-2xl">

@@ -63,9 +63,16 @@ export default function ConstructionPlanInput() {
   const [blueprintZoom, setBlueprintZoom] = useState(1.0);
   const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
   
-  // Initial dimensions set to 0
   const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
-    A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
+    A: 0,
+    B: 0,
+    C: 0,
+    D: 0,
+    E: 0,
+    F: 0,
+    length: 0,
+    width: 0,
+    area: 0
   });
   
   const [dimDetails, setDimDetails] = useState<Record<string, { ft: number; in: number }>>({
@@ -333,7 +340,10 @@ export default function ConstructionPlanInput() {
   };
 
   const handleResetDimensions = () => {
-    setPlotDimensions({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+    setPlotDimensions({ 
+      A: 0, B: 0, C: 0, D: 0, E: 0, F: 0,
+      length: 0, width: 0, area: 0 
+    });
     setDimDetails({
       A: { ft: 0, in: 0 },
       B: { ft: 0, in: 0 },
@@ -342,7 +352,7 @@ export default function ConstructionPlanInput() {
     });
     setDimensionHistory([]);
     setRoadFacingOption("");
-    setPlotShape("");
+    setPlotShape("" as any);
   };
 
   const ensureFloorSettings = (floor: string) => {
@@ -403,7 +413,7 @@ export default function ConstructionPlanInput() {
     setSelectedClientName("");
     setRepresentative("");
     setRoadFacingOption("");
-    setPlotShape("");
+    setPlotShape("" as any);
     handleResetDimensions();
     setSelectedFloors(DEFAULT_FLOORS);
     setFloorData({ "GROUND FLOOR": { width: 30, length: 50, area: 1500 } });
@@ -429,9 +439,6 @@ export default function ConstructionPlanInput() {
         createdAt: new Date().toISOString(),
       };
 
-      // IMPORTANT: Generate the architectural model ONCE here.
-      // The preview receives these exact room x/y/w/h values, so no second/fallback
-      // planner is allowed to move the rooms after this button is clicked.
       const generated = generateCompleteConstructionPlan(inputPayload);
 
       const previewPayload = {
@@ -470,9 +477,6 @@ export default function ConstructionPlanInput() {
     };
   }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
 
-  // SINGLE SOURCE OF TRUTH FOR LIVE CAD: use the exact same master generator
-  // used by the final GENERATE PLAN action. This prevents CAD and Preview from
-  // inventing different room positions.
   const liveGeneratedPlan = useMemo(() => {
     try {
       return generateCompleteConstructionPlan({
@@ -504,16 +508,6 @@ export default function ConstructionPlanInput() {
     });
     return result;
   }, [liveGeneratedPlan, selectedFloors, floorData, frontWidthFt, depthFt, plotArea]);
-
-  // CAD receives the exact generated x/y/w/h geometry from the master engine.
-  const generatedCadFloorRooms = useMemo(() => {
-    if (liveGeneratedPlan?.floorRooms) return liveGeneratedPlan.floorRooms;
-    const result: Record<string, FloorRoom[]> = {};
-    selectedFloors.forEach((floor) => {
-      result[floor] = Array.isArray(enrichedFloorData[floor]?.rooms) ? enrichedFloorData[floor].rooms as FloorRoom[] : [];
-    });
-    return result;
-  }, [liveGeneratedPlan, selectedFloors, enrichedFloorData]);
 
   const isMultiDimShape = typeof plotShape === "string" && plotShape.includes("L-SHAPE");
 
@@ -594,7 +588,7 @@ export default function ConstructionPlanInput() {
         floorBhkConfig={floorBhkConfig || {}}
         roomEditorFloor={roomEditorFloor}
         floorRooms={floorRooms || {}}
-        planningMode={planningMode}
+        planningMode={planningMode === "PRESET" ? "AUTO" : planningMode}
         setPlanningMode={setPlanningMode}
         floorSettings={floorSettings || {}}
         settingsFloor={settingsFloor}
@@ -701,7 +695,7 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-        floorRooms={generatedCadFloorRooms}
+        floorRooms={floorRooms}
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}
         planningMode={planningMode}

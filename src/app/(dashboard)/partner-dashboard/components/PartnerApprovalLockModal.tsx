@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { ShieldAlert, RefreshCw, Send, CheckCircle2, User, Phone, Mail, Hash, Plus, Trash2, Clock } from 'lucide-react';
+import { ShieldAlert, RefreshCw, Send, CheckCircle2, User, Phone, Mail, Hash, Plus, Trash2, Clock, X } from 'lucide-react';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -128,8 +128,19 @@ export default function PartnerApprovalLockModal({
   if (!hasAccount) {
     return (
       <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center z-50 p-4 font-sans text-xs uppercase">
-        <div className="bg-slate-900 border border-indigo-900/60 p-6 rounded-2xl w-full max-w-2xl space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]">
-          <div className="border-b border-slate-800 pb-3">
+        <div className="bg-slate-900 border border-indigo-900/60 p-6 rounded-2xl w-full max-w-2xl space-y-4 shadow-2xl overflow-y-auto max-h-[90vh] relative">
+          
+          {/* CLOSE / EXIT BUTTON */}
+          <button 
+            type="button" 
+            onClick={() => window.history.back()}
+            className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800/80 p-1.5 rounded-full border border-slate-700 transition"
+            title="Close / Go Back"
+          >
+            <X size={16} />
+          </button>
+
+          <div className="border-b border-slate-800 pb-3 pr-8">
             <h2 className="text-base font-black text-indigo-400 tracking-wider">PARTNER ACCOUNT ONBOARDING</h2>
             <p className="text-[11px] text-slate-400 mt-0.5">Verify your registered details and submit KYC for dual-stage approval.</p>
           </div>

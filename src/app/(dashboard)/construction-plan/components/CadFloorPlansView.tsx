@@ -1,7 +1,7 @@
 import React from "react";
 import { formatDim, renderSideDim } from "./CadDimUtils";
 import { FloorData, FloorRoom, PlacedDoor, PlacedWindow } from "../engine/planningTypes";
-import { calculateStaircase } from "../engine/staircaseRules";
+import { calculateStaircase } from "../engine/stairPlanner";
 import { validateConstructionPlan, RenderedRoomBox } from "../engine/validationEngine";
 
 interface StaircaseConfig {
@@ -682,12 +682,18 @@ export default function CadFloorPlansView({
                       y={ry}
                       width={rw}
                       height={rh}
-                      fill={isDuct ? "url(#wallHatch)" : "#020617"}
+                      fill={isDuct ? "url(#wallHatch)" : String(rm.name || "").toUpperCase() === "PASSAGE" ? "none" : "#020617"}
                       stroke={isDuct ? "#475569" : "none"}
                       strokeWidth="0.5"
                     />
 
-                    {renderRoomWallLines(rm, rx, ry, rw, rh, roomList, clearInnerWFt, clearInnerHFt)}
+                    {String(rm.name || "").toUpperCase() === "PASSAGE" && (rm as any).pinkGuideLines ? (
+                      <g id={`passage-guide-${index}-${rIdx}`} pointerEvents="none">
+                        <line x1={rx} y1={ry + 0.6} x2={rx + rw} y2={ry + 0.6} stroke="#ec4899" strokeWidth="1.1" />
+                        <line x1={rx} y1={ry + rh - 0.6} x2={rx + rw} y2={ry + rh - 0.6} stroke="#ec4899" strokeWidth="1.1" />
+                        <text x={rx + rw / 2} y={ry + rh / 2} fill="#ec4899" fontSize={Math.max(2, Math.min(3.2, rw * 0.025))} textAnchor="middle" dominantBaseline="middle" fontWeight="700">PASSAGE {Number((rm as any).corridorWidthFt || rm.h || 0).toFixed(2)}'</text>
+                      </g>
+                    ) : renderRoomWallLines(rm, rx, ry, rw, rh, roomList, clearInnerWFt, clearInnerHFt)}
                     {/* Opening cuts MUST be painted after wall lines, otherwise the wall is visually closed again. */}
                     {renderOpeningCuts(rm, rx, ry, rw, rh)}
 

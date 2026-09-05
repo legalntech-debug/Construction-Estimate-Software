@@ -201,7 +201,6 @@ export default function RemainingWorkEstimateInputPage() {
     setFloorData(updatedFloorData);
   };
 
-  // Fixed useEffect dependency array warning
   useEffect(() => {
     let newTotal = 0;
     const currentPlotAreaNum = parseFloat(plotArea.toString().replace(/,/g, '')) || 0;
@@ -390,12 +389,14 @@ export default function RemainingWorkEstimateInputPage() {
   const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
   return (
-    <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">
-      <div className="flex justify-between items-center border-2 border-black bg-gray-100 p-1 mb-2">
-        <div className="w-24"></div>
-        <h1 className="text-2xl font-bold text-center flex-1">REMAINING WORK ESTIMATE INPUT FORM</h1>
+    <div className="w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-sm sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-auto">
+      
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-3 mb-4 gap-2">
+        <div className="hidden sm:block w-24"></div>
+        <h1 className="text-xl sm:text-2xl font-bold text-center flex-1">REMAINING WORK ESTIMATE INPUT FORM</h1>
         <div>
-          <label className="bg-black text-white px-3 py-1 font-bold text-[10pt] uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
+          <label className="bg-black text-white px-3 py-1.5 font-bold text-xs sm:text-base uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
             📁 UPLOAD DOC / AI SCAN
             <input 
               type="file" 
@@ -411,80 +412,102 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       </div>
       
-      <div className="grid grid-cols-4 gap-4 mb-4 border-b border-black pb-4">
+      {/* Top Fields Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">CASE TYPE</label>
-          <select className="w-full border border-black p-1 uppercase text-center h-[38px]" disabled>
+          <label className="font-bold block text-xs sm:text-lg">CASE TYPE</label>
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" disabled>
             <option>REMAINING WORK</option>
           </select>
         </div>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">FEE</label>
-          <select className="w-full border border-black p-1 uppercase text-center h-[38px]" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
+          <label className="font-bold block text-xs sm:text-lg">FEE</label>
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
             <option value="AUTO">AUTO</option>
             <option value="MANUAL">MANUAL</option>
           </select>
           {feeMode === "MANUAL" && (
-            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1 mt-1 text-center" onChange={(e) => setManualFee(Number(e.target.value))} />
+            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">CLIENT NAME</label>
-          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center h-[38px]" placeholder="SEARCH CLIENT..." />
-          <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
+          <label className="font-bold block text-xs sm:text-lg">CLIENT NAME</label>
+          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
         </div>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">REPRESENTATIVE</label>
-          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center h-[38px]" placeholder="SEARCH REP..." />
-          <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
+          <label className="font-bold block text-xs sm:text-lg">REPRESENTATIVE</label>
+          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
         </div>
       </div>
 
+      {/* Customer Name & Property Address */}
       <div className="mb-4 space-y-4">
-        <div className="grid grid-cols-12 items-center gap-4">
-          <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
+        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
+          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">CUSTOMER NAME</label>
           <textarea 
             value={customerName} 
             disabled={!isClientFilled}
-            onChange={(e) => setCustomerName(e.target.value)} 
-            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => {
+              setCustomerName(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${e.target.scrollHeight}px`;
+            }} 
+            ref={(el) => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }
+            }}
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={1} 
             placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
           />
         </div>
-        <div className="grid grid-cols-12 items-center gap-4">
-          <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
+        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
+          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">PROPERTY ADDRESS</label>
           <textarea 
             value={propertyAddress} 
             disabled={!isCustomerFilled}
-            onChange={(e) => setPropertyAddress(e.target.value)} 
-            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => {
+              setPropertyAddress(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${e.target.scrollHeight}px`;
+            }} 
+            ref={(el) => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }
+            }}
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={2} 
             placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
           />
         </div>
       </div>
 
-      <div className={`grid grid-cols-10 gap-4 mb-1 items-center border-t border-black pt-2 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="col-span-3">
-          <label className="font-bold block text-[12pt]">PLOT AREA</label>
+      {/* Plot Area, Floor Selection & Global Items */}
+      <div className={`grid grid-cols-1 sm:grid-cols-10 gap-2 md:gap-4 mb-4 items-center border-t border-black pt-4 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="col-span-1 sm:col-span-3">
+          <label className="font-bold block text-xs sm:text-lg">PLOT AREA</label>
           <div className="relative flex items-center">
-            <input type="text" placeholder="0.00" disabled={!isAddressFilled} value={plotArea ? plotArea : ""} onChange={(e) => handlePlotAreaChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center text-xl h-[38px]" />
-            <span className="absolute right-2 text-black font-bold text-[10pt] pointer-events-none">SQ. FT</span>
+            <input type="text" placeholder="0.00" disabled={!isAddressFilled} value={plotArea ? plotArea : ""} onChange={(e) => handlePlotAreaChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-sm sm:text-lg h-[42px]" />
+            <span className="absolute right-2 text-black font-bold text-xs sm:text-base pointer-events-none">SQ. FT</span>
           </div>
         </div>
-        <div className="col-span-4">
-          <label className="font-bold block text-[12pt]">SELECT FLOORS: ({selectedFloors.length} SELECTED)</label>
-          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className={`border border-black px-6 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 w-full h-[38px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE FLOORS</button>
+        <div className="col-span-1 sm:col-span-4">
+          <label className="font-bold block text-xs sm:text-lg">SELECT FLOORS: ({selectedFloors.length} SELECTED)</label>
+          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} className={`border border-black px-4 py-2 font-bold text-xs sm:text-base bg-gray-100 hover:bg-gray-200 w-full h-[42px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE FLOORS</button>
         </div>
-        <div className="col-span-3">
-          <label className="font-bold block text-[12pt]">GLOBAL WORK ITEMS</label>
-          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className={`border border-black px-6 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 w-full h-[38px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE GLOBAL ITEMS</button>
+        <div className="col-span-1 sm:col-span-3">
+          <label className="font-bold block text-xs sm:text-lg">GLOBAL WORK ITEMS</label>
+          <button disabled={!isPlotFilled} onClick={() => { setTempSelectedItems(selectedItems); setIsItemModalOpen(true); }} className={`border border-black px-4 py-2 font-bold text-xs sm:text-base bg-gray-100 hover:bg-gray-200 w-full h-[42px] ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}>+ CHOOSE GLOBAL ITEMS</button>
         </div>
       </div>
 
+      {/* Built Up Area & Floor-Wise Remaining Work Details */}
       <div className={`mt-4 border border-black rounded-none overflow-hidden ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA & FLOOR-WISE REMAINING WORK DETAILS</div>
+        <div className="bg-[#1e293b] text-white py-2.5 font-bold uppercase tracking-wider text-center text-sm sm:text-lg">BUILT UP AREA & FLOOR-WISE REMAINING WORK DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
             .filter(f => selectedFloors.includes(f))
@@ -495,16 +518,16 @@ export default function RemainingWorkEstimateInputPage() {
               const isExceeding = plotAreaNum > 0 && currentArea > plotAreaNum;
 
               return (
-                <div key={f} className={`grid grid-cols-12 items-center border-b border-black bg-white p-2 ${isExceeding ? 'bg-red-50' : ''}`}>
-                  <span className="col-span-3 font-bold text-black uppercase text-[12pt] text-center border-r border-black">{f}</span>
-                  <div className={`col-span-3 grid grid-cols-2 gap-0 border-r px-1 ${isExceeding ? 'border-red-500 bg-red-100' : 'border-black'}`}>
+                <div key={f} className={`grid grid-cols-12 items-center border-b border-black bg-white p-2.5 ${isExceeding ? 'bg-red-50' : ''}`}>
+                  <span className="col-span-4 sm:col-span-3 font-bold text-black uppercase text-xs sm:text-lg text-center border-r border-black">{f}</span>
+                  <div className={`col-span-4 sm:col-span-3 grid grid-cols-2 gap-0 border-r px-1 ${isExceeding ? 'border-red-500 bg-red-100' : 'border-black'}`}>
                     <input 
                       type="number" 
                       step="0.01" 
                       min="0" 
                       placeholder="W" 
                       value={floorData[f]?.width || ""} 
-                      className={`w-full text-center bg-transparent outline-none text-lg font-bold ${isExceeding ? 'text-red-700' : 'text-black'}`} 
+                      className={`w-full text-center bg-transparent outline-none text-xs sm:text-lg font-bold ${isExceeding ? 'text-red-700' : 'text-black'}`} 
                       onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} 
                     />
                     <input 
@@ -513,7 +536,7 @@ export default function RemainingWorkEstimateInputPage() {
                       min="0" 
                       placeholder="L" 
                       value={floorData[f]?.length || ""} 
-                      className={`w-full text-center bg-transparent outline-none text-lg font-bold border-l ${isExceeding ? 'border-red-300 text-red-700' : 'border-gray-300 text-black'}`} 
+                      className={`w-full text-center bg-transparent outline-none text-xs sm:text-lg font-bold border-l ${isExceeding ? 'border-red-300 text-red-700' : 'border-gray-300 text-black'}`} 
                       onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} 
                     />
                   </div>
@@ -521,16 +544,16 @@ export default function RemainingWorkEstimateInputPage() {
                     type="text" 
                     readOnly 
                     value={`${currentArea} SQ.FT`} 
-                    className={`col-span-2 p-1 text-center font-bold text-[11pt] bg-transparent border-r border-black ${isExceeding ? 'text-red-600 font-extrabold' : 'text-black'}`} 
+                    className={`col-span-4 sm:col-span-2 p-2.5 text-center font-bold text-xs sm:text-base bg-transparent border-r border-black ${isExceeding ? 'text-red-600 font-extrabold' : 'text-black'}`} 
                   />
-                  <div className="col-span-4 flex items-center justify-between px-2">
-                    <span className="text-[10pt] font-semibold text-gray-700">{currentFloorItems.length} items chosen</span>
+                  <div className="col-span-12 sm:col-span-4 flex items-center justify-between px-2 mt-2 sm:mt-0">
+                    <span className="text-xs sm:text-sm font-semibold text-gray-700">{currentFloorItems.length} items chosen</span>
                     <button 
                       onClick={() => {
                         setActiveItemFloor(f);
                         setTempFloorWiseItems(currentFloorItems);
                       }} 
-                      className="border border-black px-2 py-1 text-[9pt] font-bold bg-gray-100 hover:bg-gray-200 uppercase"
+                      className="border border-black px-3 py-1.5 text-xs sm:text-sm font-bold bg-gray-100 hover:bg-gray-200 uppercase"
                     >
                       Configure Work
                     </button>
@@ -541,19 +564,20 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       </div>
 
-      <div className={`grid grid-cols-5 mb-3 mt-4 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* Summary Calculation Bar */}
+      <div className={`grid grid-cols-2 sm:grid-cols-5 mb-3 mt-4 items-center gap-2 ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">TOTAL AREA</label>
-          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" />
+          <label className="font-bold block text-xs sm:text-lg">TOTAL AREA</label>
+          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-2 uppercase text-center bg-gray-100 font-bold text-xs sm:text-lg" />
         </div>
-        <div className="text-center font-bold text-lg">X</div>
+        <div className="text-center font-bold text-lg hidden sm:block">X</div>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">RATE / SQ.FT</label>
-          <input type="number" step="0.01" placeholder="RATE / SQ.FT" value={rate || ""} onChange={(e) => { const r = parseFloat(e.target.value) || 0; setRate(r); setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); }} className="w-full text-center border border-black p-1 uppercase" />
+          <label className="font-bold block text-xs sm:text-lg">RATE / SQ.FT</label>
+          <input type="number" step="0.01" placeholder="RATE / SQ.FT" value={rate || ""} onChange={(e) => { const r = parseFloat(e.target.value) || 0; setRate(r); setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); }} className="w-full text-center border border-black p-2 uppercase text-xs sm:text-lg" />
         </div>
-        <div className="text-center font-bold text-lg">=</div>
-        <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">TOTAL AMOUNT</label>
+        <div className="text-center font-bold text-lg hidden sm:block">=</div>
+        <div className="col-span-2 sm:col-span-1">
+          <label className="font-bold block text-xs sm:text-lg">TOTAL AMOUNT</label>
           <input 
             type="text" 
             value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
@@ -566,20 +590,25 @@ export default function RemainingWorkEstimateInputPage() {
                 setRate(calculatedRate);
               }
             }} 
-            className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold" 
+            className="w-full border border-black p-2 uppercase text-center bg-gray-100 font-bold text-xs sm:text-lg" 
           />
         </div>
       </div>
 
-      <div className="flex gap-4 border-t border-black pt-4">
-        <button onClick={handleGenerate} className="bg-black text-white px-6 py-2 font-bold uppercase">GENERATE ESTIMATE</button>
-        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-2 font-bold uppercase">Clear Data</button>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-4 border-t border-black pt-4">
+        <button onClick={handleGenerate} className="bg-black text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto">GENERATE ESTIMATE</button>
+        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto">Clear Data</button>
       </div>
 
+      <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
+      <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
+
+      {/* Floor Selector Modal */}
       {isFloorModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 border border-black w-[400px] uppercase text-[9pt]">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT FLOORS</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 border border-black w-full max-w-[400px] uppercase text-xs sm:text-base">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-lg">SELECT FLOORS</h2>
             <div className="space-y-2 max-h-[350px] overflow-auto mb-4">
               {[...DEFAULT_FLOORS, ...EXTRA_FLOORS].map((floor) => (
                 <label key={floor} className="flex items-center gap-3 cursor-pointer p-2 border-b">
@@ -634,13 +663,14 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       )}
 
+      {/* Global Items Selector Modal */}
       {isItemModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT GLOBAL STRUCTURAL & FINISHING ITEMS</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 border border-black w-full max-w-[480px] uppercase text-xs sm:text-base">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-lg">SELECT GLOBAL STRUCTURAL & FINISHING ITEMS</h2>
             <div className="flex gap-2 mb-3">
-              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems(AVAILABLE_CORE_ITEMS.map(i => i.id))}>Select All</button>
-              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems([])}>Deselect All</button>
+              <button className="text-xs sm:text-sm border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems(AVAILABLE_CORE_ITEMS.map(i => i.id))}>Select All</button>
+              <button className="text-xs sm:text-sm border px-2 py-1 bg-gray-100" onClick={() => setTempSelectedItems([])}>Deselect All</button>
             </div>
             <div className="space-y-2 max-h-[380px] overflow-auto mb-4 pr-1">
               {AVAILABLE_CORE_ITEMS.map((item) => (
@@ -672,12 +702,13 @@ export default function RemainingWorkEstimateInputPage() {
         </div>
       )}
 
+      {/* Floor-Specific Work Configuration Modal */}
       {activeItemFloor && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 border border-black w-[480px] uppercase text-[9pt]">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">CONFIG REMAINING WORK FOR: {activeItemFloor}</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 border border-black w-full max-w-[480px] uppercase text-xs sm:text-base">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-lg">CONFIG REMAINING WORK FOR: {activeItemFloor}</h2>
             <div className="flex gap-2 mb-3">
-              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => {
+              <button className="text-xs sm:text-sm border px-2 py-1 bg-gray-100" onClick={() => {
                 const isGroundOrBasement = activeItemFloor === "GROUND FLOOR" || activeItemFloor === "BASEMENT";
                 const allowed = AVAILABLE_CORE_ITEMS
                   .filter(item => {
@@ -687,7 +718,7 @@ export default function RemainingWorkEstimateInputPage() {
                   .map(i => i.id);
                 setTempFloorWiseItems(allowed);
               }}>Select All</button>
-              <button className="text-xs border px-2 py-1 bg-gray-100" onClick={() => setTempFloorWiseItems([])}>Deselect All</button>
+              <button className="text-xs sm:text-sm border px-2 py-1 bg-gray-100" onClick={() => setTempFloorWiseItems([])}>Deselect All</button>
             </div>
             <div className="space-y-2 max-h-[380px] overflow-auto mb-4 pr-1">
               {AVAILABLE_CORE_ITEMS

@@ -115,7 +115,7 @@ export default function ExtensionEstimatePage() {
       rate_per_sqft: rate,
       construction_cost: amount,
       total_construction_cost: amount, 
-      total_value: amount,            
+      total_value: amount,             
       estimate_type: caseType,
       floor_details: cleanedFloorDetails,      
       selected_floors: selectedFloors,
@@ -180,7 +180,6 @@ export default function ExtensionEstimatePage() {
     const otherArea = currentFloorObj[otherType]?.area || 0;
     const combinedFloorArea = calculatedSubArea + otherArea;
 
-    // Live warning only (will not block typing or updating values)
     if (plotNum > 0 && combinedFloorArea > plotNum) {
       console.warn(`Validation Warning: Total area for ${floor} (${combinedFloorArea} SQ.FT) exceeds Plot Area (${plotNum} SQ.FT)!`);
     }
@@ -217,7 +216,6 @@ export default function ExtensionEstimatePage() {
       return;
     }
 
-    // STRICT VALIDATION ON GENERATE: Block generation if any floor area exceeds Plot Area
     const plotNum = parseFloat(plotArea) || 0;
     for (const f of selectedFloors) {
       const data = floorData[f];
@@ -259,9 +257,12 @@ export default function ExtensionEstimatePage() {
   const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
   return (
-    <div className="p-6 font-sans uppercase text-lg text-black max-w-5xl mx-auto border border-black bg-white shadow-lg leading-tight">
-      <div className="flex justify-between items-center border-2 border-black bg-gray-100 p-2 mb-4">
-        <h1 className="text-2xl font-bold text-center w-full pl-32">
+    <div className="w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-sm sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-auto">
+      
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-3 mb-4 gap-2">
+        <div className="hidden sm:block w-32"></div>
+        <h1 className="text-xl sm:text-2xl font-bold text-center flex-1">
           EXTENSION & RENOVATION ESTIMATE INPUT FORM
         </h1>
         <DocumentScanner 
@@ -273,62 +274,85 @@ export default function ExtensionEstimatePage() {
         />
       </div>
       
-      <div className="grid grid-cols-7 gap-4 mb-4 border-b border-black pb-4">
-        <div className="col-span-2">
-          <label className="font-bold block text-[12pt]">CASE TYPE</label>
-          <select className="w-full border border-black p-1 uppercase text-center">
+      {/* Top Fields Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-7 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
+        <div className="col-span-1 sm:col-span-2">
+          <label className="font-bold block text-xs sm:text-[12pt]">CASE TYPE</label>
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg">
             <option>EXTENSION & RENOVATION</option>
           </select>
         </div>
-        <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">FEE</label>
-          <select className="w-full border border-black p-1 uppercase text-center" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
+        <div className="col-span-1 sm:col-span-1">
+          <label className="font-bold block text-xs sm:text-[12pt]">FEE</label>
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
             <option value="AUTO">AUTO</option>
             <option value="MANUAL">MANUAL</option>
           </select>
           {feeMode === "MANUAL" && (
-            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1 mt-1 text-center" onChange={(e) => setManualFee(Number(e.target.value))} />
+            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
         
-        <div className="col-span-2">
-          <label className="font-bold block text-[12pt]">CLIENT NAME</label>
-          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH CLIENT..." />
+        <div className="col-span-1 sm:col-span-2">
+          <label className="font-bold block text-xs sm:text-[12pt]">CLIENT NAME</label>
+          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
         </div>
-        <div className="col-span-2">
-          <label className="font-bold block text-[12pt]">REPRESENTATIVE</label>
-          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center" placeholder="SEARCH REP..." />
+        <div className="col-span-1 sm:col-span-2">
+          <label className="font-bold block text-xs sm:text-[12pt]">REPRESENTATIVE</label>
+          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
         </div>
       </div>
 
+      {/* Customer Name & Property Address */}
       <div className="mb-4 space-y-4">
-        <div className="grid grid-cols-12 items-center gap-4">
-          <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
+        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
+          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-[12pt] border border-black p-2.5 bg-gray-100">CUSTOMER NAME</label>
           <textarea 
             value={customerName} 
             disabled={!isClientFilled}
-            onChange={(e) => setCustomerName(e.target.value)} 
-            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => {
+              setCustomerName(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${e.target.scrollHeight}px`;
+            }} 
+            ref={(el) => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }
+            }}
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={1} 
             placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
           />
         </div>
-        <div className="grid grid-cols-12 items-center gap-4">
-          <label className="col-span-3 font-bold text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
+        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
+          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-[12pt] border border-black p-2.5 bg-gray-100">PROPERTY ADDRESS</label>
           <textarea 
             value={propertyAddress} 
             disabled={!isCustomerFilled}
-            onChange={(e) => setPropertyAddress(e.target.value)} 
-            className={`col-span-9 border border-black p-2 uppercase text-left text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => {
+              setPropertyAddress(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = `${e.target.scrollHeight}px`;
+            }} 
+            ref={(el) => {
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }
+            }}
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={2} 
             placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
           />
         </div>
       </div>
 
-      <div className={`grid grid-cols-10 gap-4 mb-2 items-center border-t border-black pt-4 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="col-span-3">
-          <label className="font-bold block text-[12pt]">PLOT AREA</label>
+      {/* Plot Area & Floor Trigger */}
+      <div className={`grid grid-cols-12 gap-2 md:gap-4 mb-2 items-center border-t border-black pt-3 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="col-span-5 md:col-span-3">
+          <label className="font-bold block text-[11px] sm:text-[12pt] truncate">PLOT AREA</label>
           <div className="relative flex items-center">
             <input 
               type="text" 
@@ -341,16 +365,16 @@ export default function ExtensionEstimatePage() {
                 const formattedVal = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : val;
                 setPlotArea(formattedVal);
               }} 
-              className="w-full border border-black p-1 uppercase text-center text-xl pr-16" 
+              className="w-full border border-black p-2 uppercase text-center text-sm sm:text-lg" 
             />
-            <span className="absolute right-2 text-black font-bold text-[10pt] pointer-events-none">SQ. FT</span>
+            <span className="absolute right-2 text-black font-bold text-[9px] sm:text-[10pt] pointer-events-none">SQ. FT</span>
           </div>
         </div>
         
-        <div className="col-span-7">
+        <div className="col-span-7 md:col-span-7">
           <div className="flex justify-between items-center mb-1">
-            <label className="font-bold block text-[12pt]">SELECT FLOORS</label>
-            <div className="flex items-center gap-2 text-[10pt] font-bold text-purple-900">
+            <label className="font-bold block text-[11px] sm:text-[12pt] truncate">SELECT FLOORS</label>
+            <div className="hidden sm:flex items-center gap-2 text-[10pt] font-bold text-purple-900">
               <span className="bg-purple-100 px-3 py-1 border border-black">PROPOSED</span>
               <span className="bg-orange-100 px-3 py-1 border border-black text-orange-900">EXISTING</span>
             </div>
@@ -362,15 +386,16 @@ export default function ExtensionEstimatePage() {
               setTempFloorModes(floorModes);
               setIsFloorModalOpen(true); 
             }} 
-            className={`border border-black px-10 py-1 font-bold text-[10pt] bg-gray-100 hover:bg-gray-200 text-black w-full text-center ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
+            className={`border border-black px-2 py-2.5 font-bold text-[10px] sm:text-[10pt] bg-gray-100 hover:bg-gray-200 text-black w-full text-center truncate ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
           >
             + ADD / CHOOSE FLOOR
           </button>
         </div>
       </div>
 
-      <div className={`mt-4 border border-black overflow-hidden space-y-4 p-4 bg-gray-50 ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="bg-[#1e293b] text-white py-2 px-3 font-bold uppercase tracking-wider text-center text-[12pt]">BUILT UP AREA DETAILS (PROPOSED & EXISTING)</div>
+      {/* Built Up Area Details (Proposed & Existing) */}
+      <div className={`mt-4 border border-black overflow-hidden space-y-4 p-2 sm:p-4 bg-gray-50 ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="bg-[#1e293b] text-white py-2 px-3 font-bold uppercase tracking-wider text-center text-sm sm:text-[12pt]">BUILT UP AREA DETAILS (PROPOSED & EXISTING)</div>
         
         {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
           .filter(f => selectedFloors.includes(f))
@@ -383,34 +408,34 @@ export default function ExtensionEstimatePage() {
             const currentMode = floorModes[f] || "BOTH";
 
             return (
-              <div key={f} className="border border-black p-3 bg-white">
-                <div className="font-bold text-[12pt] text-center bg-gray-100 border border-black py-2 mb-3 flex justify-between px-4 items-center">
+              <div key={f} className="border border-black p-2.5 sm:p-3 bg-white">
+                <div className="font-bold text-xs sm:text-[12pt] text-center bg-gray-100 border border-black py-2 mb-3 flex justify-between px-3 sm:px-4 items-center">
                   <span className="text-black">{f}</span>
-                  <span className="text-[10pt] bg-white px-3 py-1 border border-black font-bold text-black">
-                    {currentMode === "BOTH" ? "PROPOSED & EXISTING" : currentMode === "PROPOSED" ? "PROPOSED ONLY" : "EXISTING ONLY"}
+                  <span className="text-[9px] sm:text-[10pt] bg-white px-2 sm:px-3 py-1 border border-black font-bold text-black">
+                    {currentMode === "BOTH" ? "PROP & EXIST" : currentMode === "PROPOSED" ? "PROPOSED ONLY" : "EXISTING ONLY"}
                   </span>
                 </div>
                 
                 <div className="space-y-3">
                   {(currentMode === "BOTH" || currentMode === "PROPOSED") && (
                     <div className="grid grid-cols-12 items-center border border-black bg-white">
-                      <span className="col-span-3 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black bg-purple-50">PROPOSED</span>
+                      <span className="col-span-3 font-bold text-black uppercase text-[10px] sm:text-[12pt] p-2 text-center border-r border-black bg-purple-50 truncate">PROP</span>
                       <div className="col-span-5 grid grid-cols-2 gap-0 border-r border-black">
-                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.proposed?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', floorObj?.proposed?.length || 0, parseFloat(e.target.value) || 0)} />
-                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.proposed?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', parseFloat(e.target.value) || 0, floorObj?.proposed?.width || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.proposed?.width || ""} className="w-full text-center border-none p-2 text-xs sm:text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', floorObj?.proposed?.length || 0, parseFloat(e.target.value) || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.proposed?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-xs sm:text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'proposed', parseFloat(e.target.value) || 0, floorObj?.proposed?.width || 0)} />
                       </div>
-                      <input type="text" readOnly value={`${floorObj?.proposed?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[12pt] bg-gray-100 text-black border-none" />
+                      <input type="text" readOnly value={`${floorObj?.proposed?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[10px] sm:text-[12pt] bg-gray-100 text-black border-none truncate" />
                     </div>
                   )}
 
                   {(currentMode === "BOTH" || currentMode === "EXISTING") && (
                     <div className="grid grid-cols-12 items-center border border-black bg-white">
-                      <span className="col-span-3 font-bold text-black uppercase text-[12pt] p-2 text-center border-r border-black bg-orange-50">EXISTING</span>
+                      <span className="col-span-3 font-bold text-black uppercase text-[10px] sm:text-[12pt] p-2 text-center border-r border-black bg-orange-50 truncate">EXIST</span>
                       <div className="col-span-5 grid grid-cols-2 gap-0 border-r border-black">
-                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.existing?.width || ""} className="w-full text-center border-none p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', floorObj?.existing?.length || 0, parseFloat(e.target.value) || 0)} />
-                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.existing?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', parseFloat(e.target.value) || 0, floorObj?.existing?.width || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="WIDTH" value={floorObj?.existing?.width || ""} className="w-full text-center border-none p-2 text-xs sm:text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', floorObj?.existing?.length || 0, parseFloat(e.target.value) || 0)} />
+                        <input type="number" step="0.01" min="0" placeholder="LENGTH" value={floorObj?.existing?.length || ""} className="w-full text-center border-none border-l border-black p-2 text-xs sm:text-[12pt] font-bold outline-none bg-transparent" onChange={(e) => updateFloorArea(f, 'existing', parseFloat(e.target.value) || 0, floorObj?.existing?.width || 0)} />
                       </div>
-                      <input type="text" readOnly value={`${floorObj?.existing?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[12pt] bg-gray-100 text-black border-none" />
+                      <input type="text" readOnly value={`${floorObj?.existing?.area || 0} SQ.FT`} className="col-span-4 p-2 text-center font-bold text-[10px] sm:text-[12pt] bg-gray-100 text-black border-none truncate" />
                     </div>
                   )}
                 </div>
@@ -419,14 +444,15 @@ export default function ExtensionEstimatePage() {
           })}
       </div>
 
-      <div className={`grid grid-cols-5 gap-4 mb-4 mt-6 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
+      {/* Calculation Section */}
+      <div className={`grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4 mt-6 items-center ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">TOTAL AREA</label>
-          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 text-center bg-gray-100 font-bold text-[12pt]" />
+          <label className="font-bold block text-xs sm:text-[12pt]">TOTAL AREA</label>
+          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-2 text-center bg-gray-100 font-bold text-xs sm:text-[12pt]" />
         </div>
-        <div className="text-center font-bold text-lg">X</div>
+        <div className="text-center font-bold text-lg hidden sm:block">X</div>
         <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">RATE / SQ.FT</label>
+          <label className="font-bold block text-xs sm:text-[12pt]">RATE / SQ.FT</label>
           <input 
             type="number" 
             step="0.01" 
@@ -436,13 +462,13 @@ export default function ExtensionEstimatePage() {
               setRate(r); 
               setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); 
             }} 
-            className="w-full text-center border border-black p-1 text-[12pt]" 
+            className="w-full text-center border border-black p-2 text-xs sm:text-[12pt]" 
             placeholder="0" 
           />
         </div>
-        <div className="text-center font-bold text-lg">=</div>
-        <div className="col-span-1">
-          <label className="font-bold block text-[12pt]">TOTAL AMOUNT</label>
+        <div className="text-center font-bold text-lg hidden sm:block">=</div>
+        <div className="col-span-2 sm:col-span-1">
+          <label className="font-bold block text-xs sm:text-[12pt]">TOTAL AMOUNT</label>
           <input 
             type="text" 
             value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
@@ -455,14 +481,15 @@ export default function ExtensionEstimatePage() {
                 setRate(calculatedRate);
               }
             }} 
-            className="w-full border border-black p-1 text-center bg-gray-100 font-bold text-[12pt]" 
+            className="w-full border border-black p-2 text-center bg-gray-100 font-bold text-xs sm:text-[12pt]" 
           />
         </div>
       </div>
 
-      <div className="flex gap-4 border-t border-black pt-4">
-        <button onClick={handleGenerate} className="bg-black text-white px-6 py-2 font-bold uppercase text-[12pt]">GENERATE ESTIMATE</button>
-        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-2 font-bold uppercase text-[12pt]">Clear Data</button>
+      {/* Action Buttons */}
+      <div className="flex flex-col sm:flex-row gap-4 border-t border-black pt-4">
+        <button onClick={handleGenerate} className="bg-black text-white px-6 py-3 font-bold uppercase text-sm sm:text-[12pt] w-full sm:w-auto">GENERATE ESTIMATE</button>
+        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-3 font-bold uppercase text-sm sm:text-[12pt] w-full sm:w-auto">Clear Data</button>
       </div>
 
       <datalist id="clients-list">
@@ -472,18 +499,19 @@ export default function ExtensionEstimatePage() {
         {filteredReps.map((rep) => <option key={rep} value={rep} />)}
       </datalist>
 
+      {/* Floor Selection Modal */}
       {isFloorModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 border border-black w-[450px] uppercase text-[9pt]">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT FLOORS & TYPES</h2>
-            <div className="space-y-2 max-h-[400px] overflow-auto mb-4 pr-2">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 border border-black w-full max-w-[450px] uppercase text-xs sm:text-[9pt]">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-[11pt]">SELECT FLOORS & TYPES</h2>
+            <div className="space-y-2 max-h-[350px] sm:max-h-[400px] overflow-auto mb-4 pr-2">
               {[...DEFAULT_FLOORS, ...EXTRA_FLOORS].map((floor) => {
                 const isSelected = tempSelectedFloors.includes(floor);
                 const currentMode = tempFloorModes[floor] || "BOTH";
 
                 return (
                   <div key={floor} className="border-b border-gray-300 py-2 flex flex-col gap-2">
-                    <label className="flex items-center gap-3 font-bold cursor-pointer text-[10pt]">
+                    <label className="flex items-center gap-3 font-bold cursor-pointer text-xs sm:text-[10pt]">
                       <input 
                         type="checkbox" 
                         checked={isSelected} 
@@ -524,8 +552,8 @@ export default function ExtensionEstimatePage() {
               })}
             </div>
             <div className="flex justify-end gap-3 mt-4">
-              <button className="border border-black px-4 py-2 font-bold text-[9pt]" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
-              <button className="bg-black text-white px-4 py-2 font-bold text-[9pt]" onClick={() => { 
+              <button className="border border-black px-4 py-2 font-bold text-xs sm:text-[9pt]" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
+              <button className="bg-black text-white px-4 py-2 font-bold text-xs sm:text-[9pt]" onClick={() => { 
                 const floorSequence = ["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"];
                 const sortedFloors = [...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b));
                 

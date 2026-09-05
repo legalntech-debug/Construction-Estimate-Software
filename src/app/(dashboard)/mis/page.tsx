@@ -35,6 +35,8 @@ interface MISRecord {
   property_address?: string;
   plot_area?: string;
   rate_per_sqft?: number;
+  source_table?: 'mis_records' | 'service_records'; // Kis table se data aaya hai track karne ke liye
+  record_category?: 'ESTIMATE' | 'SERVICE'; // Category differentiate karne ke liye
 }
 
 export default function MISPage() {
@@ -76,25 +78,74 @@ export default function MISPage() {
         }
 
         const isAdmin = profile?.role === 'admin';
-        let query = supabase.from('mis_records').select('*');
 
+        // 1. Fetch Estimate Data from 'mis_records'
+        let misQuery = supabase.from('mis_records').select('*');
         if (!isAdmin) {
-          query = supabase
+          misQuery = supabase
             .from('mis_records')
             .select(`*, estimates!inner(user_id)`)
             .eq('estimates.user_id', user.id);
         }
+        const { data: misData, error: misError } = await misQuery;
+        if (misError) throw misError;
 
-        const { data, error } = await query.order('created_date', { ascending: true });
-        if (error) throw error;
+        // 2. Fetch Service/Deed Data from 'service_records'
+        let serviceQuery = supabase.from('service_records').select('*');
+        if (!isAdmin) {
+          serviceQuery = serviceQuery.eq('user_id', user.id);
+        }
+        const { data: serviceData, error: serviceError } = await serviceQuery;
+        if (serviceError) throw serviceError;
 
-        const formattedData = (data || []).map((item: any) => ({
+        // 3. Format and tag Estimate Records (`mis_records`)
+        const formattedEstimates = (misData || []).map((item: any) => ({
           ...item,
+          source_table: 'mis_records' as const,
+          record_category: 'ESTIMATE' as const,
+          case_type: item.case_type || 'Estimate Case',
           mobile_no: item.mobile_no || "",
           email_id: item.email_id || ""
         }));
 
-        setRecords(formattedData as MISRecord[]);
+       // 4. Format and tag Service Records (`service_records`)
+        const formattedServices = (serviceData || []).map((item: any) => {
+          // Extract buyer name safely from form_snapshot JSON if available
+          let extractedBuyerName = item.customer_name;
+          if (!extractedBuyerName && item.form_snapshot) {
+            try {
+              const snapshot = typeof item.form_snapshot === 'string' 
+                ? JSON.parse(item.form_snapshot) 
+                : item.form_snapshot;
+              
+              if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
+                extractedBuyerName = snapshot.buyers[0]?.name;
+              }
+            } catch (e) {
+              console.error("Error parsing form_snapshot for buyer name", e);
+            }
+          }
+
+          return {
+            ...item,
+            customer_name: extractedBuyerName || item.buyer_name || item.buyer || item.client_name || "N/A",
+            source_table: 'service_records' as const,
+            record_category: 'SERVICE' as const,
+            created_date: item.created_date || item.created_at || new Date().toISOString(),
+            case_type: item.case_type || 'DEED_DRAFT',
+            fee_standard: item.user_service_fee || item.fee_standard || item.fee || 0,
+            mobile_no: item.mobile_no || "",
+            email_id: item.email_id || ""
+          };
+        });
+
+        // 5. Combine Both Datasets
+        const combinedRecords = [...formattedEstimates, ...formattedServices];
+        
+        // Sort by date (latest first)
+        combinedRecords.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
+
+        setRecords(combinedRecords as MISRecord[]);
       } catch (err) {
         console.error(err);
       } finally {
@@ -169,17 +220,14 @@ export default function MISPage() {
         if (!verifyWaived) return;
       }
 
-      // 3. Secure database write transaction sequence with Typecasting and Row Select Sync (#SYNC)
-            
-      const numericId = parseInt(id, 10);
-      if (isNaN(numericId)) {
-        throw new Error("Invalid Record ID Format detected on Client Runtime Engine.");
-      }
+      // 3. Dynamic Table Resolution & Secure database write transaction (#SYNC)
+      const targetRecord = records.find(r => String(r.id) === String(id));
+      const targetTable = targetRecord?.source_table || 'mis_records';
 
       const { data, error } = await supabase
-        .from('mis_records')
+        .from(targetTable)
         .update({ status: exactUppercaseStatus })
-        .eq('id', numericId)
+        .eq('id', id)
         .select(); // Real-time row return to verify commit execution
 
       if (error) throw error;
@@ -193,7 +241,6 @@ export default function MISPage() {
       setRecords(prev => prev.map(r => String(r.id) === String(id) ? { ...r, status: exactUppercaseStatus as any } : r));
       
     } catch (error: any) {
-      
       alert("Error processing mutation status updates: " + error.message);
     }
   };
@@ -212,33 +259,41 @@ export default function MISPage() {
       const currentStatus = (record.status || "").trim().toUpperCase();
       const isPaidAlready = currentStatus === "RECEIVED" || currentStatus === "PAID" || currentStatus === "SUCCESS";
 
+      // Comprehensive payload with fallback mapping keys
       const reopenData = {
         id: record.id,
         ref_no: record.ref_no,
-        customer_name: record.customer_name,
-        client_name: record.client_name,
-        representative: record.representative,
-        case_type: record.case_type,
-        estimate_type: record.case_type,
+        customer_name: record.customer_name || "",
+        client_name: record.client_name || "",
+        representative: record.representative || "",
+        case_type: record.case_type || "",
+        estimate_type: record.case_type || "",
         property_type: record.property_type || "HOUSE",
-        total_value: record.fee_standard,
+        total_value: record.fee_standard || record.fee || 0,
+        fee_standard: record.fee_standard || record.fee || 0,
         property_address: record.property_address || "",
         plot_area: record.plot_area || "",
         floor_details: parsedFloorDetails,
         rate_per_sqft: record.rate_per_sqft || 0,
+        mobile_no: record.mobile_no || record.clients?.mobile_no || "",
+        email_id: record.email_id || record.clients?.email_id || "",
         status: currentStatus,
         isAlreadyPaid: isPaidAlready,
-        is_paid: isPaidAlready
+        is_paid: isPaidAlready,
+        // Form mapping fallback keys
+        name: record.customer_name || "",
+        address: record.property_address || "",
+        client: record.client_name || ""
       };
 
       const caseTypeUpper = (record.case_type || "").trim().toUpperCase();
       
       if (caseTypeUpper.includes("RENOVATION")) {
         localStorage.setItem("renovationEstimatePreview", JSON.stringify(reopenData));
-        router.push("/renovation-estimate");
+        window.location.href = "/renovation-estimate"; // Full reload to prevent stale cache
       } else {
         localStorage.setItem("estimatePreview", JSON.stringify(reopenData));
-        router.push("/estimate");
+        window.location.href = "/estimate"; // Full reload to prevent stale cache
       }
     } catch (err: any) {
       alert("Failed to reopen case: " + err.message);
@@ -646,16 +701,16 @@ const triggerEmailBroadcast = async () => {
     <div className="space-y-4 max-w-[1600px] mx-auto p-2 bg-slate-50 min-h-screen">
       
       {/* Header Panel */}
-      <div className="flex items-center justify-between bg-white px-5 py-3 rounded border border-slate-200 shadow-xs">
+      <div className="flex flex-col md:flex-row items-center justify-between gap-3 bg-white px-5 py-3 rounded border border-slate-200 shadow-xs">
         <h1 className="text-sm font-black tracking-wider text-slate-800 uppercase">MIS Analytics Engine</h1>
-        <div className="flex gap-2">
-          <button onClick={triggerWhatsAppBroadcast} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2">
-            💬 WHATSAPP BROADCAST
+        <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
+          <button onClick={triggerWhatsAppBroadcast} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
+            💬 <span className="hidden sm:inline">WHATSAPP</span> BROADCAST
           </button>
-          <button onClick={triggerEmailBroadcast} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-xs flex items-center gap-2">
-            ✉️ EMAIL BROADCAST
+          <button onClick={triggerEmailBroadcast} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
+            ✉️ <span className="hidden sm:inline">EMAIL</span> BROADCAST
           </button>
-          <button onClick={handleCreateClick} className="bg-blue-950 hover:bg-slate-900 text-white text-[10px] font-bold uppercase px-3 py-1.5 rounded transition-all tracking-wider">
+          <button onClick={handleCreateClick} className="bg-blue-950 hover:bg-slate-900 text-white text-[10px] font-bold uppercase px-3 py-2 rounded transition-all tracking-wider flex-1 md:flex-initial justify-center">
             + Create Entry
           </button>
         </div>
@@ -663,8 +718,145 @@ const triggerEmailBroadcast = async () => {
 
       <MetricsBar metrics={metrics} />
 
-      {/* Embedded Dynamic Table Matrix */}
-      <div className="bg-white border border-slate-300 rounded shadow-xs overflow-hidden">
+      {/* Embedded Dynamic Table Matrix for Desktop / Cards for Mobile */}
+      
+      {/* 1. MOBILE CARD VIEW & FILTERS (Visible only on small screens) */}
+      <div className="block md:hidden space-y-3">
+        
+        {/* Mobile Search & Filter Box */}
+        <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs space-y-2">
+          <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Quick Filters (Mobile)</div>
+          
+          <div className="grid grid-cols-2 gap-2">
+            <input 
+              type="text" 
+              value={filterRefNo} 
+              onChange={e => setFilterRefNo(e.target.value)} 
+              placeholder="Search Ref No..." 
+              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500" 
+            />
+            <input 
+              type="text" 
+              value={filterClient} 
+              onChange={e => setFilterClient(e.target.value)} 
+              placeholder="Client Name..." 
+              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500" 
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <select 
+              value={filterCaseType} 
+              onChange={e => setFilterCaseType(e.target.value)} 
+              className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
+            >
+              <option value="ALL">All Case Types</option>
+              <option value="Construction">New Construction</option>
+              <option value="Renovation">Renovation</option>
+              <option value="Route">Route Map</option>
+            </select>
+
+            <select 
+              value={filterStatus} 
+              onChange={e => setFilterStatus(e.target.value)} 
+              className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
+            >
+              <option value="ALL">All Status</option>
+              <option value="PENDING">Pending</option>
+              <option value="RECEIVED">Received</option>
+              <option value="WAIVED">Waived</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Existing Mobile Cards Loop */}
+        {loading ? (
+          <div className="bg-white p-4 rounded text-center text-slate-400 text-xs">Syncing active engine tables...</div>
+        ) : filteredRecords.length === 0 ? (
+          <div className="bg-white p-6 rounded text-center text-slate-400 text-xs flex flex-col items-center gap-1">
+            <AlertCircle size={16} /><span>No logs match current search fields.</span>
+          </div>
+        ) : (
+          filteredRecords.map((rec) => {
+            // ... card elements loop ...
+            const cleanName = (rec.customer_name || "").split(/s\/o|d\/o|w\/o/i)[0].replace(/[,.-]+$/, "").trim().toUpperCase();
+            return (
+              <div key={rec.id} className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs space-y-2.5">
+                
+                {/* Top Row: Ref No & Date */}
+                <div className="flex items-center justify-between text-[11px] border-b border-slate-100 pb-2">
+                  <span className="font-mono font-bold text-blue-700">{rec.ref_no}</span>
+                  <span className="text-slate-500">{rec.created_date ? new Date(rec.created_date).toLocaleDateString('en-GB') : "-"}</span>
+                </div>
+
+                {/* Customer & Details */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-slate-900 uppercase">{cleanName}</span>
+                    <span className="text-xs font-black text-slate-900">₹{(rec.fee_standard || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600 font-medium">
+                    <div><span className="text-slate-400">Client:</span> {rec.client_name ? rec.client_name.toUpperCase() : "N/A"}</div>
+                    <div><span className="text-slate-400">Rep:</span> {rec.representative ? rec.representative.toUpperCase() : "N/A"}</div>
+                  </div>
+
+                  <div className="text-[11px] text-slate-500 font-medium">
+                    <span className="text-slate-400">Type:</span> {rec.case_type ? rec.case_type.toUpperCase() : "N/A"}
+                  </div>
+                </div>
+
+                {/* Bottom Row: Status Dropdown & Action Options */}
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100 gap-2">
+                  <select 
+                    value={(rec.status || 'PENDING').toUpperCase()} 
+                    onChange={(e) => updateStatus(String(rec.id), e.target.value)}
+                    className={`px-2 py-1 rounded font-black uppercase text-[10px] cursor-pointer outline-none border flex-1 ${
+                      (rec.status || '').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 
+                      (rec.status || '').toUpperCase() === 'WAIVED' ? 'bg-slate-100 text-slate-600 border-slate-200' :
+                      'bg-red-100 text-red-600 border-red-200'
+                    }`}
+                  >
+                    <option value="PENDING" className="text-red-600 font-bold bg-white">PENDING</option>
+                    <option value="RECEIVED" className="text-emerald-600 font-bold bg-white">RECEIVED</option>
+                    <option value="WAIVED" className="text-slate-600 font-bold bg-white">WAIVED</option>
+                  </select>
+
+                  <div className="flex items-center gap-1">
+                    {rec.mobile_no && <a href={`https://wa.me/91${rec.mobile_no}`} target="_blank" className="p-1.5 bg-emerald-50 text-emerald-600 rounded border border-emerald-200"><MessageSquare size={14} /></a>}
+                    {rec.email_id && <a href={`mailto:${rec.email_id}`} className="p-1.5 bg-blue-50 text-blue-600 rounded border border-blue-200"><Mail size={14} /></a>}
+                    
+                    {/* Action Menu for Mobile */}
+                    <button 
+                      onClick={() => setActiveMenuId(activeMenuId === rec.id ? null : rec.id)}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded border border-slate-300"
+                    >
+                      Actions ▾
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inline Action Dropdown for Mobile if Active */}
+                {activeMenuId === rec.id && (
+                  <div className="flex gap-2 pt-2 border-t border-dashed border-slate-200">
+                    <button onClick={() => handleReopen(rec)} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold border border-blue-200">
+                      Reopen / Edit
+                    </button>
+                    <button onClick={() => handleArchive(rec.id)} className="flex-1 bg-red-50 hover:bg-red-100 text-red-700 py-1.5 rounded text-[10px] font-bold border border-red-200">
+                      Delete
+                    </button>
+                  </div>
+                )}
+
+              </div>
+            );
+          })
+        )}
+      </div>
+
+
+      {/* 2. DESKTOP TABLE VIEW (Hidden on mobile, visible on desktop md+) */}
+      <div className="hidden md:block bg-white border border-slate-300 rounded shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse table-fixed min-w-[1300px]">
             <thead>
@@ -803,15 +995,6 @@ const triggerEmailBroadcast = async () => {
           </table>
         </div>
       </div>
-
-      <AuthModal 
-        isOpen={isAuthModalOpen}
-        setIsOpen={setIsAuthModalOpen}
-        confirmPassword={confirmPassword}
-        setConfirmPassword={setConfirmPassword}
-        authError={authError}
-        executeSecureDelete={executeSecureDelete}
-      />
     </div>
   );
 }

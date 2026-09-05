@@ -384,6 +384,15 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   }
 
   if (typeof console !== 'undefined') {
+    console.groupCollapsed('[PLANNING ENGINE] PIPELINE TRACE');
+    console.log('[PLANNING ENGINE] master=architecturalPlanningEngine.ts');
+    console.log('[PLANNING ENGINE] room placement=roomPlanner.ts');
+    console.log('[PLANNING ENGINE] parking=parkingPlanner.ts');
+    console.log('[PLANNING ENGINE] stair=stairPlanner.ts');
+    console.log('[PLANNING ENGINE] openings=openingPlanner.ts');
+    console.log('[PLANNING ENGINE] validation=validationEngine.ts');
+    console.log('[PLANNING ENGINE] renderer=components/CadFloorPlansView.tsx');
+    console.groupEnd();
     console.groupCollapsed('[PLANNING ENGINE] BUILDING SUMMARY');
     for (const floorName of selectedFloors) {
       const p = floors[floorName];

@@ -1,15 +1,35 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { X, Calendar, DollarSign, ArrowDownRight, CheckCircle2, Landmark, Filter } from 'lucide-react';
+import { X, Landmark, Filter } from 'lucide-react';
+
+interface ReferredUser {
+  rawDate?: string;
+  paid_revenue?: number;
+  earned_commission_3percent?: number;
+}
+
+interface PayoutRecord {
+  payout_date?: string;
+  settlement_month?: string;
+  amount_settled?: number;
+}
 
 interface PayoutBreakdownModalProps {
   onClose: () => void;
   referralRevenue: number;
   totalSettled: number;
   currentWalletBal: number;
-  referredUsers: any[];
-  payoutHistory: any[];
+  referredUsers: ReferredUser[];
+  payoutHistory: PayoutRecord[];
+}
+
+interface GroupedRow {
+  label: string;
+  grossRevenue: number;
+  commission: number;
+  settled: number;
+  sortTimestamp: number;
 }
 
 export default function PayoutBreakdownModal({
@@ -17,8 +37,8 @@ export default function PayoutBreakdownModal({
   referralRevenue,
   totalSettled,
   currentWalletBal,
-  referredUsers,
-  payoutHistory,
+  referredUsers = [],
+  payoutHistory = [],
 }: PayoutBreakdownModalProps) {
   const [viewMode, setViewMode] = useState<'MONTHLY' | 'FY'>('MONTHLY');
 
@@ -26,48 +46,79 @@ export default function PayoutBreakdownModal({
   const negativeDeficit = isNegativeWallet ? Math.abs(currentWalletBal) : 0;
   const netPayable = Math.max(0, referralRevenue - totalSettled - negativeDeficit);
 
+  // Helper for FY String
+  const getFYString = (date: Date) => {
+    const year = date.getFullYear();
+    const monthIdx = date.getMonth(); // 0 = Jan, 3 = April
+    const fyStartYear = monthIdx >= 3 ? year : year - 1;
+    return {
+      label: `FY ${fyStartYear}-${(fyStartYear + 1).toString().slice(-2)}`,
+      sortKey: fyStartYear,
+    };
+  };
+
   // Grouping Data Month-Wise & FY-Wise
   const groupedData = useMemo(() => {
-    const map: Record<string, { label: string; grossRevenue: number; commission: number; settled: number }> = {};
+    const map: Record<string, GroupedRow> = {};
 
-    // Group Commissions from Referred Users
+    // 1. Group Commissions from Referred Users
     referredUsers.forEach((u) => {
       const uDate = u.rawDate ? new Date(u.rawDate) : new Date();
-      const monthStr = uDate.toLocaleString('default', { month: 'long', year: 'numeric' }).toUpperCase();
       
-      const year = uDate.getFullYear();
-      const monthIdx = uDate.getMonth(); // 0 = Jan, 3 = April
-      const fyStartYear = monthIdx >= 3 ? year : year - 1;
-      const fyStr = `FY ${fyStartYear}-${(fyStartYear + 1).toString().slice(-2)}`;
+      let key = '';
+      let label = '';
+      let sortTimestamp = 0;
 
-      const key = viewMode === 'MONTHLY' ? monthStr : fyStr;
+      if (viewMode === 'MONTHLY') {
+        const year = uDate.getFullYear();
+        const month = String(uDate.getMonth() + 1).padStart(2, '0');
+        key = `${year}-${month}`;
+        label = uDate.toLocaleString('default', { month: 'long', year: 'numeric' }).toUpperCase();
+        sortTimestamp = new Date(year, uDate.getMonth(), 1).getTime();
+      } else {
+        const fy = getFYString(uDate);
+        key = fy.label;
+        label = fy.label;
+        sortTimestamp = fy.sortKey;
+      }
 
       if (!map[key]) {
-        map[key] = { label: key, grossRevenue: 0, commission: 0, settled: 0 };
+        map[key] = { label, grossRevenue: 0, commission: 0, settled: 0, sortTimestamp };
       }
       map[key].grossRevenue += u.paid_revenue || 0;
       map[key].commission += u.earned_commission_3percent || 0;
     });
 
-    // Group Settled Payouts
+    // 2. Group Settled Payouts
     payoutHistory.forEach((p) => {
-      let key = (p.settlement_month || 'UNSPECIFIED').toUpperCase();
+      const pDate = p.payout_date ? new Date(p.payout_date) : new Date();
 
-      if (viewMode === 'FY') {
-        const pDate = p.payout_date ? new Date(p.payout_date) : new Date();
+      let key = '';
+      let label = '';
+      let sortTimestamp = 0;
+
+      if (viewMode === 'MONTHLY') {
+        // Parse standard payout date for precise month key matching
         const year = pDate.getFullYear();
-        const monthIdx = pDate.getMonth();
-        const fyStartYear = monthIdx >= 3 ? year : year - 1;
-        key = `FY ${fyStartYear}-${(fyStartYear + 1).toString().slice(-2)}`;
+        const month = String(pDate.getMonth() + 1).padStart(2, '0');
+        key = `${year}-${month}`;
+        label = pDate.toLocaleString('default', { month: 'long', year: 'numeric' }).toUpperCase();
+        sortTimestamp = new Date(year, pDate.getMonth(), 1).getTime();
+      } else {
+        const fy = getFYString(pDate);
+        key = fy.label;
+        label = fy.label;
+        sortTimestamp = fy.sortKey;
       }
 
       if (!map[key]) {
-        map[key] = { label: key, grossRevenue: 0, commission: 0, settled: 0 };
+        map[key] = { label, grossRevenue: 0, commission: 0, settled: 0, sortTimestamp };
       }
       map[key].settled += Number(p.amount_settled) || 0;
     });
 
-    return Object.values(map);
+    // Chronological Sort
+    return Object.values(map).sort((a, b) => b.sortTimestamp - a.sortTimestamp);
   }, [referredUsers, payoutHistory, viewMode]);
 
   return (

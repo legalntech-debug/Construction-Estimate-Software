@@ -14,8 +14,8 @@ const slabConfig: any = {
   800: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
   900: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
   1000: { door: 0.10, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  1100: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14}, //done//
-  1150: { door: 0.18, paint: 0.18, plumb: 0.25, elec: 0.25, ms: 0.14}, //done//
+  1100: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
+  1150: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
   1200: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
   1250: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
   1300: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//

@@ -2,9 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-// [START NEW FEATURE]
 import { supabase } from "@/lib/supabase";
-// [END NEW FEATURE]
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
@@ -13,10 +11,17 @@ const EXTRA_FLOORS = [
   "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR"
 ];
 
-export default function EstimatePage() {
+interface ConstructionEstimateFormProps {
+  caseTitle?: string;
+  defaultCaseType?: string;
+}
+
+export default function ConstructionEstimateForm({
+  caseTitle = "CONSTRUCTION ESTIMATE INPUT FORM",
+  defaultCaseType = "NEW CONSTRUCTION"
+}: ConstructionEstimateFormProps) {
   const router = useRouter();
 
-  // [START NEW FEATURE]
   const [clients, setClients] = useState<any[]>([]);
   const [representative, setRepresentative] = useState("");
   const [filteredReps, setFilteredReps] = useState<string[]>([]);
@@ -36,7 +41,6 @@ export default function EstimatePage() {
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
   const [currentRefNo, setCurrentRefNo] = useState("");
-  // [END NEW FEATURE]
 
   useEffect(() => {
     const savedData = localStorage.getItem("estimateData") || localStorage.getItem("estimatePreview");
@@ -366,7 +370,7 @@ export default function EstimatePage() {
       total_value: finalCalculatedAmount,
       fee_amount: finalFee,
       fee_mode: feeMode,
-      estimate_type: "NEW CONSTRUCTION",
+      estimate_type: defaultCaseType,
       plotMaster,
       floor_count: activeFloorCount,
       has_tower: activeHasTower,
@@ -401,14 +405,12 @@ export default function EstimatePage() {
   const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
   return (
-    <div className="w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-sm sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-auto">
-      
-      {/* Header Section */}
-      <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-3 mb-4 gap-2">
+    <div className="w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-xs sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-2 mb-2 gap-2">
         <div className="hidden sm:block w-24"></div>
-        <h1 className="text-xl sm:text-2xl font-bold text-center flex-1">CONSTRUCTION ESTIMATE INPUT FORM</h1>
+        <h1 className="text-lg sm:text-2xl font-bold text-center flex-1">{caseTitle}</h1>
         <div>
-          <label className="bg-black text-white px-3 py-1.5 font-bold text-xs sm:text-base uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
+          <label className="bg-black text-white px-3 py-1 font-bold text-[9pt] sm:text-[10pt] uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
             📁 UPLOAD DOC / AI SCAN
             <input 
               type="file" 
@@ -416,7 +418,7 @@ export default function EstimatePage() {
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) {
-                  alert(`Document "${file.name}" uploaded successfully!`);
+                  alert(`Document "${file.name}" uploaded successfully! (AI Auto-Extraction will be connected here soon.)`);
                 }
               }} 
             />
@@ -424,86 +426,64 @@ export default function EstimatePage() {
         </div>
       </div>
       
-      {/* Top Fields Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-7 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
-        <div className="col-span-1 sm:col-span-2">
-          <label className="font-bold block text-xs sm:text-lg">CASE TYPE</label>
-          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg">
-            <option>NEW CONSTRUCTION</option>
+      <div className="grid grid-cols-1 sm:grid-cols-7 gap-2 sm:gap-4 mb-4 border-b border-black pb-4">
+        <div className="sm:col-span-2">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">CASE TYPE</label>
+          <select className="w-full border border-black p-1 uppercase text-center text-xs sm:text-base" defaultValue={defaultCaseType}>
+            <option>{defaultCaseType}</option>
           </select>
         </div>
-        <div className="col-span-1 sm:col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">FEE</label>
-          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
+        <div className="sm:col-span-1">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">FEE</label>
+          <select className="w-full border border-black p-1 uppercase text-center text-xs sm:text-base" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
             <option value="AUTO">AUTO</option>
             <option value="MANUAL">MANUAL</option>
           </select>
           {feeMode === "MANUAL" && (
-            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
+            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1 mt-1 text-center text-xs sm:text-base" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
-        <div className="col-span-1 sm:col-span-2">
-          <label className="font-bold block text-xs sm:text-lg">CLIENT NAME</label>
-          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
+        
+        <div className="sm:col-span-2">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">CLIENT NAME</label>
+          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-1 uppercase text-center text-xs sm:text-base" placeholder="SEARCH CLIENT..." />
           <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
         </div>
-        <div className="col-span-1 sm:col-span-2">
-          <label className="font-bold block text-xs sm:text-lg">REPRESENTATIVE</label>
-          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
+        <div className="sm:col-span-2">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">REPRESENTATIVE</label>
+          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-1 uppercase text-center text-xs sm:text-base" placeholder="SEARCH REP..." />
           <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
         </div>
       </div>
 
-      {/* Customer Name & Property Address (Auto-expanding height + Manual resize support) */}
-      <div className="mb-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
-          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">CUSTOMER NAME</label>
+      <div className="mb-4 space-y-2 sm:space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-12 items-center gap-2 sm:gap-4">
+          <label className="sm:col-span-3 font-bold text-[10pt] sm:text-[12pt] border border-black p-2 bg-gray-100">CUSTOMER NAME</label>
           <textarea 
             value={customerName} 
             disabled={!isClientFilled}
-            onChange={(e) => {
-              setCustomerName(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = `${e.target.scrollHeight}px`;
-            }} 
-            ref={(el) => {
-              if (el) {
-                el.style.height = "auto";
-                el.style.height = `${el.scrollHeight}px`;
-              }
-            }}
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => setCustomerName(e.target.value)} 
+            className={`sm:col-span-9 border border-black p-2 uppercase text-left text-sm sm:text-lg placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={1} 
             placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
           />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
-          <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">PROPERTY ADDRESS</label>
+        <div className="grid grid-cols-1 sm:grid-cols-12 items-center gap-2 sm:gap-4">
+          <label className="sm:col-span-3 font-bold text-[10pt] sm:text-[12pt] border border-black p-2 bg-gray-100">PROPERTY ADDRESS</label>
           <textarea 
             value={propertyAddress} 
             disabled={!isCustomerFilled}
-            onChange={(e) => {
-              setPropertyAddress(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = `${e.target.scrollHeight}px`;
-            }} 
-            ref={(el) => {
-              if (el) {
-                el.style.height = "auto";
-                el.style.height = `${el.scrollHeight}px`;
-              }
-            }}
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            onChange={(e) => setPropertyAddress(e.target.value)} 
+            className={`sm:col-span-9 border border-black p-2 uppercase text-left text-sm sm:text-lg placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={2} 
             placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
           />
         </div>
       </div>
 
-      {/* Plot Area & Floor Selector */}
-      <div className={`grid grid-cols-12 gap-2 md:gap-4 mb-2 items-center border-t border-black pt-3 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="col-span-5 md:col-span-3">
-          <label className="font-bold block text-[11px] sm:text-lg truncate">PLOT AREA</label>
+      <div className={`grid grid-cols-1 sm:grid-cols-10 gap-2 sm:gap-4 mb-1 items-center border-t border-black pt-2 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="sm:col-span-3">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">PLOT AREA</label>
           <div className="relative flex items-center">
             <input 
               type="text" 
@@ -511,54 +491,53 @@ export default function EstimatePage() {
               disabled={!isAddressFilled}
               value={plotArea} 
               onChange={(e) => handlePlotAreaChange(e.target.value)} 
-              className="w-full border border-black p-2 uppercase text-center text-sm sm:text-lg" 
+              className="w-full border border-black p-1 uppercase text-center text-base sm:text-xl" 
             />
-            <span className="absolute right-2 text-black font-bold text-[9px] sm:text-base pointer-events-none">SQ. FT</span>
+            <span className="absolute right-2 text-black font-bold text-[9pt] sm:text-[10pt] pointer-events-none">SQ. FT</span>
           </div>
         </div>
-        <div className="col-span-7 md:col-span-7">
-          <label className="font-bold block text-[11px] sm:text-lg truncate">SELECT FLOORS: ({selectedFloors.length})</label>
+        <div className="sm:col-span-7">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">SELECT FLOORS: ({selectedFloors.length} SELECTED)</label>
           <button 
             disabled={!isPlotFilled}
             onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} 
-            className={`w-full border border-black px-2 py-2.5 font-bold text-[10px] sm:text-lg mt-1 bg-gray-100 hover:bg-gray-200 truncate ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
+            className={`w-full sm:w-auto border border-black px-6 sm:px-10 py-1 font-bold text-[9pt] sm:text-[10pt] mt-1 bg-gray-100 hover:bg-gray-200 ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
           >
-            ADD + CHOOSE FLOOR
+            + ADD / CHOOSE FLOOR
           </button>
         </div>
       </div>
-      {/* Built Up Area Details */}
+
       <div className={`mt-4 border border-black rounded-none overflow-hidden ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="bg-[#1e293b] text-white py-2.5 font-bold uppercase tracking-wider text-center text-sm sm:text-lg">BUILT UP AREA DETAILS</div>
+        <div className="bg-[#1e293b] text-white py-2 font-bold uppercase tracking-wider text-center text-[10pt] sm:text-[12pt]">BUILT UP AREA DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
             .filter(f => selectedFloors.includes(f))
             .map((f) => (
-              <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white">
-                <span className="col-span-4 font-bold text-black uppercase text-xs sm:text-lg p-2.5 text-center border-r border-black">{f}</span>
+              <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white text-xs sm:text-base">
+                <span className="col-span-4 font-bold text-black uppercase text-[9pt] sm:text-[12pt] p-1 sm:p-2 text-center border-r border-black">{f}</span>
                 <div className="col-span-4 grid grid-cols-2 gap-0 border-r border-black">
-                  <input type="number" step="0.01" min="0" placeholder="20 FT" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
-                  <input type="number" step="0.01" min="0" placeholder="50 FT" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="W (FEET)" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none p-1 sm:p-2 text-xs sm:text-base" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="L (FEET)" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none p-1 sm:p-2 text-xs sm:text-base" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
                 </div>
-                <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-4 p-2.5 text-center font-bold text-black text-xs sm:text-lg bg-transparent" />
+                <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-4 p-1 sm:p-2 text-center font-bold text-black text-[9pt] sm:text-[12pt] bg-transparent" />
               </div>
             ))}
         </div>
       </div>
 
-      {/* Summary Calculation Bar */}
-      <div className={`grid grid-cols-2 sm:grid-cols-5 mb-3 mt-4 items-center gap-2 ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
-        <div className="col-span-1 sm:col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">TOTAL AREA</label>
-          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-2 uppercase text-center bg-gray-100 font-bold text-xs sm:text-lg" />
+      <div className={`grid grid-cols-1 sm:grid-cols-5 mb-3 mt-4 items-center gap-2 ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
+        <div className="col-span-1">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">TOTAL AREA</label>
+          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold text-xs sm:text-base" />
         </div>
-        <div className="text-center font-bold text-lg hidden sm:block">X</div>
-        <div className="col-span-1 sm:col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">RATE / SQ.FT</label>
+        <div className="hidden sm:block text-center font-bold text-lg">X</div>
+        <div className="col-span-1">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">RATE / SQ.FT</label>
           <input 
             type="number" 
             step="0.01" 
-            placeholder="RATE" 
+            placeholder="RATE / SQ.FT" 
             value={rate || ""} 
             onChange={(e) => { 
               const r = parseFloat(e.target.value) || 0; 
@@ -567,12 +546,12 @@ export default function EstimatePage() {
                 setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); 
               }
             }} 
-            className="w-full text-center border border-black p-2 uppercase text-xs sm:text-lg" 
+            className="w-full text-center border border-black p-1 uppercase text-xs sm:text-base" 
           />
         </div>
-        <div className="text-center font-bold text-lg hidden sm:block">=</div>
-        <div className="col-span-2 sm:col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">TOTAL AMOUNT</label>
+        <div className="hidden sm:block text-center font-bold text-lg">=</div>
+        <div className="col-span-1">
+          <label className="font-bold block text-[10pt] sm:text-[12pt]">TOTAL AMOUNT</label>
           <input 
             type="text" 
             placeholder="TOTAL AMOUNT"
@@ -586,22 +565,20 @@ export default function EstimatePage() {
                 setRate(calculatedRate);
               }
             }} 
-            className="w-full border border-black p-2 uppercase text-center bg-gray-100 font-bold text-xs sm:text-lg" 
+            className="w-full border border-black p-1 uppercase text-center bg-gray-100 font-bold text-xs sm:text-base" 
           />
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="flex flex-col sm:flex-row gap-4 border-t border-black pt-4">
-        <button onClick={handleGenerate} className="bg-black text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto">GENERATE ESTIMATE</button>
-        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto">Clear Data</button>
+      <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 border-t border-black pt-4">
+        <button onClick={handleGenerate} className="bg-black text-white px-6 py-2 font-bold uppercase text-xs sm:text-base">GENERATE ESTIMATE</button>
+        <button onClick={handleClear} className="bg-red-600 text-white px-6 py-2 font-bold uppercase text-xs sm:text-base">Clear Data</button>
       </div>
 
-      {/* Floor Selector Modal */}
       {isFloorModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 border border-black w-full max-w-[400px] uppercase text-xs sm:text-base">
-            <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-lg">SELECT FLOORS</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2">
+          <div className="bg-white p-4 sm:p-6 border border-black w-full max-w-[400px] uppercase text-[9pt]">
+            <h2 className="font-bold mb-4 border-b border-black pb-2 text-[11pt]">SELECT FLOORS</h2>
             <div className="space-y-2 max-h-[350px] overflow-auto mb-4">
               {[...DEFAULT_FLOORS, ...EXTRA_FLOORS].map((floor) => (
                 <label key={floor} className="flex items-center gap-3 cursor-pointer p-2 border-b">

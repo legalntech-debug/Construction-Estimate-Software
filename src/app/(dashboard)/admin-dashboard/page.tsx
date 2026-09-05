@@ -17,6 +17,8 @@ import AdminPendingApprovalsWidget from './components/AdminPendingApprovalsWidge
 import AdminRefundRequestsWidget from './components/AdminRefundRequestsWidget';
 import PremiumBillingWidget from './components/PremiumBillingWidget'; 
 import BusinessProfitSharingWidget from './components/BusinessProfitSharingWidget';
+import AdminRazorpayLiveWidget from '@/app/(dashboard)/admin-dashboard/components/AdminRazorpayLiveWidget';
+import UserManagementRBAC from './components/UserManagementRBAC';
 
 export default function AdminDashboardPage(props: { 
   searchParams: Promise<{ filter?: string; inactiveDays?: string }> 
@@ -27,23 +29,22 @@ export default function AdminDashboardPage(props: {
   const [userTableSearch, setUserTableSearch] = useState('');
 
   // --- DROPDOWN FILTER FOR DASHBOARD FEATURES ---
-  // Default selected feature is set to 'RBAC'
-  const [activeFeatureFilter, setActiveFeatureFilter] = useState<string>('RBAC');
+  const [activeFeatureFilter, setActiveFeatureFilter] = useState<string>('ALL');
 
   const [hiddenSections, setHiddenSections] = useState<{ [key: string]: boolean }>({
-    gstManager: true,
-    gatewayAnalytics: true,
-    recharge: true,
-    health: true,
-    kpi: true,
+    gstManager: false,
+    gatewayAnalytics: false,
+    recharge: false,
+    health: false,
+    kpi: false,
     rbac: false,
-    audit: true,
-    inactive: true,
-    razorpayChart: true,
-    mis: true,
-    gateway: true,
-    premiumBilling: true, 
-    profitSharing: true,
+    audit: false,
+    inactive: false,
+    razorpayChart: false,
+    mis: false,
+    gateway: false,
+    premiumBilling: false, 
+    profitSharing: false,
   });
 
   const toggleSection = (key: string) => {
@@ -64,6 +65,11 @@ export default function AdminDashboardPage(props: {
 
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
   const [refundRequests, setRefundRequests] = useState<any[]>([]);
+  const [gatewayTxns, setGatewayTxns] = useState<any[]>([]);
+  
+  // States for raw estimates and service records to support widget self-containment
+  const [estimatesList, setEstimatesList] = useState<any[]>([]);
+  const [serviceRecordsList, setServiceRecordsList] = useState<any[]>([]);
 
   const [incomes, setIncomes] = useState<any[]>([]);
   const [incomeForm, setIncomeForm] = useState({
@@ -82,6 +88,7 @@ export default function AdminDashboardPage(props: {
   const [selectedGatewayFY, setSelectedGatewayFY] = useState('2026-27');
   const [rechargeFilterMode, setRechargeFilterMode] = useState<'all' | 'month'>('all');
   const [selectedRechargeMonth, setSelectedRechargeMonth] = useState(new Date().toISOString().slice(0, 7));
+  
   const filteredRechargeRequests = rechargeRequests.filter((req: any) => {
     if (rechargeFilterMode === 'month') {
       const reqDateStr = req.created_at ? new Date(req.created_at).toISOString().slice(0, 7) : '';
@@ -90,7 +97,6 @@ export default function AdminDashboardPage(props: {
     return true;
   });
 
-  // Calculate totals separately by status
   const totalApprovedAmount = filteredRechargeRequests
     .filter((req: any) => req.status === 'APPROVED')
     .reduce((sum: number, req: any) => sum + (Number(req.amount) || 0), 0);
@@ -169,10 +175,12 @@ export default function AdminDashboardPage(props: {
         enhancedProfilesRes,
         rechargesDataRes,
         incomesDataRes,
-        refundsDataRes
+        refundsDataRes,
+        estimatesRes,
+        serviceRes
       ] = await Promise.all([
         supabase.from('mis_records').select('*').gte('created_date', startDate.toISOString()),
-        supabase.from('estimates').select('payment_status, user_id, amount, reference_no, customer_name, case_type, created_at, user_payment'),
+        supabase.from('estimates').select('payment_status, user_id, amount, reference_no, customer_name, estimate_type, created_at, user_payment'),
         supabase.rpc('get_monthly_case_count'),
         supabase.rpc('get_revenue_by_fy', { start_date: startDate.toISOString(), end_date: new Date().toISOString() }),
         supabase.rpc('get_total_users'),
@@ -184,7 +192,9 @@ export default function AdminDashboardPage(props: {
         supabase.rpc('get_profiles_with_estimates_count'),
         supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false }),
         supabase.from('admin_incomes').select('*').order('created_at', { ascending: false }),
-        supabase.from('wallet_refund_requests').select('*').order('created_at', { ascending: false })
+        supabase.from('wallet_refund_requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('estimates').select('*').order('created_at', { ascending: false }),
+        supabase.from('service_records').select('*').or('payment_status.eq.paid,razorpay_payment_id.not.is.null').order('created_at', { ascending: false })
       ]);
 
       let sortedProfiles = enhancedProfilesRes.data || [];
@@ -211,6 +221,45 @@ export default function AdminDashboardPage(props: {
       setRechargeRequests(rechargesDataRes.data || []);
       setIncomes(incomesDataRes.data || []);
       setRefundRequests(refundsDataRes.data || []);
+
+      const estimatesData = estimatesRes.data || [];
+      const serviceData = serviceRes.data || [];
+      
+      setEstimatesList(estimatesData);
+      setServiceRecordsList(serviceData);
+
+      const combinedGatewayTransactions = [
+        ...estimatesData.map((item: any) => {
+          const refNo = item.reference_no || item.estimate_no || item.id || '';
+          let inferredType = 'Estimate';
+          if (refNo.includes('LnT')) {
+            inferredType = 'Construction Estimate';
+          } else if (refNo.includes('FY') || refNo.includes('D0')) {
+            inferredType = 'Estimate Type';
+          }
+
+          return {
+            ...item,
+            case_type: item.estimate_type || item.case_type || inferredType, 
+            reference_no: refNo,
+            customer_name: item.client_name || item.customer_name || 'N/A',
+            amount: Number(item.amount || item.total_amount || 0),
+            created_at: item.created_at,
+            payment_status: item.payment_status || 'paid'
+          };
+        }),
+        ...serviceData.map((item: any) => ({
+          ...item,
+          case_type: item.service_type || item.case_type || 'Drafting & Map',
+          reference_no: item.reference_no || item.razorpay_payment_id || item.id,
+          customer_name: item.client_name || item.customer_name || 'N/A',
+          amount: Number(item.user_payment || item.amount || 0),
+          created_at: item.created_at,
+          payment_status: item.payment_status || 'paid'
+        }))
+      ].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+      setGatewayTxns(combinedGatewayTransactions);
       setQueryLatency(Date.now() - startTime);
     } catch (err) {
       console.error("Error fetching admin dashboard data:", err);
@@ -222,7 +271,20 @@ export default function AdminDashboardPage(props: {
     fetchDashboardData();
   }, [mounted, filter, inactiveDays]);
 
-  const gatewayTxns = dashboardData.razorpayTransactions || [];
+  const handleUpdateUserRbac = async (userId: string, actionField: 'role' | 'status', newValue: string) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ [actionField]: newValue })
+        .eq('id', userId);
+
+      if (error) throw error;
+      alert(`User ${actionField} successfully updated to "${newValue}"!`);
+      fetchDashboardData();
+    } catch (err: any) {
+      alert('Failed to update user RBAC: ' + (err.message || err));
+    }
+  };
   
   const filteredGatewayTxns = gatewayTxns.filter((tx: any) => {
     const txDateStr = tx.created_at || tx.date || tx.payment_date || '';
@@ -309,7 +371,7 @@ export default function AdminDashboardPage(props: {
       sgst,
       igst: 0,
       total_amount: revToConsolidate,
-      description: `Automated gateway direct payment consolidation (${filteredGatewayTxns.length} transactions).`,
+      description: `Automated gateway direct payment consolidation (${filteredGatewayTxns.length} transactions) - DRC FY 2026-27 Software Engine.`,
     };
 
     try {
@@ -473,10 +535,20 @@ export default function AdminDashboardPage(props: {
 
   const filteredProfiles = dashboardData.allProfiles?.filter((p: any) => {
     const query = userTableSearch.toLowerCase();
-    const name = (p.full_name || '').toLowerCase();
+    const name = (p.full_name || p.name || '').toLowerCase();
     const email = (p.email || '').toLowerCase();
     const mobile = (p.mobile || '').toLowerCase();
-    return name.includes(query) || email.includes(query) || mobile.includes(query);
+    
+    const category = (p.category || p.user_category || p.user_type || p.account_type || '').toLowerCase();
+    const firmName = (p.firm_name || p.company_name || p.business_name || '').toLowerCase();
+
+    return (
+      name.includes(query) || 
+      email.includes(query) || 
+      mobile.includes(query) || 
+      category.includes(query) || 
+      firmName.includes(query)
+    );
   }) || [];
 
   const filteredModalEstimates = userEstimatesList.filter((est: any) => {
@@ -506,27 +578,26 @@ export default function AdminDashboardPage(props: {
         }
       `}</style>
 
-      <div className="p-4 sm:p-8 bg-slate-50/50 min-h-screen space-y-8 font-sans antialiased text-slate-950 relative select-none">
+      <div className="p-3 sm:p-6 lg:p-8 bg-slate-50/50 min-h-screen space-y-6 font-sans antialiased text-slate-950 relative select-none overflow-x-hidden">
         
         {/* Top Header */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-6 rounded-3xl shadow-sm border border-slate-100 gap-4">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-black tracking-tight text-slate-950">Enterprise Control Center</h1>
-              <span className="px-2.5 py-0.5 text-xs font-semibold bg-blue-50 text-blue-600 rounded-full border border-blue-100">v2.5 Pro Enterprise</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-950">Enterprise Control Center</h1>
+              <span className="px-2.5 py-0.5 text-xs font-semibold bg-blue-50 text-blue-600 rounded-full border border-blue-100">v2.5 Pro Enterprise (FY 2026-27)</span>
             </div>
-            <p className="text-sm text-slate-500 mt-1">Real-time financial telemetry, RBAC security, audit trails, and live system health.</p>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">Real-time financial telemetry, RBAC security, audit trails, and live system health. <span className="font-mono text-xs text-indigo-600 font-semibold">[DRC Software Engine Active]</span></p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-between lg:justify-end">
             
-            {/* --- FEATURE SELECTION DROPDOWN --- */}
-            <div className="flex items-center gap-2 bg-blue-50/60 p-1.5 rounded-2xl border border-blue-100">
+            <div className="flex items-center gap-2 bg-blue-50/60 p-1.5 rounded-2xl border border-blue-100 w-full sm:w-auto">
               <span className="text-xs font-extrabold text-blue-800 uppercase px-2">Show Feature:</span>
               <select
                 value={activeFeatureFilter}
                 onChange={(e) => setActiveFeatureFilter(e.target.value)}
-                className="bg-white text-xs font-bold text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm"
+                className="bg-white text-xs font-bold text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-sm w-full sm:w-auto"
               >
                 <option value="RBAC">RBAC Table & User Management (Default)</option>
                 <option value="PROFIT_SHARING">Business Profit Sharing & Equity</option>
@@ -545,12 +616,12 @@ export default function AdminDashboardPage(props: {
               </select>
             </div>
 
-            <div className="flex bg-slate-100 p-1.5 rounded-2xl overflow-x-auto">
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl overflow-x-auto max-w-full">
               {['day', 'week', 'month', 'year', 'fy'].map((f) => (
                 <Link 
                   key={f} 
                   href={`/admin-dashboard?filter=${f}`} 
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${filter === f ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${filter === f ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   {f.toUpperCase()}
                 </Link>
@@ -561,250 +632,35 @@ export default function AdminDashboardPage(props: {
           </div>
         </div>
 
-        {/* --- PUSH NOTIFICATION MANAGER WIDGET --- */}
         <PushNotificationManager />
 
-        {/* --- MODULAR WIDGETS --- */}
         <AdminBroadcastWidget />
         <AdminCreateUserWidget onUserCreated={fetchDashboardData} />
         <AdminPendingApprovalsWidget onActionComplete={fetchDashboardData} />
         <AdminRefundRequestsWidget refundRequests={refundRequests} onUpdate={fetchDashboardData} />
 
-        {/* --- RBAC TABLE CODE (DEFAULT ACTIVE) --- */}
+        {/* RBAC Table Section */}
         {isSectionVisible('RBAC') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
-              <div>
-                <h3 className="font-bold text-slate-800 text-base">User Role, Wallet & Estimates Tracking (RBAC)</h3>
-                <p className="text-xs text-slate-500">Filter user activity by date or month to calculate precise fee dues and estimate counts.</p>
-              </div>
-              
-              {/* Date & Month Filters Bar */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">From:</span>
-                  <input 
-                    type="date" 
-                    value={modalSelectedDate && modalFilterType === 'date' ? modalSelectedDate : ''} 
-                    onChange={(e) => { setModalSelectedDate(e.target.value); setModalFilterType('date'); }}
-                    className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-                  <span className="text-[10px] font-bold text-slate-500 uppercase">Month:</span>
-                  <input 
-                    type="month" 
-                    value={modalSelectedMonth} 
-                    onChange={(e) => { setModalSelectedMonth(e.target.value); setModalFilterType('month'); }}
-                    className="text-xs bg-transparent focus:outline-none font-semibold text-slate-800"
-                  />
-                </div>
-
-                {(modalSelectedDate || modalSelectedMonth || userTableSearch) && (
-                  <button 
-                    onClick={() => { setModalSelectedDate(''); setModalSelectedMonth(''); setUserTableSearch(''); setModalFilterType('all'); }}
-                    className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-xl text-xs font-bold hover:bg-rose-100 transition"
-                  >
-                    Reset Filters
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 pt-2">
-              <div className="w-full sm:w-72">
-                <input 
-                  type="text"
-                  placeholder="🔍 Search name, email or mobile..."
-                  value={userTableSearch}
-                  onChange={(e) => setUserTableSearch(e.target.value)}
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                />
-              </div>
-              <button 
-                onClick={() => toggleSection('rbac')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
-              >
-                {hiddenSections.rbac ? 'Show [+]' : 'Hide [-]'}
-              </button>
-            </div>
-
-            {!hiddenSections.rbac && (
-              <div className="overflow-x-auto pt-2">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
-                    <tr>
-                      <th className="p-3 rounded-l-xl">User Details (Name & Email)</th>
-                      <th className="p-3">Mobile No.</th>
-                      <th className="p-3 text-center">Wallet Balance</th>
-                      <th className="p-3 text-center">Lock Status</th>
-                      <th className="p-3 text-center">Total Estimates</th>
-                      <th className="p-3">Total Revenue (Fee)</th>
-                      <th className="p-3">Assigned Role</th>
-                      <th className="p-3">Account Status</th>
-                      <th className="p-3 rounded-r-xl text-right">Quick Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {(() => {
-                      const processedProfiles = filteredProfiles.map((p: any) => {
-                        let estCount = p.estimates_count || 0;
-                        let userRevenue = p.total_revenue || 0;
-
-                        if (modalSelectedDate || modalSelectedMonth) {
-                          const matchingEstimates = (p.estimates_list || []).filter((est: any) => {
-                            if (!est.created_at) return false;
-                            const estDate = new Date(est.created_at);
-                            if (modalFilterType === 'date' && modalSelectedDate) {
-                              return estDate.toISOString().split('T')[0] === modalSelectedDate;
-                            }
-                            if (modalFilterType === 'month' && modalSelectedMonth) {
-                              const estMonthStr = `${estDate.getFullYear()}-${String(estDate.getMonth() + 1).padStart(2, '0')}`;
-                              return estMonthStr === modalSelectedMonth;
-                            }
-                            return true;
-                          });
-                          estCount = matchingEstimates.length;
-                          userRevenue = estCount * 21;
-                        }
-
-                        return { ...p, calculatedEstCount: estCount, calculatedRevenue: userRevenue };
-                      }).filter((p: any) => {
-                        if (!modalSelectedDate && !modalSelectedMonth) return true;
-                        return p.calculatedEstCount > 0;
-                      });
-
-                      (window as any).__tempFilteredProfiles = processedProfiles;
-
-                      if (processedProfiles.length === 0) {
-                        return (
-                          <tr>
-                            <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">No profiles found matching your search or date criteria.</td>
-                          </tr>
-                        );
-                      }
-
-                      return processedProfiles.map((p: any) => {
-                        const userId = p.id;
-                        const userWalletBalance = Number(p.wallet_balance ?? 0);
-                        const userPlan = (p.plan_type || '').toUpperCase();
-                        
-                        // Check explicitly if user is Admin or has a Premium plan
-                        const isAdminUser = p.role === 'admin' || (p.email || '').toLowerCase() === 'legalntech@gmail.com';
-                        const isPremium = userPlan.includes('PREMIUM');
-
-                        // Lock Condition: Admin aur Premium ko chhod kar agar balance < 100 hai toh Locked
-                        const isUserLocked = !isAdminUser && !isPremium && userWalletBalance < 100;
-
-                        return (
-                          <tr key={userId} className="hover:bg-slate-50/50 transition">
-                            <td className="p-3">
-                              <div className="font-bold text-slate-900">{p.full_name || 'N/A'}</div>
-                              <div className="text-xs text-slate-500">{p.email || 'No Email'}</div>
-                            </td>
-
-                            <td className="p-3 text-slate-700 font-medium">
-                              {p.mobile || 'N/A'}
-                            </td>
-
-                            <td className="p-3 text-center">
-                              <span className={`px-3 py-1 rounded-xl font-black text-xs border ${
-                                userWalletBalance < 0 
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200' 
-                                  : userWalletBalance === 0 
-                                  ? 'bg-amber-50 text-amber-700 border-amber-200' 
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              }`}>
-                                {userWalletBalance < 0 ? `- ₹ ${Math.abs(userWalletBalance).toLocaleString('en-IN')}` : `₹ ${userWalletBalance.toLocaleString('en-IN')}`}
-                              </span>
-                            </td>
-
-                            {/* --- LOCK STATUS COLUMN --- */}
-                            <td className="p-3 text-center">
-                              {isAdminUser ? (
-                                <span className="px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg text-[10px] font-extrabold uppercase">Admin</span>
-                              ) : isPremium ? (
-                                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg text-[10px] font-extrabold uppercase">Exempt</span>
-                              ) : isUserLocked ? (
-                                <span className="px-2.5 py-1 bg-rose-100 text-rose-700 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">
-                                  🔒 Locked
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-extrabold uppercase">
-                                  🟢 Active
-                                </span>
-                              )}
-                            </td>
-
-                            <td className="p-3 text-center">
-                              <button 
-                                onClick={() => handleOpenUserEstimates(p)}
-                                className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-black text-xs transition shadow-sm border border-blue-200 inline-flex items-center gap-1.5"
-                              >
-                                <span>📊 {p.calculatedEstCount} {p.calculatedEstCount === 1 ? 'Estimate' : 'Estimates'}</span>
-                              </button>
-                            </td>
-
-                            <td className="p-3 font-semibold text-emerald-600">
-                              ₹ {Number(p.calculatedRevenue).toLocaleString('en-IN')}
-                            </td>
-
-                            <td className="p-3">
-                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                                p.role === 'admin' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 
-                                p.role === 'premium' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 
-                                'bg-slate-100 text-slate-600'
-                              }`}>
-                                {p.role || 'user'}
-                              </span>
-                            </td>
-
-                            <td className="p-3">
-                              <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${p.status === 'suspended' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                                {p.status || 'Active'}
-                              </span>
-                            </td>
-
-                            <td className="p-3 text-right">
-                              <form action="/api/admin/update-role" method="POST" className="inline-flex gap-2">
-                                <input type="hidden" name="user_id" value={p.user_id || p.id} />
-                                <button type="submit" name="action" value="toggle_role" className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition">
-                                  Toggle Role
-                                </button>
-                                <button type="submit" name="action" value="toggle_status" className="px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-semibold rounded-lg transition">
-                                  {p.status === 'suspended' ? 'Activate' : 'Suspend'}
-                                </button>
-                              </form>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                  <tfoot className="bg-slate-50/80 border-t border-slate-200 font-bold text-slate-900 text-xs">
-                    {(() => {
-                      const currentList = (window as any).__tempFilteredProfiles || [];
-                      const filteredActiveCount = currentList.filter((p: any) => (p.status || 'active').toLowerCase() === 'active').length;
-                      const filteredSuspendedCount = currentList.filter((p: any) => (p.status || '').toLowerCase() === 'suspended').length;
-                      const filteredWalletSum = currentList.reduce((sum: number, p: any) => sum + Number(p.wallet_balance ?? 0), 0);
-                      const filteredEstCountSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedEstCount || 0), 0);
-                      const filteredRevenueSum = currentList.reduce((sum: number, p: any) => sum + Number(p.calculatedRevenue || 0), 0);
-
-                      return (
-                        <tr><td colSpan={2} className="p-3"><div className="flex flex-col gap-1"><span className="text-blue-700 font-black">TOTAL SUMMARY (Filtered Users):</span><span className="text-slate-500 font-medium">Active: <strong className="text-emerald-600">{filteredActiveCount}</strong> | Suspended: <strong className="text-rose-600">{filteredSuspendedCount}</strong></span></div></td><td className={`p-3 text-center rounded-lg align-middle border ${filteredWalletSum < 0 ? 'bg-rose-50 text-rose-700 border-rose-200' : filteredWalletSum === 0 ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{filteredWalletSum < 0 ? `- ₹ ${Math.abs(filteredWalletSum).toLocaleString('en-IN')}` : `₹ ${filteredWalletSum.toLocaleString('en-IN')}`}</td><td className="p-3"></td><td className="p-3 text-center text-blue-700 align-middle">{filteredEstCountSum} Estimates</td><td colSpan={4} className="p-3 text-emerald-700 align-middle">₹ {filteredRevenueSum.toLocaleString('en-IN')}</td></tr>
-                      );
-                    })()}
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
+          <UserManagementRBAC 
+            filteredProfiles={filteredProfiles}
+            userTableSearch={userTableSearch}
+            setUserTableSearch={setUserTableSearch}
+            modalSelectedDate={modalSelectedDate}
+            setModalSelectedDate={setModalSelectedDate}
+            modalSelectedMonth={modalSelectedMonth}
+            setModalSelectedMonth={setModalSelectedMonth}
+            modalFilterType={modalFilterType}
+            setModalFilterType={setModalFilterType}
+            hiddenSections={hiddenSections}
+            toggleSection={toggleSection}
+            handleUpdateUserRbac={handleUpdateUserRbac}
+            handleOpenUserEstimates={handleOpenUserEstimates}
+          />
         )}
 
-        {/* --- BUSINESS PROFIT SHARING WIDGET --- */}
+        {/* Business Profit Sharing */}
         {isSectionVisible('PROFIT_SHARING') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">Business Profit Sharing & Equity Distribution</h3>
@@ -824,9 +680,9 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* --- PREMIUM BILLING REPORT WIDGET --- */}
+        {/* Premium Billing */}
         {isSectionVisible('PREMIUM_BILLING') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">Premium Subscribers Billing & Passbook</h3>
@@ -846,9 +702,9 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* --- ADVANCED GATEWAY REVENUE INSPECTOR WITH DYNAMIC FILTERS & EXCEL DOWNLOAD --- */}
+        {/* Gateway Inspector */}
         {isSectionVisible('GATEWAY_INSPECTOR') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">Payment Gateway Advanced Income & Earnings Inspector</h3>
@@ -955,9 +811,9 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* --- GST & INCOME MANAGEMENT PANEL --- */}
+        {/* GST Manager */}
         {isSectionVisible('GST_MANAGER') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">GST Filing & Income Management System</h3>
@@ -1115,9 +971,9 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* --- WALLET RECHARGE PANEL --- */}
+        {/* Wallet Recharge */}
         {isSectionVisible('WALLET_RECHARGE') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">Wallet Recharge Management Panel</h3>
@@ -1158,9 +1014,7 @@ export default function AdminDashboardPage(props: {
 
             {!hiddenSections.recharge && (
               <div className="space-y-4">
-                {/* --- STATUS-WISE TOTALS SUMMARY CARDS --- */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {/* Approved Total */}
                   <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-between">
                     <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
                       Total Approved Amount
@@ -1170,7 +1024,6 @@ export default function AdminDashboardPage(props: {
                     </p>
                   </div>
 
-                  {/* Rejected Total */}
                   <div className="bg-rose-50/60 p-4 rounded-2xl border border-rose-100 flex flex-col justify-between">
                     <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider">
                       Total Rejected Amount
@@ -1180,7 +1033,6 @@ export default function AdminDashboardPage(props: {
                     </p>
                   </div>
 
-                  {/* Pending Total */}
                   <div className="bg-amber-50/60 p-4 rounded-2xl border border-amber-100 flex flex-col justify-between">
                     <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">
                       Total Pending Amount
@@ -1191,7 +1043,6 @@ export default function AdminDashboardPage(props: {
                   </div>
                 </div>
 
-                {/* --- TABLE --- */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
@@ -1268,7 +1119,7 @@ export default function AdminDashboardPage(props: {
 
         {/* System Health */}
         {isSectionVisible('SYSTEM_HEALTH') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">System Telemetry & Health</h3>
               <button 
@@ -1312,7 +1163,7 @@ export default function AdminDashboardPage(props: {
         )}
 
         {/* Action Bar */}
-        <div className="flex justify-between items-center bg-gradient-to-r from-blue-900 to-indigo-900 p-6 rounded-3xl text-white shadow-md">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gradient-to-r from-blue-900 to-indigo-900 p-6 rounded-3xl text-white shadow-md gap-4">
           <div>
             <h2 className="text-lg font-bold">Financial Health Index: Optimal</h2>
             <p className="text-xs text-blue-200 mt-0.5">Total Revenue Tracked: ₹ {totalCalculatedRevenue.toLocaleString()}</p>
@@ -1328,9 +1179,9 @@ export default function AdminDashboardPage(props: {
           </div>
         </div>
 
-        {/* Core KPI Cards */}
+        {/* KPI Section */}
         {isSectionVisible('KPI') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">Key Performance Indicators</h3>
               <button 
@@ -1377,15 +1228,15 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* --- USER ESTIMATES MODAL --- */}
+        {/* User Estimates Modal */}
         {selectedUserForEstimates && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
               
-              <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+              <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center">
                 <div>
-                  <h3 className="text-lg font-black tracking-tight">Payment & Estimate Dispute Tracking: {selectedUserForEstimates.full_name}</h3>
-                  <p className="text-xs text-slate-300 mt-0.5">Email: {selectedUserForEstimates.email} | Mobile: <span className="text-blue-400 font-bold">{selectedUserForEstimates.mobile || 'N/A'}</span> | Current Wallet Balance: <span className="text-emerald-400 font-bold">₹ {Number(selectedUserForEstimates.wallet_balance || 0).toLocaleString('en-IN')}</span></p>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight">Payment & Estimate Dispute Tracking: {selectedUserForEstimates.full_name}</h3>
+                  <p className="text-xs text-slate-300 mt-0.5">Email: {selectedUserForEstimates.email} | Mobile: <span className="text-blue-400 font-bold">{selectedUserForEstimates.mobile || 'N/A'}</span></p>
                 </div>
                 <button 
                   onClick={() => setSelectedUserForEstimates(null)}
@@ -1395,7 +1246,7 @@ export default function AdminDashboardPage(props: {
                 </button>
               </div>
 
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
+              <div className="p-4 sm:px-6 sm:py-4 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Filter By:</span>
                   <button 
@@ -1418,7 +1269,7 @@ export default function AdminDashboardPage(props: {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
                   {modalFilterType === 'date' && (
                     <input 
                       type="date"
@@ -1491,7 +1342,7 @@ export default function AdminDashboardPage(props: {
                 </div>
               </div>
 
-              <div className="p-6 overflow-y-auto flex-1">
+              <div className="p-4 sm:p-6 overflow-y-auto flex-1">
                 {filteredModalEstimates.length > 0 ? (
                   <div className="overflow-x-auto border border-slate-100 rounded-2xl">
                     <table className="w-full text-left text-sm">
@@ -1563,7 +1414,7 @@ export default function AdminDashboardPage(props: {
 
         {/* Audit Logs */}
         {isSectionVisible('AUDIT_TRAIL') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">System Audit Trail & Security Compliance</h3>
@@ -1599,7 +1450,7 @@ export default function AdminDashboardPage(props: {
 
         {/* Inactive Users */}
         {isSectionVisible('INACTIVE_USERS') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
               <div>
                 <h3 className="font-bold text-slate-800 text-base">Dead User Engagement Analysis</h3>
@@ -1648,7 +1499,7 @@ export default function AdminDashboardPage(props: {
 
         {/* Razorpay Revenue Chart */}
         {isSectionVisible('RAZORPAY_CHART') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">Razorpay Revenue Analytics</h3>
               <button 
@@ -1666,7 +1517,7 @@ export default function AdminDashboardPage(props: {
 
         {/* MIS Metrics */}
         {isSectionVisible('MIS_METRICS') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">MIS & Financial Telemetry Metrics</h3>
               <button 
@@ -1747,25 +1598,13 @@ export default function AdminDashboardPage(props: {
           </div>
         )}
 
-        {/* Razorpay Transactions Table */}
+        {/* --- GATEWAY OPERATIONS WIDGET --- */}
         {isSectionVisible('GATEWAY_OPERATIONS') && (
-          <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-800 text-base">Payment Gateway & Dispute Operations</h3>
-                <span className="text-xs text-slate-400">Razorpay Live API Hook</span>
-              </div>
-              <button 
-                onClick={() => toggleSection('gateway')}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
-              >
-                {hiddenSections.gateway ? 'Show [+]' : 'Hide [-]'}
-              </button>
-            </div>
-            {!hiddenSections.gateway && (
-              <RazorpayTableWithFilter transactions={dashboardData.razorpayTransactions || []} />
-            )}
-          </div>
+          <AdminRazorpayLiveWidget 
+            transactions={dashboardData.razorpayTransactions || []} 
+            estimates={estimatesList}
+            serviceRecords={serviceRecordsList}
+          />
         )}
 
       </div>

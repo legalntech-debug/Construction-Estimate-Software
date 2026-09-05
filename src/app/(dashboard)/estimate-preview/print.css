@@ -9,6 +9,78 @@
   }
 }
 
+/* --- MOBILE RESPONSIVE PREVIEW WRAPPER FIX (MATCHES DESKTOP ZOOM) --- */
+@media screen and (max-width: 768px) {
+  body {
+    background-color: #f3f4f6 !important;
+    overflow-x: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Mobile container jo page ko center karega */
+  .mobile-preview-wrapper, 
+  .preview-scroll-container,
+  body > div:first-child {
+    width: 100% !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    overflow: hidden !important;
+    background-color: #f3f4f6 !important;
+    padding: 10px 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* A4 page ko mobile screen width ke hisaab se scale down karna */
+  .print-page, 
+  .invoice-box, 
+  #estimate-preview-container {
+    width: 794px !important;
+    min-width: 794px !important;
+    max-width: 794px !important;
+    transform: scale(0.45) !important;
+    transform-origin: top center !important;
+    margin-top: -10px !important;
+    margin-bottom: -55% !important;
+    background: #ffffff !important;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+    box-sizing: border-box !important;
+  }
+  
+  table {
+    word-break: break-word;
+  }
+
+ /* --- ABSOLUTE TABLE FIX FOR MOBILE VIEW --- */
+  table.estimate-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  table.estimate-table th, 
+  table.estimate-table td {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Description ko chhod kar baaki saare columns ko single line mein force karna */
+  table.estimate-table td:not(:nth-child(2)), 
+  table.estimate-table th:not(:nth-child(2)) {
+    white-space: nowrap !important;
+  }
+
+  /* Exact widths taki overflow na ho */
+  table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 5% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 35% !important; text-align: left !important; white-space: normal !important; word-break: break-word !important; }
+  table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 6% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(4), table.estimate-table td:nth-child(4) { width: 11% !important; text-align: right !important; }
+  table.estimate-table th:nth-child(5), table.estimate-table td:nth-child(5) { width: 7% !important; text-align: center !important; }
+  table.estimate-table th:nth-child(6), table.estimate-table td:nth-child(6) { width: 17% !important; text-align: right !important; }
+  table.estimate-table th:nth-child(7), table.estimate-table td:nth-child(7) { width: 19% !important; text-align: right !important; font-weight: bold !important; }
+}
+
 /* --- 2. Screen Styles --- */
 .no-print {
   display: block;
@@ -64,6 +136,8 @@
     margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
+    transform: none !important;
+    box-shadow: none !important;
   }
 
   /* --- HEADER & REF SECTION --- */
@@ -93,7 +167,7 @@
     letter-spacing: 0.3px !important;
   }
 
-  /* --- CUSTOMER DETAILS (NO BORDERS & 1-LINE VERTICAL GAP) --- */
+  /* --- CUSTOMER DETAILS --- */
   .customer-details, 
   .customer-info, 
   .client-details,
@@ -120,24 +194,6 @@
     line-height: 1.4 !important;
   }
 
-  /* CUSTOMER NAME और PROPERTY ADDRESS के बीच 12px का गैप */
-  table:not(.estimate-table) tr:first-child td,
-  .customer-details table tr:first-child td,
-  .customer-info table tr:first-child td {
-    padding-bottom: 12px !important;
-  }
-
-  .customer-details p, 
-  .customer-details div,
-  .customer-info p,
-  .customer-info div {
-    border: none !important;
-    margin-bottom: 12px !important;
-    font-size: 10px !important;
-    line-height: 1.4 !important;
-    font-weight: bold !important;
-  }
-
   /* --- ESTIMATE & SUMMARY TABLES --- */
   table:not(.customer-details-table):not(.customer-table) {
     width: 100% !important;
@@ -161,7 +217,6 @@
     width: 100% !important;
   }
 
-  /* Header repeat बंद करने के लिए बदला हुआ रूल */
   thead { display: table-row-group !important; }
   tbody { display: table-row-group !important; }
 
@@ -188,7 +243,7 @@
     border: 1px solid #000 !important;
   }
 
-  /* Column Width Alignment */
+  /* Print Mode Column Widths */
   table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 4% !important; text-align: center !important; }
   table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 46% !important; text-align: left !important; word-wrap: break-word !important; }
   table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 4% !important; text-align: center !important; }

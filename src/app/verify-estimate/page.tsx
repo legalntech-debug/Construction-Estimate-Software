@@ -6,50 +6,35 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function VerifyEstimate() {
-  // #CLEAN: Ek baday generic global search variable ko multi-column independent states me convert kiya gaya hai
   const [filterRefNo, setFilterRefNo] = useState('');
   const [filterCustomer, setFilterCustomer] = useState('');
   const [results, setResults] = useState<any[]>([]);
 
-  // 1. URL se Ref No. nikalne ke liye (Sirf Initial Load par)
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  const ref = params.get('ref');
-  
-  if (ref) {
-    setFilterRefNo(ref); 
-  } else {
-    // Agar koi URL param nahi hai, toh hi normal search load karein
-    handleSearch();
-  }
-}, []); 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    
+    if (ref) {
+      setFilterRefNo(ref); 
+    } else {
+      handleSearch();
+    }
+  }, []); 
 
-// 2. Jab bhi Filter Change ho, search trigger karne ke liye
-useEffect(() => {
-  const delayDebounceFn = setTimeout(() => {
-    handleSearch();
-  }, 500); // Debounce taaki user ke typing ke beech me request na jaye
-  
-  return () => clearTimeout(delayDebounceFn);
-}, [filterRefNo, filterCustomer]);
-
-
-// #SYNC: Jab filter values change ho, tab search update karein
-useEffect(() => {
-  const delayDebounceFn = setTimeout(() => {
-    handleSearch();
-  }, 500); // Thoda delay (500ms) taaki har type par request na jaye
-  return () => clearTimeout(delayDebounceFn);
-}, [filterRefNo, filterCustomer]);
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      handleSearch();
+    }, 500);
+    
+    return () => clearTimeout(delayDebounceFn);
+  }, [filterRefNo, filterCustomer]);
 
   const handleSearch = async () => {
     try {
-      // #SYNC: Explicitly fetching the newly added rate_per_sqft numeric column safely
       let query = supabase
         .from('estimates')
         .select('id, ref_no, created_at, customer_name, property_address, plot_area, total_builtup_area, total_construction_cost, estimate_snapshot, rate_per_sqft');
       
-      // Multi-column filtering condition logic execution
       if (filterRefNo) {
         query = query.ilike('ref_no', `%${filterRefNo}%`);
       }
@@ -70,7 +55,6 @@ useEffect(() => {
   };
 
   const downloadPDF = (item: any) => {
-    // Explicitly A4 size portrait layout parameters configuration
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -79,10 +63,9 @@ useEffect(() => {
     
     const snapshot = item.estimate_snapshot || {};
     
-    // --- 1. LETTERHEAD TOP HEADER ---
     doc.setFont("helvetica", "bold");
     doc.setFontSize(20);
-    doc.setTextColor(20, 48, 114); // Royal Blue Theme
+    doc.setTextColor(20, 48, 114);
     doc.text("LEGAL N TECH CONSULTANT", 105, 20, { align: "center" });
     
     doc.setFont("helvetica", "normal");
@@ -95,12 +78,10 @@ useEffect(() => {
     doc.setTextColor(0, 0, 0);
     doc.text("Construction Estimate Summary Report", 105, 33, { align: "center" });
     
-    // Top Horizontal Divider Line
     doc.setDrawColor(20, 48, 114);
     doc.setLineWidth(0.6);
     doc.line(14, 37, 196, 37);
 
-    // --- 2. METADATA INFO BLOCK ---
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
@@ -112,7 +93,6 @@ useEffect(() => {
     doc.setFontSize(11);
     doc.text("PROPOSED CONSTRUCTION ESTIMATE REPORT", 14, 54);
 
-    // Customer Name & Address Box Info
     doc.setFontSize(10);
     doc.text("CUSTOMER NAME", 14, 64);
     doc.setFont("helvetica", "normal");
@@ -122,17 +102,13 @@ useEffect(() => {
     doc.text("PROPERTY ADDRESS", 14, 72);
     doc.setFont("helvetica", "normal");
     
-    // Long Text Wrapping for Property Address safely
     const splitAddress = doc.splitTextToSize(item.property_address || 'N/A', 130);
     doc.text(":", 60, 72);
     doc.text(splitAddress, 63, 72);
 
-    // Dynamic Y positioning calculation based on property address lines count to fix overlaps
     const addressLines = Array.isArray(splitAddress) ? splitAddress.length : 1;
     const tableStartY = 75 + (addressLines * 5);
 
-    // --- 3. AREA & TOTAL SUMMARY VALUE TABLE ---
-    // Note: Replaced '₹' with 'Rs.' to block dynamic encoding garbage text rendering
     const summaryHeaders = [["SR", "DESCRIPTION", "AREA / VALUES"]];
     const summaryRows = [
       ["1", "PLOT AREA", `${item.plot_area || snapshot.plot_area || '0'} SQ.FT`],
@@ -155,16 +131,13 @@ useEffect(() => {
       }
     });
 
-    // --- 4. REVENUE CONVERSION PAYWALL LOCK PANEL ---
     const finalY = (doc as any).lastAutoTable.finalY + 12;
     
-    // Red Alert Box Background & Border
     doc.setFillColor(254, 242, 242); 
     doc.setDrawColor(239, 68, 68); 
     doc.setLineWidth(0.4);
     doc.rect(14, finalY, 182, 32, "FD");
 
-    // Paywall text contents inside the frame box (Removed unicode emojis)
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(220, 38, 38); 
@@ -180,11 +153,10 @@ useEffect(() => {
     doc.setTextColor(20, 48, 114);
     doc.text("Click 'Unlock Full PDF Report' on portal gateway dashboard to clear pending invoice.", 105, finalY + 26, { align: "center" });
 
-    // --- 5. SYSTEM GENERATED DISCLAIMER NOTE (Replacing Authorised Signatory) ---
     const noteY = finalY + 45;
     doc.setDrawColor(200, 200, 200);
     doc.setLineWidth(0.2);
-    doc.line(14, noteY, 196, noteY); // Top thin dividing line for disclaimer section
+    doc.line(14, noteY, 196, noteY);
 
     doc.setFont("helvetica", "italic");
     doc.setFontSize(8.5);
@@ -196,90 +168,88 @@ useEffect(() => {
     doc.text(disclaimerText1, 105, noteY + 5, { align: "center" });
     doc.text(disclaimerText2, 105, noteY + 10, { align: "center" });
 
-    // Save File safely
     doc.save(`Summary_Report_${item.ref_no}.pdf`);
   };
 
   return (
     <div className="min-h-screen bg-white">
-      <div className="bg-blue-900 text-white py-2 overflow-hidden whitespace-nowrap font-bold uppercase">
-        <div className="animate-marquee inline-block text-sm">
+      <div className="bg-blue-900 text-white py-2 overflow-hidden whitespace-nowrap font-bold uppercase text-xs">
+        <div className="animate-marquee inline-block">
           Welcome to Legal n Tech Consultants • ERP Secure Gateway • Construction Estimate System • Client Management Live • MIS Dashboard • PDF Engine • Wallet System • AI ERP Core
         </div>
       </div>
 
-      <nav className="flex justify-between items-center p-4 border-b border-gray-200">
-        <h1 className="text-xl font-bold text-blue-900 uppercase">LnT WITH AI 2.0 PORTAL</h1>
-        <div className="space-x-4">
-          <Link href="/login" className="text-blue-900 font-bold hover:underline">Sign In</Link>
-          <Link href="/signup" className="bg-blue-900 text-white px-4 py-2 rounded hover:bg-blue-800">Sign Up</Link>
+      {/* NAVBAR */}
+      <nav className="flex flex-col sm:flex-row justify-between items-center gap-4 p-5 border-b border-gray-200 bg-white shadow-sm">
+        <h1 className="text-xl font-extrabold text-blue-900 uppercase text-center sm:text-left tracking-wide">
+          LnT WITH AI 2.0 PORTAL
+        </h1>
+        <div className="flex items-center gap-3">
+          <Link href="/login" className="text-blue-900 text-sm font-bold px-4 py-2 hover:bg-blue-50 rounded-lg transition">Sign In</Link>
+          <Link href="/signup" className="bg-blue-900 text-white text-sm font-bold px-5 py-2 rounded-lg hover:bg-blue-800 shadow transition">Sign Up</Link>
         </div>
       </nav>
 
-      <div className="p-8">
-        <h2 className="text-2xl font-bold mb-6 text-center text-blue-900 uppercase">ESTIMATE VERIFICATION PORTAL</h2>
+      <div className="p-4 sm:p-8 max-w-7xl mx-auto">
+        <h2 className="text-2xl font-black mb-6 text-center text-blue-900 uppercase tracking-wide">ESTIMATE VERIFICATION PORTAL</h2>
         
-        {/* Old top multi search box line code deleted successfully - #CLEAN */}
-
-        <div className="overflow-x-auto border border-blue-600 rounded-lg shadow-sm">
-          <table className="w-full border-collapse table-fixed">
+        {/* TABLE CONTAINER WITH PROPER SCROLL & WIDTH */}
+        <div className="overflow-x-auto border border-blue-600 rounded-xl shadow-md bg-white">
+          <table className="w-full border-collapse min-w-[900px]">
             <thead className="bg-blue-900 text-white uppercase text-xs">
               <tr>
-                {/* Column level interactive inline filter fields */}
-                <th className="border p-2 w-[180px]">
-                  <div className="flex flex-col gap-1">
-                    <span>Ref No.</span>
+                <th className="border p-3 w-[180px]">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="font-bold">Ref No.</span>
                     <input 
                       type="text"
                       placeholder="Filter Ref..."
                       value={filterRefNo}
                       onChange={(e) => setFilterRefNo(e.target.value)}
-                      className="p-1 text-black text-xs font-normal rounded border border-gray-300 w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="p-1.5 text-black text-xs font-normal rounded border border-gray-300 w-full focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                     />
                   </div>
                 </th>
-                <th className="border p-2 w-[65px]">Date</th>
-                <th className="border p-2 w-[180px]">
-                  <div className="flex flex-col gap-1">
-                    <span>Customer Name</span>
+                <th className="border p-3 w-[90px] font-bold">Date</th>
+                <th className="border p-3 w-[180px]">
+                  <div className="flex flex-col gap-1.5">
+                    <span className="font-bold">Customer Name</span>
                     <input 
                       type="text"
                       placeholder="Filter Name..."
                       value={filterCustomer}
                       onChange={(e) => setFilterCustomer(e.target.value)}
-                      className="p-1 text-black text-xs font-normal rounded border border-gray-300 w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      className="p-1.5 text-black text-xs font-normal rounded border border-gray-300 w-full focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
                     />
                   </div>
                 </th>
-                <th className="border p-2 w-[270px]">Property Address</th>
-                <th className="border p-2 w-[60px]">Plot Area</th>
-                <th className="border p-2 w-[60px]">Built-up</th>
-                <th className="border p-2 w-[70px]">Rate/Sq.Ft</th>
-                <th className="border p-2 w-[90px]">Amount</th>
-                <th className="border p-2 w-[60px]">Action</th>
+                <th className="border p-3 w-[240px] font-bold">Property Address</th>
+                <th className="border p-3 w-[80px] font-bold">Plot Area</th>
+                <th className="border p-3 w-[80px] font-bold">Built-up</th>
+                <th className="border p-3 w-[90px] font-bold">Rate/Sq.Ft</th>
+                <th className="border p-3 w-[110px] font-bold">Amount</th>
+                <th className="border p-3 w-[80px] font-bold">Action</th>
               </tr>
             </thead>
             <tbody>
               {results.length > 0 ? results.map((item: any) => {
                 const snapshot = item.estimate_snapshot || {};
                 return (
-                  <tr key={item.id} className="text-center border-b hover:bg-blue-50 text-sm">
-                    <td className="border p-3 font-bold text-blue-700 break-words">{item.ref_no || 'N/A'}</td>
-                    <td className="border p-3">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN') : '-'}</td>
-                    <td className="border p-3 break-words">{item.customer_name || 'N/A'}</td>
-                    <td className="border p-3 break-words">{item.property_address || 'N/A'}</td>
-                    {/* Database ka structural numeric column priority par hai, snapshot fallback par */}
-                    <td className="border p-3">{item.plot_area || snapshot.plot_area || '-'}</td>
-                    <td className="border p-3">{item.total_builtup_area || '0'}</td>
-                    {/* Database structural main column priority data parsing */}
-                    <td className="border p-3">{item.rate_per_sqft || snapshot.rate_per_sqft || '-'}</td>
-                    <td className="border p-3 font-bold">
+                  <tr key={item.id} className="text-center border-b hover:bg-blue-50/60 text-sm">
+                    <td className="border p-3.5 font-bold text-blue-700 break-words">{item.ref_no || 'N/A'}</td>
+                    <td className="border p-3.5 text-gray-700">{item.created_at ? new Date(item.created_at).toLocaleDateString('en-IN') : '-'}</td>
+                    <td className="border p-3.5 text-gray-900 font-semibold break-words">{item.customer_name || 'N/A'}</td>
+                    <td className="border p-3.5 text-gray-700 break-words text-left">{item.property_address || 'N/A'}</td>
+                    <td className="border p-3.5 text-gray-700">{item.plot_area || snapshot.plot_area || '-'}</td>
+                    <td className="border p-3.5 text-gray-700">{item.total_builtup_area || '0'}</td>
+                    <td className="border p-3.5 text-gray-700">{item.rate_per_sqft || snapshot.rate_per_sqft || '-'}</td>
+                    <td className="border p-3.5 font-bold text-blue-900">
                       {item.total_construction_cost ? `₹${Number(item.total_construction_cost).toLocaleString('en-IN')}` : '₹0'}
                     </td>
-                    <td className="border p-3">
+                    <td className="border p-3.5">
                       <button 
                         onClick={() => downloadPDF(item)}
-                        className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700"
+                        className="bg-green-600 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold hover:bg-green-700 cursor-pointer active:scale-95 transition-transform shadow"
                       >
                         PDF
                       </button>
@@ -287,7 +257,7 @@ useEffect(() => {
                   </tr>
                 );
               }) : (
-                <tr><td colSpan={9} className="border p-6 text-gray-500 text-center">No data available</td></tr>
+                <tr><td colSpan={9} className="border p-8 text-gray-500 text-center font-medium">No data available</td></tr>
               )}
             </tbody>
           </table>
@@ -297,7 +267,6 @@ useEffect(() => {
       <style jsx>{`
         @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
         .animate-marquee { animation: marquee 20s linear infinite; }
-        th { min-width: 60px; }
       `}</style>
     </div>
   );

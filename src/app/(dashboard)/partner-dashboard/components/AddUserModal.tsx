@@ -1,13 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
-import { UserPlus, X, Mail, Lock, Eye, EyeOff, Building, ShieldCheck, MessageSquareShare } from 'lucide-react';
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { UserPlus, X, Mail, Lock, Eye, EyeOff, Building, ShieldCheck, MessageSquareShare, MapPin, CreditCard } from 'lucide-react';
 
 const INDIAN_STATES_AND_DISTRICTS: Record<string, string[]> = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
@@ -56,6 +50,8 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
   const [newUserFirmName, setNewUserFirmName] = useState('');
   const [newUserState, setNewUserState] = useState('');
   const [newUserCity, setNewUserCity] = useState('');
+  const [newUserAddress, setNewUserAddress] = useState('');
+  const [newUserAadhaar, setNewUserAadhaar] = useState('');
   const [submittingUser, setSubmittingUser] = useState(false);
   const [formError, setFormError] = useState('');
   const [createdUserPayload, setCreatedUserPayload] = useState<any>(null);
@@ -77,42 +73,45 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
     }
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newUserEmail.toLowerCase(),
-        password: newUserPassword,
-      });
-
-      if (authError || !authData.user) {
-        throw new Error(authError?.message || 'FAILED TO CREATE USER AUTH ACCOUNT.');
-      }
-
       const generatedUserCode = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
       const partnerUserCode = partnerProfile?.profiles?.user_code || partnerProfile.partner_id;
 
-      const { error: profileError } = await supabase.from('profiles').insert([
-        {
-          id: authData.user.id,
-          full_name: newUserName.toUpperCase(),
-          mobile: newUserMobile,
-          email: newUserEmail.toLowerCase(),
-          user_type: newUserType,
-          plan_type: 'BASIC PLAN',
-          firm_name: newUserType !== 'INDIVIDUAL' ? newUserFirmName.toUpperCase() : null,
-          city: newUserCity.toUpperCase(),
-          state: newUserState.toUpperCase(),
-          user_code: generatedUserCode,
-          referred_by: partnerUserCode,
-          partner_id: partnerProfile.partner_id,
-          status: 'active',
-          role: 'user',
-          terms_accepted: true,
-          terms_accepted_at: new Date().toISOString(),
-          created_at: new Date().toISOString(),
+      // API Route endpoint call
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      ]);
+        body: JSON.stringify({
+          email: newUserEmail.toLowerCase(),
+          password: newUserPassword,
+          profileData: {
+            full_name: newUserName.toUpperCase(),
+            mobile: newUserMobile,
+            email: newUserEmail.toLowerCase(),
+            address: newUserAddress.toUpperCase(),
+            aadhaar_no: newUserAadhaar,
+            user_type: newUserType,
+            plan_type: 'BASIC PLAN',
+            firm_name: newUserType !== 'INDIVIDUAL' ? newUserFirmName.toUpperCase() : null,
+            city: newUserCity.toUpperCase(),
+            state: newUserState.toUpperCase(),
+            user_code: generatedUserCode,
+            referred_by: partnerUserCode,
+            partner_id: partnerProfile.partner_id,
+            status: 'active',
+            role: 'user',
+            terms_accepted: false,
+            terms_accepted_at: null,
+            created_at: new Date().toISOString(),
+          },
+        }),
+      });
 
-      if (profileError) {
-        throw new Error(profileError.message);
+      const result = await res.json();
+
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'FAILED TO CREATE USER ACCOUNT.');
       }
 
       setCreatedUserPayload({
@@ -228,6 +227,37 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
 
             <div className="grid grid-cols-2 gap-3">
               <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                  <CreditCard size={12} className="text-indigo-400" /> AADHAAR NUMBER *
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={12}
+                  placeholder="12-DIGIT AADHAAR NUMBER"
+                  value={newUserAadhaar}
+                  onChange={(e) => setNewUserAadhaar(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                  className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 mb-1 flex items-center gap-1">
+                  <MapPin size={12} className="text-indigo-400" /> FULL ADDRESS *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="STREET / HOUSE NO. / LOCALITY"
+                  value={newUserAddress}
+                  onChange={(e) => setNewUserAddress(e.target.value.toUpperCase())}
+                  className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-emerald-500 uppercase"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
                 <label className="block text-[10px] font-bold text-slate-400 mb-1">STATE *</label>
                 <select
                   required
@@ -332,7 +362,7 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
             </div>
             <div>
               <h4 className="text-base font-black text-white">USER ACCOUNT CREATED SUCCESSFULLY!</h4>
-              <p className="text-xs text-slate-400 mt-1">Direct Auth & Profile created without OTP dependency.</p>
+              <p className="text-xs text-slate-400 mt-1">Direct Auth & Profile created. Terms approval pending for first login.</p>
             </div>
 
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-left space-y-2 font-mono text-xs">

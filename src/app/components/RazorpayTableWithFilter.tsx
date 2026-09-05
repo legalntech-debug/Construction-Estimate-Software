@@ -63,12 +63,15 @@ export default function RazorpayTableWithFilter({ transactions }: { transactions
                   <td className="py-3 px-4 font-mono font-medium text-gray-800">{txn.razorpay_payment_id || "N/A"}</td>
                   <td className="py-3 px-4 font-semibold text-blue-600">{txn.ref_no || "N/A"}</td>
                   <td className="py-3 px-4 font-medium text-gray-800">{txn.customer_name || txn.client_name || "Valued User"}</td>
-                  <td className="py-3 px-4 font-medium text-blue-600">{txn.estimate_type || "N/A"}</td>
+                  {/* FIXED: Reading case_type / caseType instead of estimate_type */}
+                  <td className="py-3 px-4 font-medium text-blue-600">
+                    {txn.case_type || txn.caseType || txn.estimate_type || "N/A"}
+                  </td>
                   <td className="py-3 px-4">{new Date(txn.created_at || Date.now()).toLocaleString('en-IN')}</td>
                   <td className="py-3 px-4 text-right font-bold text-gray-900">₹ {Number(txn.user_payment || 0).toLocaleString()}</td>
                   <td className="py-3 px-4 text-center">
                     <span className="bg-green-100 text-green-700 font-semibold px-2.5 py-1 rounded-full text-[10px]">
-                      {txn.platform_payment_status || 'PAID'}
+                      {txn.platform_payment_status || txn.payment_status || 'PAID'}
                     </span>
                   </td>
                 </tr>

@@ -1452,8 +1452,9 @@ if (isCheckingHistory) {
 }
 
 return (
-  <div className="print-area print-page p-10 bg-white min-h-screen relative">
-    <style jsx global>{`
+  <div className="w-full overflow-x-auto bg-slate-100 p-2 md:p-6 flex justify-center">
+    <div className="print-area print-page p-10 bg-white min-h-screen relative">
+      <style jsx global>{`
       @media print {
         ...
       }
@@ -1859,7 +1860,7 @@ return (
       ⬅️ BACK TO INPUT
     </button>
   </div>
-
+</div>
 </div>
 </div>
 );

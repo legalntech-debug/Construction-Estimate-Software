@@ -34,18 +34,18 @@ const EPS = 0.15; // Flexible tolerance for alignment
 
 export const NBC_ROOM_SPECS: Record<string, { minW: number; minH: number; maxRatio: number }> = {
   bedroom: { minW: 8.5, minH: 9.0, maxRatio: 2.5 },
-  "master-bedroom": { minW: 9.5, minH: 9.5, maxRatio: 2.5 },
+  "master-bedroom": { minW: 10.5, minH: 10.5, maxRatio: 2.5 },
   kitchen: { minW: 5.5, minH: 6.5, maxRatio: 2.5 },
-  "kitchen-dining": { minW: 7.5, minH: 8.5, maxRatio: 2.8 },
+  "kitchen-dining": { minW: 8.0, minH: 9.5, maxRatio: 2.8 },
   dining: { minW: 6.5, minH: 6.5, maxRatio: 2.75 },
   bathroom: { minW: 3.0, minH: 3.5, maxRatio: 2.5 },
   bath: { minW: 3.0, minH: 3.5, maxRatio: 2.5 },
   hall: { minW: 8.5, minH: 9.5, maxRatio: 3.0 },
-  parking: { minW: 8.0, minH: 11.0, maxRatio: 3.0 },
-  stairs: { minW: 5.5, minH: 8.0, maxRatio: 2.5 },
+  parking: { minW: 9.0, minH: 15.0, maxRatio: 3.0 },
+  stairs: { minW: 5.5, minH: 10.0, maxRatio: 2.5 },
   duct: { minW: 1.5, minH: 1.5, maxRatio: 5.0 },
   balcony: { minW: 2.5, minH: 2.5, maxRatio: 4.0 },
-  passage: { minW: 2.8, minH: 4.0, maxRatio: 6.0 },
+  passage: { minW: 3.0, minH: 3.0, maxRatio: 10.0 },
 };
 
 export function roomType(room: RenderedRoomBox): string {
@@ -166,7 +166,30 @@ export function validateConstructionPlan(
     const stairs = layout.find((r) => roomType(r) === "stairs");
     const bathrooms = layout.filter((r) => roomType(r) === "bathroom");
     const ducts = layout.filter((r) => roomType(r) === "duct");
+    const passages = layout.filter((r) => roomType(r) === "passage");
     const circulationLayout = layout.filter((r) => roomType(r) !== "duct" && !(r as any).subZoneOf && !(r as any).isSubRoom && (r as any).parkingZone !== "EXTENSION" && !String(r.name || "").toUpperCase().includes("OPEN TERRACE"));
+
+    // Passage is protected geometry, not leftover space. Any real room/stair/column-zone
+    // crossing it is a HARD ERROR; the planner must reject/re-plan instead of showing a
+    // warning-only invalid map.
+    for (const passage of passages) {
+      const minPassageWidth = Number((passage as any).corridorWidthFt || Math.min(passage.w, passage.h) || 0);
+      if (minPassageWidth < 3.0 - EPS) {
+        errors.push({ floor, roomKey: passage.name, severity: "ERROR", message: `${floor}: PASSAGE width ${minPassageWidth.toFixed(2)} ft is below the protected circulation minimum.` });
+      }
+      for (const other of layout) {
+        if (other === passage || roomType(other) === "duct" || (other as any).subZoneOf) continue;
+        const overlapX = Math.min(passage.x + passage.w, other.x + other.w) - Math.max(passage.x, other.x);
+        const overlapY = Math.min(passage.y + passage.h, other.y + other.h) - Math.max(passage.y, other.y);
+        if (overlapX > 0.15 && overlapY > 0.15) {
+          errors.push({ floor, roomKey: passage.name, severity: "ERROR", message: `${floor}: PASSAGE BLOCKED/CUT by ${other.name}. The protected circulation zone cannot be crossed.` });
+        }
+      }
+      const touchingRooms = layout.filter(r => r !== passage && roomType(r) !== "duct" && touches(passage, r));
+      if (touchingRooms.length < 2) {
+        errors.push({ floor, roomKey: passage.name, severity: "ERROR", message: `${floor}: PASSAGE does not connect at least two usable spaces.` });
+      }
+    }
 
     // The architectural engine may attach the exact generated program here.
     // Every required room must exist; missing input requirements are HARD errors, not warnings.
@@ -204,10 +227,15 @@ export function validateConstructionPlan(
       const type = roomType(r);
       const spec = NBC_ROOM_SPECS[type];
       if (spec) {
-        const minW = Math.min(r.w, r.h);
-        const maxW = Math.max(r.w, r.h);
-        const ratio = maxW / Math.max(0.1, minW);
-        if (minW + EPS < spec.minW || Math.min(r.w, r.h) + EPS < spec.minH) {
+        const shortDim = Math.min(r.w, r.h);
+        const longDim = Math.max(r.w, r.h);
+        const requiredShort = Math.min(spec.minW, spec.minH);
+        const requiredLong = Math.max(spec.minW, spec.minH);
+        const ratio = longDim / Math.max(0.1, shortDim);
+        // Compare orientation-independent dimensions correctly. The old check compared
+        // the short side against BOTH minima, incorrectly warning on valid 9×15 parking
+        // and 6×10 stair footprints.
+        if (shortDim + EPS < requiredShort || longDim + EPS < requiredLong) {
           warnings.push({ floor, roomKey: r.name, severity: "WARNING", message: `${floor} → ${r.name}: Compact size (${r.w.toFixed(1)}' × ${r.h.toFixed(1)}') is below preferred NBC standard.` });
         }
         if (ratio > spec.maxRatio) {

@@ -116,22 +116,27 @@ export default function GatewayRevenueWidget({ gatewayTxns, onGstConsolidated }:
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-6 my-6">
+    <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl p-4 sm:p-6 my-6 space-y-6 text-slate-100">
+      {/* Header section */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h3 className="font-bold text-slate-800 text-base">Payment Gateway Advanced Income & Earnings Inspector</h3>
-          <p className="text-xs text-slate-500">Filter online gateway revenue dynamically by Date, Month, Year, or Financial Year with Excel export support.</p>
+          <h3 className="font-extrabold text-white text-sm sm:text-base tracking-wide uppercase">
+            Payment Gateway Advanced Income & Earnings Inspector
+          </h3>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
+            Filter online gateway revenue dynamically by Date, Month, Year, or Financial Year with Excel export support.
+          </p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-start flex-wrap">
           <button 
             onClick={handleExportGatewayExcel}
-            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
+            className="flex-1 sm:flex-initial px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
           >
-            <span>📊 Download Excel (CSV)</span>
+            <span>📊 Excel Export</span>
           </button>
           <button 
             onClick={() => setIsHidden(!isHidden)}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-bold transition"
           >
             {isHidden ? 'Show [+]' : 'Hide [-]'}
           </button>
@@ -140,25 +145,33 @@ export default function GatewayRevenueWidget({ gatewayTxns, onGstConsolidated }:
 
       {!isHidden && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200 flex-wrap">
-            <span className="text-xs font-bold text-slate-500 uppercase px-2">Filter By:</span>
-            {(['month', 'date', 'year', 'fy'] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setGatewayFilterMode(mode)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${gatewayFilterMode === mode ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-600 border hover:bg-slate-100'}`}
-              >
-                {mode.toUpperCase()} WISE
-              </button>
-            ))}
+          {/* Filter Bar - Mobile Friendly Layout */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">Filter By:</span>
+              {(['month', 'date', 'year', 'fy'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setGatewayFilterMode(mode)}
+                  className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition ${
+                    gatewayFilterMode === mode 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  {mode.toUpperCase()}
+                </button>
+              ))}
+            </div>
 
-            <div className="ml-auto flex items-center gap-2">
+            {/* Dynamic Date/Month Selectors */}
+            <div className="w-full lg:w-auto lg:ml-auto flex items-center">
               {gatewayFilterMode === 'month' && (
                 <input 
                   type="month"
                   value={selectedGatewayMonth}
                   onChange={(e) => setSelectedGatewayMonth(e.target.value)}
-                  className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                  className="w-full lg:w-auto bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-black text-blue-400 focus:outline-none focus:border-blue-500"
                 />
               )}
               {gatewayFilterMode === 'date' && (
@@ -166,14 +179,14 @@ export default function GatewayRevenueWidget({ gatewayTxns, onGstConsolidated }:
                   type="date"
                   value={selectedGatewayDate}
                   onChange={(e) => setSelectedGatewayDate(e.target.value)}
-                  className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                  className="w-full lg:w-auto bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-black text-blue-400 focus:outline-none focus:border-blue-500"
                 />
               )}
               {gatewayFilterMode === 'year' && (
                 <select
                   value={selectedGatewayYear}
                   onChange={(e) => setSelectedGatewayYear(e.target.value)}
-                  className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                  className="w-full lg:w-auto bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-black text-blue-400 focus:outline-none focus:border-blue-500"
                 >
                   <option value="2026">2026</option>
                   <option value="2025">2025</option>
@@ -184,7 +197,7 @@ export default function GatewayRevenueWidget({ gatewayTxns, onGstConsolidated }:
                 <select
                   value={selectedGatewayFY}
                   onChange={(e) => setSelectedGatewayFY(e.target.value)}
-                  className="bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-black text-blue-600 focus:outline-none"
+                  className="w-full lg:w-auto bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-700 text-xs font-black text-blue-400 focus:outline-none focus:border-blue-500"
                 >
                   <option value="2026-27">FY 2026-27</option>
                   <option value="2025-26">FY 2025-26</option>
@@ -194,27 +207,28 @@ export default function GatewayRevenueWidget({ gatewayTxns, onGstConsolidated }:
             </div>
           </div>
 
+          {/* Cards Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <span className="text-xs font-bold text-slate-400 uppercase">Filtered Gateway Revenue ({gatewayFilterMode.toUpperCase()})</span>
-              <p className="text-2xl font-black text-blue-600 mt-1">₹ {activeGatewayRevenue.toLocaleString('en-IN')}</p>
-              <span className="text-[10px] text-slate-400 mt-1 block">{filteredGatewayTxns.length} matching transactions</span>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">Filtered Revenue ({gatewayFilterMode.toUpperCase()})</span>
+              <p className="text-xl sm:text-2xl font-black text-blue-400 mt-1">₹ {activeGatewayRevenue.toLocaleString('en-IN')}</p>
+              <span className="text-[10px] text-slate-500 mt-1 block">{filteredGatewayTxns.length} matching transactions</span>
             </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-              <span className="text-xs font-bold text-slate-400 uppercase">All-Time Gateway Revenue</span>
-              <p className="text-2xl font-black text-slate-900 mt-1">₹ {totalGatewayRevenueAllTime.toLocaleString('en-IN')}</p>
-              <span className="text-[10px] text-slate-400 mt-1 block">{gatewayTxns.length} total fetched transactions</span>
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800">
+              <span className="text-[11px] font-bold text-slate-400 uppercase">All-Time Revenue</span>
+              <p className="text-xl sm:text-2xl font-black text-slate-100 mt-1">₹ {totalGatewayRevenueAllTime.toLocaleString('en-IN')}</p>
+              <span className="text-[10px] text-slate-500 mt-1 block">{gatewayTxns.length} total fetched transactions</span>
             </div>
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
+            <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 flex flex-col justify-between">
               <div>
-                <span className="text-xs font-bold text-slate-400 uppercase">Actionable Note</span>
-                <p className="text-xs text-slate-600 mt-1">Convert current filtered earnings directly into monthly GST filings.</p>
+                <span className="text-[11px] font-bold text-slate-400 uppercase">Actionable Note</span>
+                <p className="text-[11px] sm:text-xs text-slate-400 mt-1">Convert current filtered earnings directly into monthly GST filings.</p>
               </div>
               <button
                 onClick={handleGenerateMonthlyConsolidatedGST}
                 className="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
               >
-                ⚡ Convert Filtered Period to GST
+                ⚡ Convert Period to GST
               </button>
             </div>
           </div>

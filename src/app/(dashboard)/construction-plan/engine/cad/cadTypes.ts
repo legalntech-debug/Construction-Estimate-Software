@@ -24,7 +24,7 @@ export type Point2D = { x: number; y: number };
 
 export type VastuZone = "NE" | "N" | "NW" | "W" | "SW" | "S" | "SE" | "E" | "CENTER";
 
-export type WallThickness = 9 | 4.5; // 9" Load Bearing Outer Wall, 4.5" Interior Partition Wall
+export type WallThickness = 9 | 4; // 9" Load Bearing Outer Wall, 4.5" Interior Partition Wall
 
 export interface WallSegment {
   id: string;

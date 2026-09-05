@@ -3,24 +3,39 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/lib/auth-context';
-import PushNotificationManager from '@/components/PushNotificationManager';
+import RechargeModal from './components/RechargeModal';
+import AdminRechargeApproval from './components/AdminRechargeApproval';
 
 /* CARD COMPONENT */
 function Card({ title, value, color }: any) {
   return (
-    <div className="bg-white border rounded-xl p-4 shadow-sm hover:shadow-md transition">
-      <p className="text-xs text-gray-400">{title}</p>
-      <h2 className={`text-2xl font-bold ${color}`}>{value}</h2>
+    <div className="bg-white border rounded-xl p-3 sm:p-4 shadow-sm hover:shadow-md transition">
+      <p className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider">{title}</p>
+      <h2 className={`text-xl sm:text-2xl font-black ${color}`}>{value}</h2>
     </div>
   );
 }
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [userData, setUserData] = useState<any>({email: '', id: '', uuid: '', name: 'Loading...', wallet: 0, planType: 'BASIC ENGINE PLAN', isAdmin: false, approvalStatus: 'APPROVED', createdAt: null });
+  const [userData, setUserData] = useState<any>({
+    email: '',
+    id: '',
+    uuid: '',
+    name: 'Loading...',
+    wallet: 0,
+    planType: 'BASIC ENGINE PLAN',
+    isAdmin: false,
+    approvalStatus: 'APPROVED',
+    createdAt: null
+  });
   const [estimateList, setEstimateList] = useState<any[]>([]);
+  
+  // States for Profile Dropdown, Hamburger Menu Drawer & Notifications
   const [showProfile, setShowProfile] = useState(false);
+  const [showMenuDrawer, setShowMenuDrawer] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+
   const [filterType, setFilterType] = useState<'All' | 'Paid' | 'Pending'>('All');
   const [refWidth, setRefWidth] = useState(240); 
   const [clientWidth, setClientWidth] = useState(240);
@@ -34,16 +49,12 @@ export default function DashboardPage() {
   const [clientSearch, setClientSearch] = useState('');
   const [representativeSearch, setRepresentativeSearch] = useState('');
 
-  // Wallet Recharge & Admin Approval States
+  // Wallet Recharge State
   const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
-  const [rechargeAmount, setRechargeAmount] = useState('');
-  const [rechargeUTR, setRechargeUTR] = useState('');
-  const [rechargeLoading, setRechargeLoading] = useState(false);
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
-  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
-   const fetchData = async () => {
+    const fetchData = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
@@ -95,131 +106,10 @@ export default function DashboardPage() {
     if (data) setRechargeRequests(data);
   };
 
-  const handleRequestRecharge = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (userData.approvalStatus !== 'APPROVED' && !userData.isAdmin) {
-      alert('Your account is pending Admin approval. You cannot recharge until approved.');
-      return;
-    }
-    if (!rechargeAmount || Number(rechargeAmount) <= 0) {
-      alert('Please enter a valid recharge amount');
-      return;
-    }
-    if (!rechargeUTR || rechargeUTR.trim() === '') {
-      alert('Please enter UTR No / UPI Transaction Reference');
-      return;
-    }
-
-    setRechargeLoading(true);
-    try {
-      const cleanUTR = rechargeUTR.trim();
-
-      // Duplicate Check via UTR No
-      const { data: existingReq, error: checkError } = await supabase
-        .from('wallet_recharges')
-        .select('id, status, utr_no')
-        .eq('utr_no', cleanUTR)
-        .maybeSingle();
-
-      if (checkError) {
-        console.error('Error checking duplicate entry:', checkError);
-      }
-
-      if (existingReq) {
-        alert(
-          '⚠️ This entry is already submitted! Please wait for approval.\n\n' +
-          'If you have any query, please raise a query on Helpline / WhatsApp No: 7987561396.'
-        );
-        setRechargeLoading(false);
-        return;
-      }
-
-      const { error } = await supabase.from('wallet_recharges').insert({
-        user_id: userData.uuid,
-        user_email: userData.email,
-        user_name: userData.name,
-        amount: Number(rechargeAmount),
-        utr_no: cleanUTR,
-        status: 'PENDING',
-        created_at: new Date().toISOString()
-      });
-
-      if (error) throw error;
-      alert('Recharge request submitted successfully to Admin for approval!');
-      setRechargeAmount('');
-      setRechargeUTR('');
-      setIsRechargeModalOpen(false);
-      fetchRecharges(userData.uuid, userData.isAdmin);
-    } catch (err: any) {
-      alert('Error submitting recharge request: ' + (err.message || err));
-    } finally {
-      setRechargeLoading(false);
-    }
-  };
-
-  const handleAdminApproveRecharge = async (reqId: string, targetUserId: string, reqAmount: number) => {
-    try {
-      const { error: updateErr } = await supabase
-        .from('wallet_recharges')
-        .update({ status: 'APPROVED' })
-        .eq('id', reqId);
-      if (updateErr) throw updateErr;
-
-      const { data: targetProfile } = await supabase
-        .from('profiles')
-        .select('wallet_balance')
-        .eq('id', targetUserId)
-        .maybeSingle();
-
-      const currentWallet = Number(targetProfile?.wallet_balance || 0);
-      const newBalance = currentWallet + Number(reqAmount);
-
-      const { error: profileErr } = await supabase
-        .from('profiles')
-        .update({ wallet_balance: newBalance })
-        .eq('id', targetUserId);
-      if (profileErr) throw profileErr;
-
-      await supabase.from('wallet_transactions').insert({
-        user_id: targetUserId,
-        amount: Number(reqAmount),
-        type: 'CREDIT',
-        ref_no: `TOPUP-${Date.now().toString().slice(-6)}`,
-        customer_name: 'Admin Topup',
-        case_type: 'Wallet Recharge Approved',
-        payment_mode: 'Admin Approval',
-        balance_after: newBalance
-      });
-
-      alert('Recharge approved and user wallet updated successfully!');
-      fetchRecharges(userData.uuid, userData.isAdmin);
-    } catch (err: any) {
-      alert('Approval failed: ' + (err.message || err));
-    }
-  };
-
-  const handleAdminRejectRecharge = async (reqId: string) => {
-    try {
-      const { error } = await supabase
-        .from('wallet_recharges')
-        .update({ status: 'REJECTED' })
-        .eq('id', reqId);
-
-      if (error) throw error;
-
-      alert('Recharge request successfully rejected!');
-      fetchRecharges(userData.uuid, userData.isAdmin);
-    } catch (err: any) {
-      alert('Rejection failed: ' + (err.message || err));
-    }
-  };
-
-  // LOGIC CALCULATIONS
   const currentDate = new Date();
   const targetLockDate = new Date('2026-08-20T00:00:00');
   const isAfterLockDate = currentDate > targetLockDate;
   
-  // 21-day grace period check for new users
   const accountCreationDate = new Date(userData.createdAt || Date.now());
   const daysSinceCreation = (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
   const isWithinGracePeriod = daysSinceCreation <= 21;
@@ -228,14 +118,11 @@ export default function DashboardPage() {
   const isPremiumUser = (userData.planType || '').toUpperCase().includes('PREMIUM');
   const isFirstDateOfMonth = currentDate.getDate() === 1;
 
-  // Admin & Premium users are NEVER locked or restricted for low balance
   const isAccountLocked = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isAfterLockDate && isWalletLow;
   
-  // Low wallet warning banner
   const showLowWalletWarning = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isWalletLow;
   const showPremiumBillClearAlert = isPremiumUser && isFirstDateOfMonth;
 
-  // REF NO COLUMN RESIZE HANDLER
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -257,7 +144,6 @@ export default function DashboardPage() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  // CLIENT COLUMN RESIZE HANDLER
   const handleClientMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
@@ -310,23 +196,23 @@ export default function DashboardPage() {
   const isApproved = userData.isAdmin || userData.approvalStatus === 'APPROVED';
 
   return (
-    <div className="p-6 space-y-6 relative">
+    <div className="p-2 sm:p-6 space-y-3 sm:space-y-6 relative pb-32 max-w-7xl mx-auto">
 
       {/* PREMIUM USER 1ST OF THE MONTH BILL CLEARANCE ALERT */}
       {showPremiumBillClearAlert && (
-        <div className="bg-blue-900 text-white px-5 py-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">📋</span>
+        <div className="bg-blue-900 text-white p-3 sm:px-5 sm:py-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">📋</span>
             <div>
-              <h4 className="font-extrabold text-sm uppercase tracking-wide">Monthly Bill Clearance Alert (1st of the Month)</h4>
-              <p className="text-xs opacity-95 mt-0.5">
-                Dear Premium Subscriber, please review and clear your monthly subscription billing statement and ledger balance.
+              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Monthly Bill Clearance Alert</h4>
+              <p className="text-[10px] sm:text-xs opacity-95 mt-0.5">
+                Dear Premium Subscriber, please review and clear your monthly subscription billing statement.
               </p>
             </div>
           </div>
           <button
             onClick={() => router.push('/billing-ledger')}
-            className="bg-amber-400 text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs uppercase shadow-md hover:bg-amber-300 transition whitespace-nowrap"
+            className="w-full sm:w-auto bg-amber-400 text-slate-950 font-black px-4 py-2 rounded-lg text-[11px] uppercase shadow hover:bg-amber-300 transition whitespace-nowrap cursor-pointer"
           >
             View Bill & Clear
           </button>
@@ -335,38 +221,57 @@ export default function DashboardPage() {
 
       {/* LOW WALLET BALANCE RECHARGE NOTIFICATION BANNER */}
       {showLowWalletWarning && (
-        <div className="bg-rose-600 text-white px-5 py-4 rounded-2xl shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4 animate-pulse">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">⚠️</span>
+        <div className="bg-rose-600 text-white p-3 sm:px-5 sm:py-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-pulse">
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">⚠️</span>
             <div>
-              <h4 className="font-extrabold text-sm uppercase tracking-wide">Low Wallet Balance Alert!</h4>
-              <p className="text-xs opacity-95 mt-0.5">
-                Your wallet balance is <strong className="underline">₹{userData.wallet.toFixed(2)}</strong> (less than ₹100). Please recharge your wallet to maintain uninterrupted service.
+              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Low Wallet Balance Alert!</h4>
+              <p className="text-[10px] sm:text-xs opacity-95 mt-0.5">
+                Your wallet balance is <strong className="underline">₹{userData.wallet.toFixed(2)}</strong> (less than ₹100). Please recharge.
               </p>
             </div>
           </div>
           <button
             onClick={() => setIsRechargeModalOpen(true)}
-            className="bg-white text-rose-600 font-black px-5 py-2.5 rounded-xl text-xs uppercase shadow-md hover:bg-rose-50 transition whitespace-nowrap"
+            className="w-full sm:w-auto bg-white text-rose-600 font-black px-4 py-2 rounded-lg text-[11px] uppercase shadow hover:bg-rose-50 transition whitespace-nowrap cursor-pointer"
           >
             Recharge Now
           </button>
         </div>
       )}
 
-      {/* HEADER WITH NOTIFICATION BELL & PROFILE */}
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <h1 className="text-xl font-black text-slate-800 uppercase">
-          {userData.isAdmin ? 'LNT ADMIN DASHBOARD (ALL RECORDS)' : 'LNT DASHBOARD'}
-        </h1>
+      {/* HEADER WITH HAMBURGER MENU, TITLE, NOTIFICATION BELL & PROFILE */}
+      <div className="flex justify-between items-center bg-white px-3 py-2.5 sm:p-4 rounded-xl shadow-sm border border-slate-200">
+        <div className="flex items-center gap-2.5">
+          {/* HAMBURGER MENU ICON */}
+          <button
+            onClick={() => {
+              setShowMenuDrawer(true);
+              setShowProfile(false);
+              setShowNotifications(false);
+            }}
+            className="text-slate-800 hover:text-blue-600 focus:outline-none cursor-pointer p-1"
+            title="Menu"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+          
+          <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight">
+            {userData.isAdmin ? 'LNT ADMIN DASHBOARD' : 'LNT DASHBOARD'}
+          </h1>
+        </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           
           {/* NOTIFICATION BELL BUTTON */}
           <div className="relative">
             <button
               onClick={async () => {
                 setShowNotifications(!showNotifications);
+                setShowMenuDrawer(false);
+                setShowProfile(false);
                 if (!('Notification' in window)) return;
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
@@ -376,10 +281,10 @@ export default function DashboardPage() {
                   });
                 }
               }}
-              className="relative p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition shadow-sm border border-slate-200"
+              className="relative p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition shadow-sm border border-slate-200 cursor-pointer"
               title="Notifications"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
               </svg>
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-600 rounded-full ring-2 ring-white"></span>
@@ -387,17 +292,17 @@ export default function DashboardPage() {
 
             {/* NOTIFICATION DROPDOWN */}
             {showNotifications && (
-              <div className="absolute right-0 mt-3 w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
+              <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
                 <div className="bg-slate-900 p-3 text-white flex justify-between items-center">
                   <span className="font-bold text-xs uppercase tracking-wider">Notifications</span>
                   <button 
                     onClick={() => setShowNotifications(false)}
-                    className="text-slate-400 hover:text-white text-sm font-bold"
+                    className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer"
                   >
                     &times;
                   </button>
                 </div>
-                <div className="p-4 space-y-2 bg-slate-50/50">
+                <div className="p-3 sm:p-4 space-y-2 bg-slate-50/50 max-h-[60vh] overflow-y-auto">
                   {showLowWalletWarning && (
                     <div className="bg-red-50 p-3 rounded-xl border border-red-200 shadow-sm space-y-2">
                       <p className="font-bold text-xs text-red-600">⚠️ Low Wallet Balance Alert!</p>
@@ -410,7 +315,7 @@ export default function DashboardPage() {
                             setShowNotifications(false);
                             setIsRechargeModalOpen(true);
                           }}
-                          className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-1.5 rounded-lg text-[10px] uppercase transition shadow-sm"
+                          className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-1.5 rounded-lg text-[10px] uppercase transition shadow-sm cursor-pointer"
                         >
                           Recharge Now
                         </button>
@@ -448,29 +353,33 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* PROFILE */}
+          {/* PROFILE ICON */}
           <div className="relative">
             <div
-              onClick={() => setShowProfile(!showProfile)}
-              className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold cursor-pointer shadow-sm"
+              onClick={() => {
+                setShowProfile(!showProfile);
+                setShowMenuDrawer(false);
+                setShowNotifications(false);
+              }}
+              className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold cursor-pointer shadow-sm text-sm"
             >
               {userData?.email?.charAt(0).toUpperCase()}
             </div>
 
             {showProfile && (
-              <div className="absolute right-0 mt-3 w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
+              <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
                 <div className="bg-blue-600 p-4 text-white flex items-center gap-3">
                   <div className="bg-blue-500/30 p-2 rounded-lg">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
                     </svg>
                   </div>
-                  <span className="font-bold text-sm tracking-wider uppercase">
+                  <span className="font-bold text-xs sm:text-sm tracking-wider uppercase">
                     {userData.isAdmin ? 'ADMIN ACCOUNT' : 'ACCOUNT STATUS'}
                   </span>
                 </div>
 
-                <div className="p-4 space-y-4">
+                <div className="p-4 space-y-4 max-h-[65vh] overflow-y-auto">
                   <div className="space-y-3 pb-4 border-b border-slate-100 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold uppercase text-slate-500">USER NAME</span>
@@ -479,7 +388,7 @@ export default function DashboardPage() {
 
                     <div className="flex items-center justify-between">
                       <span className="font-semibold uppercase text-slate-500">USER EMAIL</span>
-                      <span className="font-bold text-slate-900">{userData?.email}</span>
+                      <span className="font-bold text-slate-900 truncate max-w-[150px]">{userData?.email}</span>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -505,7 +414,7 @@ export default function DashboardPage() {
                   <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                     <div>
                       <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wide">WALLET AMOUNT</p>
-                      <p className={`text-lg font-black ${userData.wallet < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      <p className={`text-base sm:text-lg font-black ${userData.wallet < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {userData.wallet < 0 ? `- ₹ ${Math.abs(userData.wallet).toFixed(2)}` : `₹ ${userData?.wallet?.toFixed(2) || '0.00'}`}
                       </p>
                     </div>
@@ -516,7 +425,7 @@ export default function DashboardPage() {
                           setShowProfile(false);
                           router.push('/wallet-ledger');
                         }}
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs px-3 py-2 rounded-lg transition shadow-sm uppercase tracking-wider"
+                        className="bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[11px] px-2.5 py-2 rounded-lg transition shadow-sm uppercase tracking-wider cursor-pointer"
                       >
                         Ledger
                       </button>
@@ -525,7 +434,7 @@ export default function DashboardPage() {
                           setShowProfile(false);
                           setIsRechargeModalOpen(true);
                         }}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs px-4 py-2 rounded-lg transition shadow-md shadow-blue-200 uppercase tracking-wider"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[11px] px-3 py-2 rounded-lg transition shadow-md shadow-blue-200 uppercase tracking-wider cursor-pointer"
                       >
                         Recharge
                       </button>
@@ -535,7 +444,7 @@ export default function DashboardPage() {
                   <div className="space-y-1 text-xs font-bold">
                     <button 
                       onClick={() => router.push('/edit-profile')} 
-                      className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition group uppercase"
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 transition group uppercase cursor-pointer"
                     >
                       <span>EDIT PROFILE (PRE-FILLED)</span>
                     </button>
@@ -550,7 +459,7 @@ export default function DashboardPage() {
                           alert('Logout failed: ' + (err.message || err));
                         }
                       }}
-                      className="w-full flex items-center p-3 rounded-xl hover:bg-red-50 text-red-600 transition group mt-2 uppercase"
+                      className="w-full flex items-center p-2.5 rounded-xl hover:bg-red-50 text-red-600 transition group mt-1 uppercase cursor-pointer"
                     >
                       <span>LOGOUT</span>
                     </button>
@@ -562,11 +471,101 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* NAVIGATION DRAWER */}
+      {showMenuDrawer && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-start">
+          <div className="bg-white w-80 h-full shadow-2xl flex flex-col justify-between animate-in slide-in-from-left duration-200">
+            <div>
+              <div className="bg-slate-900 p-4 text-white flex justify-between items-center">
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xl">☰</span>
+                  <span className="font-black text-sm uppercase tracking-wider">LNT NAVIGATION MENU</span>
+                </div>
+                <button 
+                  onClick={() => setShowMenuDrawer(false)}
+                  className="text-slate-400 hover:text-white font-bold text-xl cursor-pointer p-1"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="p-4 space-y-2 text-xs font-bold text-slate-700 overflow-y-auto max-h-[calc(100vh-140px)]">
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/dashboard'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer text-blue-600 bg-blue-50"
+                >
+                  <span>🏠 Dashboard Home</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/wallet-ledger'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>Passbook & Wallet Ledger</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); setIsRechargeModalOpen(true); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer text-emerald-600"
+                >
+                  <span>💳 Recharge Wallet</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/edit-profile'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>⚙️ Edit Profile</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/drafting'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>📐 Map Drafting</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/plan'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>💳 Plan & Subscription</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/estimate-type'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>📊 Estimate Type</span>
+                </button>
+                <button 
+                  onClick={() => { setShowMenuDrawer(false); router.push('/document-management'); }}
+                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                >
+                  <span>📁 Document Management</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50">
+              <button 
+                onClick={async () => {
+                  try {
+                    await supabase.auth.signOut();
+                    router.push('/verify-estimate');
+                  } catch (err: any) {
+                    alert('Logout failed');
+                  }
+                }}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-sm"
+              >
+                Logout Session
+              </button>
+            </div>
+          </div>
+          <div className="flex-1" onClick={() => setShowMenuDrawer(false)}></div>
+        </div>
+      )}
+
       {/* DASHBOARD CONTENT WRAPPER */}
-      <div className={`relative space-y-6 ${isAccountLocked ? 'pointer-events-none opacity-40 select-none' : ''}`}>
+      <div className={`relative space-y-3 sm:space-y-6 ${isAccountLocked ? 'pointer-events-none opacity-40 select-none' : ''}`}>
 
         {/* KPI CARDS */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
           <Card title="TOTAL" value={totalValue} color="text-slate-800" />
           <Card title="RECEIVED" value={receivedAmount} color="text-green-600" />
           <Card title="PENDING" value={pendingAmount} color="text-red-600" />
@@ -574,46 +573,20 @@ export default function DashboardPage() {
         </div>
 
         {/* ADMIN RECHARGE APPROVAL SECTION */}
-        {userData.isAdmin && rechargeRequests.filter(r => r.status === 'PENDING').length > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm space-y-3">
-            <h2 className="text-sm font-black text-amber-800 uppercase tracking-wide">Pending Wallet Recharge Requests (Admin Dashboard)</h2>
-            <div className="space-y-2">
-              {rechargeRequests.filter(r => r.status === 'PENDING').map(req => (
-                <div key={req.id} className="flex justify-between items-center bg-white p-3 rounded-lg border border-amber-100 text-xs">
-                  <div>
-                    <p className="font-bold text-slate-900">{req.user_name || req.user_email}</p>
-                    <p className="text-slate-500">Amount: <span className="font-black text-emerald-600">₹{req.amount}</span> | UTR / Ref: <span className="font-mono font-bold text-blue-600">{req.utr_no}</span></p>
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleAdminApproveRecharge(req.id, req.user_id, req.amount)}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs shadow uppercase transition"
-                    >
-                      Approve
-                    </button>
-
-                    <button
-                      onClick={() => handleAdminRejectRecharge(req.id)}
-                      className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-3 py-1.5 rounded-lg text-xs shadow uppercase transition"
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <AdminRechargeApproval 
+          isAdmin={userData.isAdmin} 
+          rechargeRequests={rechargeRequests} 
+          onRefresh={() => fetchRecharges(userData.uuid, userData.isAdmin)} 
+        />
 
         {/* FILTER BAR */}
-        <div className="flex justify-between items-center">
-          <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             {['All', 'Paid', 'Pending'].map(type => (
               <button
                 key={type}
                 onClick={() => setFilterType(type as any)}
-                className={`px-4 py-1.5 rounded-full text-xs font-bold border transition ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 cursor-pointer ${
                   filterType === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                 }`}
               >
@@ -624,23 +597,22 @@ export default function DashboardPage() {
           {isApproved ? (
             <button
               onClick={() => router.push('/wallet-ledger')}
-              className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-lg shadow transition uppercase tracking-wide"
+              className="bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold px-3.5 py-2 rounded-lg shadow transition uppercase tracking-wide cursor-pointer text-center"
             >
               View Wallet & Ledger Passbook
             </button>
           ) : (
-            <span className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-lg font-bold border border-amber-200">
+            <span className="text-[10px] text-amber-700 bg-amber-50 px-3 py-2 rounded-lg font-bold border border-amber-200 text-center">
               Ledger Locked (Pending Admin Approval)
             </span>
           )}
         </div>
 
         {/* TABLE */}
-        <div className="overflow-x-auto bg-white rounded-lg shadow-sm border border-slate-100">
+        <div className="overflow-x-auto bg-white rounded-xl shadow-sm border border-slate-200">
           <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
             <thead>
               <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
-                
                 <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
                   <div className="flex flex-col gap-1 items-center">
                     <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
@@ -708,12 +680,12 @@ export default function DashboardPage() {
 
                 return (
                   <tr key={est.id} className="border-t hover:bg-slate-50 text-xs font-sans tracking-wide">
-                    <td className="p-3 font-bold text-blue-600 uppercase whitespace-nowrap overflow-hidden text-ellipsis">
+                    <td className="p-3 font-bold text-blue-600 uppercase text-center">
                       {est.ref_no}
                     </td>
                     <td className="p-3 text-slate-600 text-center whitespace-nowrap">{formattedDate}</td>
-                    <td className="p-3 font-extrabold text-slate-800 uppercase whitespace-nowrap overflow-hidden text-ellipsis">
-                      {cleanCustomerName.replace(/[,.]\s*$/, '')}
+                    <td className="p-3 uppercase text-center">
+                      <div className="font-extrabold text-slate-800">{cleanCustomerName.replace(/[,.]\s*$/, '')}</div>
                     </td>
                     <td className="p-3 font-bold text-slate-700 uppercase text-center truncate">
                       {est.client_name || '-'}
@@ -736,14 +708,13 @@ export default function DashboardPage() {
                         {(est.status || 'PENDING').toUpperCase()}
                       </span>
                     </td>
-
                     <td className="p-3 text-center">
                       <button
                         onClick={() => {
                           setSelectedTxn(est);
                           setIsModalOpen(true);
                         }}
-                        className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-3 py-1 rounded-lg text-xs transition border border-blue-200 uppercase"
+                        className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-3 py-1 rounded-lg text-xs transition border border-blue-200 uppercase cursor-pointer"
                       >
                         History
                       </button>
@@ -759,16 +730,16 @@ export default function DashboardPage() {
 
       {/* LOCK MESSAGE BANNER OVERLAY */}
       {isAccountLocked && (
-        <div className="absolute inset-x-6 top-32 z-40 bg-slate-900/95 text-white p-8 rounded-3xl shadow-2xl border-2 border-rose-500 text-center space-y-4 backdrop-blur-md">
+        <div className="absolute inset-x-3 sm:inset-x-6 top-32 z-40 bg-slate-900/95 text-white p-6 sm:p-8 rounded-3xl shadow-2xl border-2 border-rose-500 text-center space-y-4 backdrop-blur-md">
           <span className="text-4xl">🔒</span>
-          <h3 className="text-xl font-black uppercase text-rose-500 tracking-wider">Dashboard Locked (Recharge Required)</h3>
+          <h3 className="text-lg sm:text-xl font-black uppercase text-rose-500 tracking-wider">Dashboard Locked (Recharge Required)</h3>
           <p className="text-xs text-slate-300 max-w-lg mx-auto leading-relaxed">
             Your 21-day trial period has ended. As per platform policy effective after August 20, 2026, accounts with a wallet balance below ₹100 are restricted. Your current balance is <strong className="text-rose-400">₹{userData.wallet.toFixed(2)}</strong>.
           </p>
           <div className="pt-2">
             <button
               onClick={() => setIsRechargeModalOpen(true)}
-              className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition"
+              className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
             >
               Recharge Wallet Now to Unlock
             </button>
@@ -776,100 +747,23 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* WALLET RECHARGE MODAL */}
-      {isRechargeModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-100 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-slate-800 text-base uppercase">Recharge Wallet</h3>
-              <button 
-                onClick={() => setIsRechargeModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
-              >
-                &times;
-              </button>
-            </div>
-
-            {/* QR CODE DISPLAY SECTION */}
-            <div className="flex flex-col items-center justify-center bg-slate-50 p-4 rounded-xl border border-slate-200 text-center space-y-2">
-              <p className="text-xs font-extrabold text-slate-700 uppercase tracking-wide">Scan QR Code to Pay via Any UPI App</p>
-              
-              <div className="bg-white p-2 rounded-xl shadow-sm border border-slate-200">
-                <img 
-                  src="/qr-code.jpg" 
-                  alt="UPI QR Code" 
-                  className="w-44 h-44 object-contain mx-auto rounded-lg"
-                />
-              </div>
-              
-              <p className="text-[11px] text-slate-500 font-medium">
-                UPI ID: <strong className="text-slate-800 font-mono">9669562719-3@axl</strong>
-              </p>
-              <p className="text-[11px] text-slate-600 font-bold">
-                Helpline / WhatsApp Support: <span className="text-blue-600">7987561396</span>
-              </p>
-            </div>
-
-            <form onSubmit={handleRequestRecharge} className="space-y-4 text-xs">
-              <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 text-blue-800">
-                <p className="font-bold">Instructions:</p>
-                <p className="mt-1">Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at <strong>7987561396</strong> for quick Admin approval.</p>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1 uppercase">Recharge Amount (₹)</label>
-                <input 
-                  type="number"
-                  placeholder="e.g. 1000"
-                  value={rechargeAmount}
-                  onChange={(e) => setRechargeAmount(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 font-bold text-sm focus:outline-none focus:border-blue-600"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1 uppercase">UTR No / UPI Transaction Reference</label>
-                <input 
-                  type="text"
-                  placeholder="Enter 12-digit UTR or UPI Ref ID"
-                  value={rechargeUTR}
-                  onChange={(e) => setRechargeUTR(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 font-bold text-sm focus:outline-none focus:border-blue-600"
-                  required
-                />
-              </div>
-
-              <div className="pt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsRechargeModalOpen(false)}
-                  className="w-1/2 bg-gray-200 hover:bg-gray-300 text-slate-700 font-bold py-2.5 rounded-xl uppercase transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={rechargeLoading}
-                  className="w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold py-2.5 rounded-xl uppercase transition shadow-md shadow-blue-200"
-                >
-                  {rechargeLoading ? 'Submitting...' : 'Submit Request'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* WALLET RECHARGE MODAL COMPONENT */}
+      <RechargeModal 
+        isOpen={isRechargeModalOpen} 
+        onClose={() => setIsRechargeModalOpen(false)} 
+        userData={userData} 
+        onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)} 
+      />
 
       {/* TRANSACTION HISTORY MODAL POPUP */}
       {isModalOpen && selectedTxn && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-slate-100 space-y-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-4 sm:p-6 w-full max-w-md border border-slate-100 space-y-4">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-slate-800 text-base">Transaction History</h3>
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Transaction History</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold text-lg"
+                className="text-slate-400 hover:text-slate-600 font-bold text-lg cursor-pointer"
               >
                 &times;
               </button>
@@ -910,7 +804,7 @@ export default function DashboardPage() {
             <div className="pt-2">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded-xl text-xs transition uppercase"
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded-xl text-xs transition uppercase cursor-pointer"
               >
                 Close
               </button>
@@ -918,9 +812,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
-
       {/* FOOTER */}
-      <div className="text-xs text-gray-400 text-center pt-4">
+      <div className="text-[10px] sm:text-xs text-gray-400 text-center pt-2 pb-4">
         © 2026 LNT WITH AI 2.0 RIGHTS RESERVED
       </div>
 

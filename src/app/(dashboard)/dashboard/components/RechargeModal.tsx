@@ -16,7 +16,7 @@ export default function RechargeModal({
   onClose,
   userData,
   onRechargeSubmitted,
-  upiId = '9669562713-3@ybl',
+  upiId = '9669562719-3@axl',
   helplineNo = '7987561396'
 }: RechargeModalProps) {
   const [step, setStep] = useState<1 | 2>(1);

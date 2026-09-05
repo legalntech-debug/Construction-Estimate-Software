@@ -24,13 +24,12 @@ export default function MobileBottomNav({ onOpenMenu }: MobileBottomNavProps) {
   ];
 
   return (
-<div 
+    <div 
+      // yahan 'md:hidden' apne aap bade screen par hide kar dega, alag se JS ki zaroorat nahi hai
       className="md:hidden absolute bottom-0 left-0 right-0 w-full bg-blue-950 text-white border-t border-blue-900 z-50 no-print shadow-2xl flex flex-row flex-nowrap items-center justify-between"
       style={{ 
         height: '56px', 
-        padding: '0 2px',
-        // Yeh ensure karega ki 768px se badi screen par yeh CSS level par permanently hide rahe
-        display: typeof window !== 'undefined' && window.innerWidth >= 768 ? 'none' : 'flex' 
+        padding: '0 2px'
       }}
     >
       {navItems.map((item) => {

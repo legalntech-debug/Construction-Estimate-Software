@@ -64,8 +64,16 @@ export default function ConstructionPlanInput() {
   const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
   
   // Initial dimensions set to 0
-  const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
-    A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
+ const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
+    length: 0,
+    width: 0,
+    area: 0,
+    A: 0, 
+    B: 0, 
+    C: 0, 
+    D: 0, 
+    E: 0, 
+    F: 0
   });
   
   const [dimDetails, setDimDetails] = useState<Record<string, { ft: number; in: number }>>({
@@ -333,7 +341,7 @@ export default function ConstructionPlanInput() {
   };
 
   const handleResetDimensions = () => {
-    setPlotDimensions({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+    setPlotDimensions({ length: 0, width: 0, area: 0, A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
     setDimDetails({
       A: { ft: 0, in: 0 },
       B: { ft: 0, in: 0 },
@@ -594,7 +602,7 @@ export default function ConstructionPlanInput() {
         floorBhkConfig={floorBhkConfig || {}}
         roomEditorFloor={roomEditorFloor}
         floorRooms={floorRooms || {}}
-        planningMode={planningMode}
+        planningMode={planningMode as "AUTO" | "MANUAL"} // <--- Fixed here
         setPlanningMode={setPlanningMode}
         floorSettings={floorSettings || {}}
         settingsFloor={settingsFloor}
@@ -701,7 +709,7 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-        floorRooms={generatedCadFloorRooms}
+       floorRooms={generatedCadFloorRooms as unknown as Record<string, Record<string, FloorRoom>>} // <--- Fixed here
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}
         planningMode={planningMode}

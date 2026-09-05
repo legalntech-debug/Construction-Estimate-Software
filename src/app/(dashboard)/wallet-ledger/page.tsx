@@ -76,9 +76,8 @@ export default function WalletLedgerPage() {
   const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   
-  const [selectedMonth, setSelectedMonth] = useState<string>(
-    new Date().toISOString().slice(0, 7)
-  );
+  // Default set to 'ALL' for All-Time view across all months
+  const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [showDateDropdown, setShowDateDropdown] = useState<boolean>(false);
   const [fromDate, setFromDate] = useState<string>('');
   const [toDate, setToDate] = useState<string>('');
@@ -108,6 +107,34 @@ export default function WalletLedgerPage() {
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  // Real-time subscription setup for live updates
+  useEffect(() => {
+    if (!selectedUserId || !isAuthenticated) return;
+
+    const channel = supabaseClient
+      .channel('ledger-realtime-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_transactions', filter: `user_id=eq.${selectedUserId}` }, () => {
+        fetchLedgerData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_recharges', filter: `user_id=eq.${selectedUserId}` }, () => {
+        fetchLedgerData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'estimates', filter: `user_id=eq.${selectedUserId}` }, () => {
+        fetchLedgerData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_records', filter: `user_id=eq.${selectedUserId}` }, () => {
+        fetchLedgerData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partner_settlements', filter: `user_id=eq.${selectedUserId}` }, () => {
+        fetchLedgerData();
+      })
+      .subscribe();
+
+    return () => {
+      supabaseClient.removeChannel(channel);
+    };
+  }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -280,49 +307,59 @@ export default function WalletLedgerPage() {
       setTargetProfile(profile);
     }
 
-    let startDate = fromDate ? `${fromDate}T00:00:00` : `${selectedMonth}-01T00:00:00`;
-    let endDate = toDate ? `${toDate}T23:59:59` : `${selectedMonth}-31T23:59:59`;
+    // Build query filters based on selectedMonth or custom date range
+    let startDate = '';
+    let endDate = '';
+
+    if (fromDate && toDate) {
+      startDate = `${fromDate}T00:00:00`;
+      endDate = `${toDate}T23:59:59`;
+    } else if (selectedMonth !== 'ALL') {
+      startDate = `${selectedMonth}-01T00:00:00`;
+      endDate = `${selectedMonth}-31T23:59:59`;
+    }
 
     // 1. Fetch Wallet Transactions
-    const { data: walletTx } = await supabaseClient
-      .from('wallet_transactions')
-      .select('*')
-      .eq('user_id', selectedUserId)
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    let walletQuery = supabaseClient.from('wallet_transactions').select('*').eq('user_id', selectedUserId);
+    if (startDate && endDate) {
+      walletQuery = walletQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: walletTx } = await walletQuery;
 
     // 2. Fetch Wallet Recharges
-    const { data: rechargeTx } = await supabaseClient
-      .from('wallet_recharges')
-      .select('*')
-      .eq('user_id', selectedUserId)
-      .or('status.eq.APPROVED,status.eq.approved')
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    let rechargeQuery = supabaseClient.from('wallet_recharges').select('*').eq('user_id', selectedUserId).or('status.eq.APPROVED,status.eq.approved');
+    if (startDate && endDate) {
+      rechargeQuery = rechargeQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: rechargeTx } = await rechargeQuery;
 
     // 3. Fetch Estimates / Plan Usage
-    const { data: estimateTx } = await supabaseClient
-      .from('estimates')
-      .select('*')
-      .eq('user_id', selectedUserId)
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    let estimateQuery = supabaseClient.from('estimates').select('*').eq('user_id', selectedUserId);
+    if (startDate && endDate) {
+      estimateQuery = estimateQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: estimateTx } = await estimateQuery;
 
     // 4. FETCH PARTNER SETTLEMENTS & AUTO ADJUSTMENTS
-    const { data: partnerSettlements } = await supabaseClient
-      .from('partner_settlements')
-      .select('*')
-      .eq('user_id', selectedUserId)
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    let partnerSettlementQuery = supabaseClient.from('partner_settlements').select('*').eq('user_id', selectedUserId);
+    if (startDate && endDate) {
+      partnerSettlementQuery = partnerSettlementQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: partnerSettlements } = await partnerSettlementQuery;
 
     // 5. FETCH PARTNER LEDGER ADJUSTMENTS
-    const { data: partnerTx } = await supabaseClient
-      .from('partner_ledger')
-      .select('*')
-      .or(`user_id.eq.${selectedUserId},partner_id.eq.${selectedUserId}`)
-      .gte('created_at', startDate)
-      .lte('created_at', endDate);
+    let partnerQuery = supabaseClient.from('partner_ledger').select('*').or(`user_id.eq.${selectedUserId},partner_id.eq.${selectedUserId}`);
+    if (startDate && endDate) {
+      partnerQuery = partnerQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: partnerTx } = await partnerQuery;
+
+    // 6. Fetch Service Records / Deed Drafting Data
+    let serviceQuery = supabaseClient.from('service_records').select('*').eq('user_id', selectedUserId);
+    if (startDate && endDate) {
+      serviceQuery = serviceQuery.gte('created_at', startDate).lte('created_at', endDate);
+    }
+    const { data: serviceRecordsTx } = await serviceQuery;
 
     let combinedTx: Transaction[] = [];
 
@@ -384,6 +421,40 @@ export default function WalletLedgerPage() {
       });
     }
 
+    if (serviceRecordsTx) {
+      serviceRecordsTx.forEach((s: any) => {
+        const fee = Number(s.user_payment || s.amount || s.total_amount || 0);
+        
+        // Extract buyer name from form_snapshot JSON if customer_name is missing/empty
+        let resolvedCustomerName = s.customer_name;
+        if (!resolvedCustomerName || resolvedCustomerName.trim() === '' || resolvedCustomerName === s.client_name) {
+          try {
+            const snapshot = typeof s.form_snapshot === 'string' ? JSON.parse(s.form_snapshot) : s.form_snapshot;
+            if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
+              resolvedCustomerName = snapshot.buyers[0].name || s.client_name || 'N/A';
+            } else {
+              resolvedCustomerName = s.client_name || 'N/A';
+            }
+          } catch (err) {
+            resolvedCustomerName = s.client_name || s.customer_name || 'N/A';
+          }
+        }
+
+        combinedTx.push({
+          id: s.ref_no || s.id,
+          created_at: s.created_at,
+          ref_no: s.ref_no || 'DEED-REF',
+          customer_name: resolvedCustomerName,
+          case_type: s.case_type || s.service_type || 'Deed Drafting Service',
+          payment_mode: s.payment_status === 'paid' ? 'Online Gateway' : 'Wallet Deduction',
+          razorpay_payment_id: s.razorpay_payment_id || '-',
+          type: 'DEBIT',
+          amount: fee,
+          balance_after: 0
+        });
+      });
+    }
+
     // PROCESS PARTNER SETTLEMENTS (AUTO-RECOVERY / AUTO-ADJUSTMENT)
     if (partnerSettlements) {
       partnerSettlements.forEach((ps: any) => {
@@ -397,7 +468,7 @@ export default function WalletLedgerPage() {
             case_type: ps.notes || 'Partner Network Auto Adjustment',
             payment_mode: ps.mode || 'Commission Auto-Recovery',
             razorpay_payment_id: ps.utr_no || '-',
-            type: 'CREDIT', // Auto-adjusting negative wallet acts as a CREDIT
+            type: 'CREDIT',
             amount: Math.abs(Number(ps.amount || ps.amount_paid || 0)),
             balance_after: 0
           });
@@ -695,7 +766,7 @@ export default function WalletLedgerPage() {
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-200 print:hidden">
         <div>
           <h1 className="text-2xl font-black text-slate-900 tracking-wide uppercase">Wallet & Account Ledger</h1>
-          <p className="text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, partner adjustments, and platform usage logs.</p>
+          <p className="text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, partner adjustments, and platform usage logs with real-time live sync.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3 shrink-0">
           
@@ -706,7 +777,7 @@ export default function WalletLedgerPage() {
             >
               <Calendar size={18} className="text-slate-600" />
               <span className="text-sm font-semibold text-slate-800">
-                {fromDate && toDate ? `${fromDate} to ${toDate}` : selectedMonth}
+                {fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All Months (All-Time)' : selectedMonth)}
               </span>
               <ChevronDown size={14} className="text-slate-500" />
             </div>
@@ -718,12 +789,23 @@ export default function WalletLedgerPage() {
                   <button onClick={() => setShowDateDropdown(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕</button>
                 </div>
                 <div>
+                  <button 
+                    onClick={() => {
+                      setSelectedMonth('ALL');
+                      setFromDate('');
+                      setToDate('');
+                      setShowDateDropdown(false);
+                    }}
+                    className={`w-full py-2 mb-2 rounded text-xs font-bold transition ${selectedMonth === 'ALL' && !fromDate ? 'bg-blue-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                  >
+                    View All Months (All-Time)
+                  </button>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Month Selector</label>
                   <input 
                     type="month" 
-                    value={selectedMonth}
+                    value={selectedMonth === 'ALL' ? '' : selectedMonth}
                     onChange={(e) => {
-                      setSelectedMonth(e.target.value);
+                      setSelectedMonth(e.target.value || 'ALL');
                       setFromDate('');
                       setToDate('');
                     }}
@@ -753,12 +835,12 @@ export default function WalletLedgerPage() {
                     </div>
                   </div>
                 </div>
-                {(fromDate || toDate) && (
+                {(fromDate || toDate || selectedMonth !== 'ALL') && (
                   <button 
-                    onClick={() => { setFromDate(''); setToDate(''); setShowDateDropdown(false); }}
+                    onClick={() => { setSelectedMonth('ALL'); setFromDate(''); setToDate(''); setShowDateDropdown(false); }}
                     className="w-full bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold py-1.5 rounded transition"
                   >
-                    Clear Custom Range
+                    Reset to All-Time View
                   </button>
                 )}
               </div>
@@ -935,8 +1017,8 @@ export default function WalletLedgerPage() {
         {/* Ledger Table */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 font-bold text-sm uppercase tracking-wide text-slate-700 flex justify-between items-center">
-            <span>Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : selectedMonth})</span>
-            <span className="text-xs text-slate-500 font-normal"> Passbook </span>
+            <span>Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All Months (All-Time)' : selectedMonth)})</span>
+            <span className="text-xs text-slate-500 font-normal"> Passbook (Live Sync Active) </span>
           </div>
 
           {loading ? (

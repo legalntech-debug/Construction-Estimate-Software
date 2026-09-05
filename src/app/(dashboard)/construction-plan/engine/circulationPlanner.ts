@@ -1,5 +1,5 @@
 import { FloorRoom } from './planningTypes';
-import { findSharedBoundary } from './doorWindowRules';
+import { findSharedBoundary } from './openingPlanner';
 
 function typeOf(r: FloorRoom): string {
   const s = `${r.type || ''} ${r.name || ''}`.toLowerCase();

@@ -242,19 +242,19 @@ export default function AdminRefundRequestsWidget({ refundRequests, onUpdate }: 
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
-      <div className="flex justify-between items-center">
+    <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
-          <h3 className="font-bold text-slate-800 text-base">Unutilized Balance Refund Requests</h3>
-          <p className="text-xs text-slate-500">Review users&apos; wallet refund requests, approve with UTR, reject, or revert with Admin OTP security.</p>
+          <h3 className="font-bold text-slate-800 text-sm sm:text-base">Unutilized Balance Refund Requests</h3>
+          <p className="text-[11px] sm:text-xs text-slate-500">Review users&apos; wallet refund requests, approve with UTR, reject, or revert with Admin OTP security.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 self-end sm:self-auto">
           <span className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-xl font-bold border border-amber-200">
             {pendingCount} Pending
           </span>
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition border border-slate-200"
+            className="px-3 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition border border-slate-200 shrink-0"
           >
             {isOpen ? 'Hide [-]' : 'Show [+]'}
           </button>
@@ -262,8 +262,8 @@ export default function AdminRefundRequestsWidget({ refundRequests, onUpdate }: 
       </div>
 
       {isOpen && (
-        <div className="overflow-x-auto pt-2 animate-in fade-in duration-200">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto pt-2 animate-in fade-in duration-200 -mx-4 sm:mx-0 px-4 sm:px-0">
+          <table className="w-full text-left text-sm min-w-[650px] sm:min-w-full">
             <thead className="bg-slate-50 text-slate-400 uppercase text-[10px] tracking-wider font-bold">
               <tr>
                 <th className="p-3 rounded-l-xl">User ID</th>
@@ -291,12 +291,12 @@ export default function AdminRefundRequestsWidget({ refundRequests, onUpdate }: 
                       </span>
                     </td>
                     <td className="p-3 text-slate-500">{new Date(req.created_at).toLocaleDateString()}</td>
-                    <td className="p-3 text-right space-x-1.5 whitespace-nowrap">
+                    <td className="p-3 text-right space-x-1 whitespace-nowrap">
                       {req.status !== 'APPROVED' && (
                         <button
                           onClick={() => handleInitiateAction(req, 'APPROVE')}
                           disabled={loadingId === req.id}
-                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
+                          className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
                         >
                           Approve
                         </button>
@@ -306,7 +306,7 @@ export default function AdminRefundRequestsWidget({ refundRequests, onUpdate }: 
                         <button
                           onClick={() => handleInitiateAction(req, 'REJECT')}
                           disabled={loadingId === req.id}
-                          className="px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
+                          className="px-2 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
                         >
                           Reject
                         </button>
@@ -316,7 +316,7 @@ export default function AdminRefundRequestsWidget({ refundRequests, onUpdate }: 
                         <button
                           onClick={() => handleInitiateAction(req, 'REVERT')}
                           disabled={loadingId === req.id}
-                          className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
+                          className="px-2 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg uppercase text-[10px] shadow-sm transition"
                         >
                           Revert Back
                         </button>

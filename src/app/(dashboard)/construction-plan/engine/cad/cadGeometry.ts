@@ -151,7 +151,7 @@ export function generateWallsFromRooms(
         id: `wall_${wallIdCounter++}`,
         start: raw.start,
         end: raw.end,
-        thickness: raw.isOuter ? 9 : 4.5,
+        thickness: raw.isOuter ? 9 : 4,
         isOuter: raw.isOuter,
         associatedRoomIds: [raw.roomId],
       });

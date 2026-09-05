@@ -36,15 +36,15 @@ export default function AdminBroadcastWidget() {
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
+    <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="font-bold text-slate-800 text-base">📢 Send Broadcast Push Notification</h3>
-          <p className="text-xs text-slate-500">Send an instant notification directly to all users&apos; mobile and desktop screens.</p>
+          <h3 className="font-bold text-slate-800 text-sm sm:text-base">📢 Send Broadcast Push Notification</h3>
+          <p className="text-[11px] sm:text-xs text-slate-500">Send an instant notification directly to all users&apos; mobile and desktop screens.</p>
         </div>
         <button 
           onClick={() => setShowBroadcastPanel(!showBroadcastPanel)}
-          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition shrink-0 ml-2"
         >
           {showBroadcastPanel ? 'Hide [-]' : 'Show [+]'}
         </button>
@@ -71,7 +71,7 @@ export default function AdminBroadcastWidget() {
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={3}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               required
             />
           </div>

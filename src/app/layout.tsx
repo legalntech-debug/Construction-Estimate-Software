@@ -10,9 +10,8 @@ const inter = Inter({
   variable: "--font-sans",
 });
 
-// PWA और App की metadata यहाँ डिफाइन करें
+// Define metadata for PWA and App
 export const metadata: Metadata = {
- 
   description: "Construction Estimate & Deed Drafting System",
   manifest: "/manifest.json",
   icons: {
@@ -20,7 +19,7 @@ export const metadata: Metadata = {
   },
 };
 
-// Next.js 14+ में viewport के लिए अलग से export करना सही तरीका है
+// Recommended approach for viewport configuration in Next.js 14+
 export const viewport: Viewport = {
   themeColor: "#2563eb",
   width: "device-width",

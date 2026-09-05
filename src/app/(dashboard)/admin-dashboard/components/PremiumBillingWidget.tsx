@@ -123,50 +123,53 @@ export default function PremiumBillingWidget() {
   };
 
   return (
-    <div className="w-full bg-white rounded-xl shadow-sm border border-slate-200 p-6 mt-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b border-slate-100">
+    <div className="w-full bg-slate-900 rounded-2xl border border-slate-800 shadow-xl p-4 sm:p-6 mt-6 text-slate-100">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 pb-4 border-b border-slate-800">
         <div>
-          <h2 className="text-xl font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
-            <ShieldCheck className="text-blue-900" size={24} /> Premium Plan Billing & Usage
+          <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-wide flex items-center gap-2">
+            <ShieldCheck className="text-blue-400" size={22} /> Premium Plan Billing & Usage
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">Active premium subscribers passbook, case logs, and letterhead bill generation.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Active premium subscribers passbook, case logs, and letterhead bill generation.</p>
         </div>
         <button 
           onClick={() => window.print()}
-          className="flex items-center gap-2 bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-800 transition shadow"
+          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-2 rounded-xl text-xs font-bold transition shadow-sm"
         >
           <Printer size={14} /> Print Report
         </button>
       </div>
 
+      {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+        <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Total Premium Users</p>
-            <h3 className="text-2xl font-black text-blue-900 mt-1">{premiumUsers.length}</h3>
+            <h3 className="text-2xl font-black text-blue-400 mt-1">{premiumUsers.length}</h3>
           </div>
-          <div className="p-3 bg-blue-100 text-blue-900 rounded-lg"><Users size={20} /></div>
+          <div className="p-3 bg-blue-950 text-blue-400 border border-blue-900/50 rounded-xl"><Users size={20} /></div>
         </div>
 
-        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+        <div className="bg-slate-950/40 p-4 rounded-2xl border border-slate-800 flex items-center justify-between">
           <div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Cumulative Billed Amount</p>
-            <h3 className="text-2xl font-black text-rose-600 mt-1">₹ {grandTotalBilled.toFixed(2)}</h3>
+            <h3 className="text-2xl font-black text-rose-400 mt-1">₹ {grandTotalBilled.toFixed(2)}</h3>
           </div>
-          <div className="p-3 bg-rose-100 text-rose-600 rounded-lg"><ArrowUpCircle size={20} /></div>
+          <div className="p-3 bg-rose-950 text-rose-400 border border-rose-900/50 rounded-xl"><ArrowUpCircle size={20} /></div>
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 overflow-hidden">
+      {/* Main Table Section */}
+      <div className="rounded-2xl border border-slate-800 overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center text-slate-500 text-xs font-bold uppercase">Loading records...</div>
+          <div className="p-8 text-center text-slate-400 text-xs font-bold uppercase tracking-wider">Loading records...</div>
         ) : premiumUsers.length === 0 ? (
-          <div className="p-8 text-center text-slate-500 text-xs font-bold uppercase">No active premium plan users found.</div>
+          <div className="p-8 text-center text-slate-400 text-xs font-bold uppercase tracking-wider">No active premium plan users found.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
               <thead>
-                <tr className="bg-slate-900 text-white font-bold uppercase text-[10px]">
+                <tr className="bg-slate-950 text-slate-400 font-bold uppercase text-[10px]">
                   <th className="p-3 w-12">Sr.</th>
                   <th className="p-3">User Code</th>
                   <th className="p-3">Subscriber Name</th>
@@ -177,42 +180,42 @@ export default function PremiumBillingWidget() {
                   <th className="p-3 text-center">Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
+              <tbody className="divide-y divide-slate-800/60 bg-slate-900 font-medium">
                 {premiumUsers.map((user, index) => {
                   const userBilled = (user.dataSource || []).reduce((s: number, tx: any) => {
                     return tx.type === 'DEBIT' ? s + Number(tx.amount || 0) : s;
                   }, 0);
                   return (
-                    <tr key={user.id} className="hover:bg-slate-50 transition">
-                      <td className="p-3 font-bold text-slate-400">{index + 1}</td>
-                      <td className="p-3 font-mono font-bold text-blue-600">{user.user_code}</td>
-                      <td className="p-3 font-bold text-slate-900 uppercase">{user.full_name}</td>
-                      <td className="p-3 text-slate-600">
+                    <tr key={user.id} className="hover:bg-slate-800/50 transition">
+                      <td className="p-3 font-bold text-slate-500">{index + 1}</td>
+                      <td className="p-3 font-mono font-bold text-blue-400">{user.user_code}</td>
+                      <td className="p-3 font-bold text-slate-100 uppercase">{user.full_name}</td>
+                      <td className="p-3 text-slate-300">
                         <div>{user.mobile}</div>
-                        <div className="text-[10px] text-slate-400">{user.email}</div>
+                        <div className="text-[10px] text-slate-500">{user.email}</div>
                       </td>
                       <td className="p-3">
-                        <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded uppercase">
+                        <span className="bg-amber-950 text-amber-300 border border-amber-800/60 text-[9px] font-black px-2 py-0.5 rounded uppercase">
                           {user.plan_type}
                         </span>
                       </td>
-                      <td className={`p-3 text-right font-bold ${user.wallet_balance < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                      <td className={`p-3 text-right font-bold ${user.wallet_balance < 0 ? 'text-rose-400' : 'text-slate-200'}`}>
                         {user.wallet_balance < 0 ? `- ₹ ${Math.abs(user.wallet_balance).toFixed(2)}` : `₹ ${user.wallet_balance.toFixed(2)}`}
                       </td>
-                      <td className="p-3 text-right font-black text-rose-600">
+                      <td className="p-3 text-right font-black text-rose-400">
                         ₹ {userBilled.toFixed(2)}
                       </td>
                       <td className="p-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={() => openUserPassbook(user)}
-                            className="bg-blue-900 text-white px-2.5 py-1.5 rounded text-[10px] font-bold hover:bg-blue-800 transition flex items-center gap-1 shadow-sm"
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition flex items-center gap-1 shadow-sm"
                           >
                             <FileText size={12} /> View Bill
                           </button>
                           <button
                             onClick={() => handleSendWhatsApp(user)}
-                            className="bg-emerald-600 text-white p-1.5 rounded text-[10px] font-bold hover:bg-emerald-700 transition flex items-center shadow-sm"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white p-1.5 rounded-xl text-[10px] font-bold transition flex items-center shadow-sm"
                             title="Send Bill via WhatsApp"
                           >
                             <MessageCircle size={14} />
@@ -228,31 +231,31 @@ export default function PremiumBillingWidget() {
         )}
       </div>
 
-      {/* BILL & LETTERHEAD MODAL */}
+      {/* BILL & LETTERHEAD MODAL (Retains clean white print/paper look for PDF exports while container stays sleek) */}
       {showBillModal && selectedUser && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full p-6 relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-4xl w-full p-6 relative max-h-[90vh] overflow-y-auto">
             
             <div className="flex justify-between items-center pb-4 mb-4 border-b border-slate-200 no-print">
-              <h3 className="text-base font-black text-slate-900 uppercase">
+              <h3 className="text-sm sm:text-base font-black text-slate-900 uppercase">
                 Official Letterhead Bill & Case Ledger - {selectedUser.full_name} ({selectedUser.user_code})
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleSendWhatsApp(selectedUser)}
-                  className="bg-emerald-600 text-white px-3 py-2 rounded text-xs font-bold hover:bg-emerald-700 flex items-center gap-1.5 shadow-sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
                 >
                   <MessageCircle size={14} /> Send WhatsApp
                 </button>
                 <button
                   onClick={() => window.print()}
-                  className="bg-blue-600 text-white px-3 py-2 rounded text-xs font-bold hover:bg-blue-700 flex items-center gap-1.5 shadow-sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition"
                 >
                   <Printer size={14} /> Print / Save PDF
                 </button>
                 <button
                   onClick={() => setShowBillModal(false)}
-                  className="bg-slate-200 text-slate-700 p-2 rounded hover:bg-slate-300"
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl transition"
                 >
                   <X size={18} />
                 </button>
@@ -260,26 +263,26 @@ export default function PremiumBillingWidget() {
             </div>
 
             {/* LETTERHEAD CONTENT CONTAINER */}
-            <div className="bg-white p-6 text-slate-900">
+            <div className="bg-white p-2 sm:p-4 text-slate-900">
               
               <div className="mb-6 border-b-2 border-black pb-4">
                 <div className="grid grid-cols-3 items-center">
-                  <div className="text-[12px] uppercase font-bold text-slate-700">
+                  <div className="text-[10px] sm:text-[12px] uppercase font-bold text-slate-700">
                     <p>IOV APPROVED VALUER A-33162</p>
                     <p>BUILDING PERMISSION DEPARTMENT</p>
                     <p>ENG/172/2024</p>
                   </div>
                   <div className="flex justify-center items-center">
-                    <img src="/logo.jpg" alt="Logo" className="h-20 w-auto object-contain" />
+                    <img src="/logo.jpg" alt="Logo" className="h-16 sm:h-20 w-auto object-contain" />
                   </div>
-                  <div className="text-[12px] text-right font-bold text-slate-700">
+                  <div className="text-[10px] sm:text-[12px] text-right font-bold text-slate-700">
                     <p>ADDRESS GROUND FLOOR, BUILDING NO. 180/5,</p>
                     <p>MEGHDOOT NAGAR, INDORE</p>
                     <p>CONTACT NO. 79875-61396</p>
                     <p>Gmail: legalntech@gmail.com</p>
                   </div>
                 </div>
-                <div className="mt-4 text-[13px] text-center font-bold text-slate-600 uppercase leading-relaxed border-t pt-2">
+                <div className="mt-4 text-[11px] sm:text-[13px] text-center font-bold text-slate-600 uppercase leading-relaxed border-t pt-2">
                   <p>SUBSCRIPTION USAGE, CASE LEDGER & BILL STATEMENT</p>
                   <hr className="w-full border border-black border-collapse mt-2 mb-2"/>
                 </div>
@@ -292,7 +295,7 @@ export default function PremiumBillingWidget() {
               <table className="w-full border-collapse mb-6 text-xs">
                 <tbody>
                   <tr>
-                    <td className="font-bold w-[200px] py-1">SUBSCRIBER NAME</td>
+                    <td className="font-bold w-[160px] sm:w-[200px] py-1">SUBSCRIBER NAME</td>
                     <td className="font-bold w-[20px]">:</td>
                     <td className="uppercase font-semibold">{selectedUser.full_name}</td>
                   </tr>
@@ -312,16 +315,16 @@ export default function PremiumBillingWidget() {
               </table>
 
               {/* DETAILED CASES & TRANSACTIONS TABLE */}
-              <div className="mb-6">
+              <div className="mb-6 overflow-x-auto">
                 <h4 className="font-bold text-xs uppercase mb-2 text-slate-800 bg-slate-100 p-2 border border-black">
                   Detailed Case List & Fee Ledger Log
                 </h4>
                 {loadingTx ? (
-                  <div className="p-4 text-center text-xs text-slate-500">Loading cases and transaction logs...</div>
+                  <div className="p-4 text-center text-xs text-slate-500 border border-black">Loading cases and transaction logs...</div>
                 ) : userCasesList.length === 0 ? (
                   <div className="p-4 text-center text-xs text-slate-500 border border-black">No cases or transactions found for this user.</div>
                 ) : (
-                  <table className="w-full border border-black border-collapse text-xs">
+                  <table className="w-full border border-black border-collapse text-xs whitespace-nowrap">
                     <thead>
                       <tr className="bg-slate-100 font-bold uppercase text-[10px]">
                         <th className="border border-black p-2 w-10 text-center">SR</th>
@@ -355,7 +358,7 @@ export default function PremiumBillingWidget() {
               </div>
 
               {/* Disclaimer and Signature Footer */}
-              <table className="w-full border border-black border-collapse mt-4">
+              <table className="w-full border border-black border-collapse mt-4 text-xs">
                 <tbody>
                   <tr>
                     <td className="border border-black p-4 w-[65%] align-top">

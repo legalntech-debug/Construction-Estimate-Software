@@ -5,6 +5,7 @@ interface ActionMenuProps {
   setActiveMenuId: (id: string | null) => void;
   handleReopen: (record: any) => void;
   handleArchive: (id: string) => void;
+  asCell?: boolean; // New prop to toggle between <td> and <div>
 }
 
 export default function ActionMenu({
@@ -13,9 +14,10 @@ export default function ActionMenu({
   setActiveMenuId,
   handleReopen,
   handleArchive,
+  asCell = true,
 }: ActionMenuProps) {
-  return (
-    <td className="p-3 text-center relative overflow-visible">
+  const menuContent = (
+    <div className="relative inline-block text-center">
       <button 
         onClick={(e) => {
           e.stopPropagation();
@@ -48,6 +50,16 @@ export default function ActionMenu({
           </button>
         </div>
       )}
+    </div>
+  );
+
+  if (!asCell) {
+    return menuContent;
+  }
+
+  return (
+    <td className="p-3 text-center relative overflow-visible">
+      {menuContent}
     </td>
   );
 }

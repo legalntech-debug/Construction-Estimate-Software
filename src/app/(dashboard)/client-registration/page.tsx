@@ -172,23 +172,24 @@ function ClientRegistrationContent() {
   };
 
   return (
-    <div className="p-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
+    <div className="p-3 sm:p-6">
+      <div className="bg-white rounded-xl shadow-md p-4 sm:p-6">
 
-        <h1 className="text-2xl font-bold text-blue-900 mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-blue-900 mb-6">
           {clientIdParam ? 'EDIT CLIENT REGISTRATION' : 'NEW CLIENT REGISTRATION'}
         </h1>
 
-        <div className="grid grid-cols-3 gap-4 mb-4">
+        {/* TOP ROW: Client Category, Client Name, Representative Name (3 cols on desktop, 2 cols on mobile) */}
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4">
           {/* CLIENT CATEGORY */}
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               CLIENT CATEGORY *
             </label>
             <select
               value={clientCategory}
               onChange={(e) => setClientCategory(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm bg-white"
             >
               <option value="">SELECT CATEGORY</option>
               <option value="INDIVIDUAL USER">INDIVIDUAL USER</option>
@@ -201,7 +202,7 @@ function ClientRegistrationContent() {
 
           {/* NAME */}
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               {clientCategory === 'BANKER'
                 ? 'BANK NAME *'
                 : clientCategory === 'DSA'
@@ -217,13 +218,13 @@ function ClientRegistrationContent() {
               value={clientName}
               onChange={(e) => setClientName(e.target.value.replace(/\s+/g, ' ').toUpperCase())}
               onBlur={(e) => setClientName(e.target.value.trim().replace(/\s+/g, ' ').toUpperCase())}
-              className="w-full border rounded-lg p-2 mt-1 uppercase text-sm"
+              className="w-full border rounded-lg p-2 mt-1 uppercase text-xs sm:text-sm"
             />
           </div>
 
           {/* REPRESENTATIVE NAME */}
-          <div>
-            <label className="font-semibold text-xs text-slate-700">
+          <div className="col-span-2 lg:col-span-1">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               REPRESENTATIVE NAME *
             </label>
             <input
@@ -231,21 +232,21 @@ function ClientRegistrationContent() {
               value={representative}
               onChange={(e) => setRepresentative(e.target.value.replace(/\s+/g, ' ').toUpperCase())}
               onBlur={(e) => setRepresentative(e.target.value.trim().replace(/\s+/g, ' ').toUpperCase())}
-              className="w-full border rounded-lg p-2 mt-1 uppercase text-sm"
+              className="w-full border rounded-lg p-2 mt-1 uppercase text-xs sm:text-sm"
             />
           </div>
         </div>
 
         {/* MOBILE + COUNTRY */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               COUNTRY CODE
             </label>
             <select
               value={countryCode}
               onChange={(e) => setCountryCode(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm bg-white"
             >
               <option>+91 INDIA</option>
               <option>+1 USA</option>
@@ -255,7 +256,7 @@ function ClientRegistrationContent() {
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               MOBILE NO *
             </label>
             <input
@@ -263,61 +264,61 @@ function ClientRegistrationContent() {
               maxLength={10}
               value={mobileNo}
               onChange={(e) => setMobileNo(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
         </div>
 
         {/* EMAIL + GST */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               EMAIL ID *
             </label>
             <input
               type="email"
               value={emailId}
               onChange={(e) => setEmailId(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               GST NO
             </label>
             <input
               type="text"
               value={gstNo}
               onChange={(e) => setGstNo(e.target.value.toUpperCase())}
-              className="w-full border rounded-lg p-2 mt-1 uppercase text-sm"
+              className="w-full border rounded-lg p-2 mt-1 uppercase text-xs sm:text-sm"
             />
           </div>
         </div>
 
         {/* ADDRESS */}
         <div className="mb-4">
-          <label className="font-semibold text-xs text-slate-700">
+          <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
             ADDRESS *
           </label>
           <textarea
             rows={3}
             value={address}
             onChange={(e) => setAddress(e.target.value.toUpperCase())}
-            className="w-full border rounded-lg p-2 mt-1 uppercase text-sm"
+            className="w-full border rounded-lg p-2 mt-1 uppercase text-xs sm:text-sm"
           />
         </div>
 
         {/* PLAN */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-4">
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               PLAN TYPE *
             </label>
             <select
               value={planType}
               onChange={(e) => setPlanType(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm bg-white"
             >
               <option>BASIC</option> 
               <option>PREMIUM</option>
@@ -325,13 +326,13 @@ function ClientRegistrationContent() {
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">
               ACCOUNT STATUS *
             </label>
             <select
               value={accountStatus}
               onChange={(e) => setAccountStatus(e.target.value)}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm bg-white"
             >
               <option>ACTIVE</option> 
               <option>INACTIVE</option>
@@ -339,52 +340,52 @@ function ClientRegistrationContent() {
           </div>
         </div>
 
-        {/* FEES */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        {/* FEES (4 cols on desktop, 2 cols on mobile) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
           <div>
-            <label className="font-semibold text-xs text-slate-700">ESTIMATE FEE</label>
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">ESTIMATE FEE</label>
             <input
                type="number"
                value={estimateFee}
                onChange={(e) => setEstimateFee(Number(e.target.value))}
-               className="w-full border rounded-lg p-2 mt-1 text-sm"
+               className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">PLAN FEE</label>
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">PLAN FEE</label>
             <input
               type="number"
               value={planFee}
               onChange={(e) => setPlanFee(Number(e.target.value))}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">ROUTE MAP FEE</label>
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">ROUTE MAP FEE</label>
             <input
               type="number"
               value={routeMapFee}
               onChange={(e) => setRouteMapFee(Number(e.target.value))}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
 
           <div>
-            <label className="font-semibold text-xs text-slate-700">DRAFTING FEE</label>
+            <label className="font-semibold text-[10px] sm:text-xs text-slate-700">DRAFTING FEE</label>
             <input
               type="number"
               value={draftingFee}
               onChange={(e) => setDraftingFee(Number(e.target.value))}
-              className="w-full border rounded-lg p-2 mt-1 text-sm"
+              className="w-full border rounded-lg p-2 mt-1 text-xs sm:text-sm"
             />
           </div>
         </div>
 
         <button
           onClick={handleSaveClient}
-          className="bg-blue-700 hover:bg-blue-800 text-white px-8 py-3 rounded-lg font-semibold text-sm transition-all"
+          className="w-full sm:w-auto bg-blue-700 hover:bg-blue-800 text-white px-8 py-3 rounded-lg font-semibold text-sm transition-all"
         >
           {clientIdParam ? 'UPDATE CLIENT' : 'SAVE CLIENT'}
         </button>

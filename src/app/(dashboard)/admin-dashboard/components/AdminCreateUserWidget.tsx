@@ -124,15 +124,15 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
   };
 
   return (
-    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
+    <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 my-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="font-bold text-slate-800 text-base">👑 Create Manual User / Premium Account</h3>
-          <p className="text-xs text-slate-500">Manually provision a fully configured user profile with State, City, Plan, and Wallet Bonus.</p>
+          <h3 className="font-bold text-slate-800 text-sm sm:text-base">👑 Create Manual User / Premium Account</h3>
+          <p className="text-[11px] sm:text-xs text-slate-500">Manually provision a fully configured user profile with State, City, Plan, and Wallet Bonus.</p>
         </div>
         <button 
           onClick={() => setShowPanel(!showPanel)}
-          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition shrink-0 ml-2"
         >
           {showPanel ? 'Hide [-]' : 'Show [+]'}
         </button>

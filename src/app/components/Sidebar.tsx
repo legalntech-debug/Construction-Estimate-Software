@@ -2,11 +2,15 @@
 
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Banknote, Users, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Banknote, Users, ShieldCheck, X } from "lucide-react";
 import { createBrowserClient } from '@supabase/ssr';
 import { usePathname } from 'next/navigation';
 
-export default function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void;
+}
+
+export default function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
@@ -22,7 +26,7 @@ export default function Sidebar() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
-  
+
   useEffect(() => {
     setMounted(true);
     const checkUserSession = async () => {
@@ -30,7 +34,6 @@ export default function Sidebar() {
       if (session) {
         let userIsAdmin = false;
 
-        // 1. Check Admin Role
         const { data: roleData } = await supabaseClient.rpc('get_user_role', { target_user_id: session.user.id });
         if (roleData?.toLowerCase() === 'admin' || session.user.email === 'legalntech@gmail.com') {
           userIsAdmin = true;
@@ -52,7 +55,6 @@ export default function Sidebar() {
 
         setIsAdmin(userIsAdmin);
 
-        // 2. Check Partner Role for Access Control
         const { data: partnerData } = await supabaseClient
           .from('partners')
           .select('second_role, status')
@@ -63,7 +65,6 @@ export default function Sidebar() {
         const allowedPartnerRoles = ['ceo', 'co-partner', 'co-owner', 'marketing & support', 'investor'];
         const userPartnerRole = partnerData?.second_role?.toLowerCase() || '';
 
-        // Access Control Eligibility (Admin, CEO, Co-Partner, Co-Owner, etc.)
         const showAccessControl = userIsAdmin || (partnerData && allowedPartnerRoles.includes(userPartnerRole));
         setIsEligibleForAccessControl(!!showAccessControl);
       }
@@ -82,7 +83,7 @@ export default function Sidebar() {
   }, []);
 
   if (!mounted) {
-    return <aside className="bg-blue-950 text-white w-72 h-screen no-print shrink-0"></aside>;
+    return <div className="bg-blue-950 text-white w-72 h-screen no-print shrink-0"></div>;
   }
 
   const isWalletLow = walletBalance < 100;
@@ -91,22 +92,38 @@ export default function Sidebar() {
   const ledgerLabel = isPremium ? 'Billing & Account Ledger' : 'Account Ledger';
 
   return (
-    <aside className={`
-      bg-blue-950 text-white transition-all duration-300 h-screen sticky top-0 z-50 no-print 
-      flex flex-col shrink-0 overflow-y-auto overflow-x-hidden custom-scrollbar
+    <div className={`
+      flex flex-col 
+      bg-blue-950 text-white transition-all duration-300 h-full z-50 no-print 
+      shrink-0 overflow-y-auto overflow-x-hidden custom-scrollbar
       ${collapsed ? 'w-16' : 'w-72'}
     `}>
       
       {/* HEADER */}
       <div className="flex items-center justify-between p-3 border-b border-blue-800 shrink-0">
         {!collapsed && <h1 className="font-extrabold text-sm tracking-wide text-white whitespace-nowrap">LNT WITH AI 2.0</h1>}
-        <button 
-          onClick={() => setCollapsed(!collapsed)} 
-          className="bg-blue-800 px-2 py-1 rounded text-xs text-white hover:bg-blue-700 transition-colors ml-auto"
-          title={collapsed ? "Expand" : "Collapse"}
-        >
-          {collapsed ? '☰' : '◀'}
-        </button>
+        
+        <div className="flex items-center gap-1 ml-auto">
+          {/* Mobile Close Button */}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="md:hidden bg-blue-800 p-1.5 rounded text-white hover:bg-blue-700 transition-colors cursor-pointer"
+              title="Close Menu"
+            >
+              <X size={18} />
+            </button>
+          )}
+
+          {/* Desktop Collapse Button */}
+          <button 
+            onClick={() => setCollapsed(!collapsed)} 
+            className="hidden md:block bg-blue-800 px-2 py-1 rounded text-xs text-white hover:bg-blue-700 transition-colors cursor-pointer"
+            title={collapsed ? "Expand" : "Collapse"}
+          >
+            {collapsed ? '☰' : '◀'}
+          </button>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -115,6 +132,7 @@ export default function Sidebar() {
         {/* DASHBOARD */}
         <Link 
           href="/dashboard" 
+          onClick={onClose}
           className={`flex items-center gap-3 px-4 py-2 rounded-lg transition ${
             pathname === '/dashboard' ? 'bg-blue-600 text-white' : 'text-white bg-blue-600 hover:bg-blue-700'
           }`}
@@ -125,41 +143,41 @@ export default function Sidebar() {
 
         {/* PLAN */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <button onClick={() => !isSidebarRestricted && setShowPlan(!showPlan)} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex justify-between items-center rounded">
+          <button onClick={() => !isSidebarRestricted && setShowPlan(!showPlan)} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex justify-between items-center rounded cursor-pointer">
             <span>🏗 {!collapsed && 'PLAN'}</span>
           </button>
           {!collapsed && showPlan && !isSidebarRestricted && (
             <div className="ml-8 space-y-0.5 mb-1 text-xs">
-              <Link href="/construction-plan" className="block py-1 hover:text-blue-300">🏗 Construction Plan</Link>
-              <Link href="/route-map" className="block py-1 hover:text-blue-300">📍 Location / Key Plan</Link>
+              <Link href="/construction-plan" onClick={onClose} className="block py-1 hover:text-blue-300">🏗 Construction Plan</Link>
+              <Link href="/route-map" onClick={onClose} className="block py-1 hover:text-blue-300">📍 Location / Key Plan</Link>
             </div>
           )}
         </div>
 
         {/* ESTIMATE TYPE */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <button onClick={() => !isSidebarRestricted && setShowEstimate(!showEstimate)} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex justify-between items-center rounded">
+          <button onClick={() => !isSidebarRestricted && setShowEstimate(!showEstimate)} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex justify-between items-center rounded cursor-pointer">
             <span>📋 {!collapsed && 'ESTIMATE TYPE'}</span>
           </button>
           {!collapsed && showEstimate && !isSidebarRestricted && (
             <div className="ml-8 space-y-0.5 mb-1 text-xs">
-              <Link href="/estimate" className="block py-1 hover:text-blue-300">New Construction</Link>
-              <Link href="/renovation-estimate" className="block py-1 hover:text-blue-300">Renovation</Link>
-              <Link href="/extension-estimate" className="block py-1 hover:text-blue-300">Renovation + Extension</Link>
-              <Link href="/remaining-work-estimate" className="block py-1 hover:text-blue-300">Remaining Work</Link>
-              <Link href="/construction-certificate" className="block py-1 hover:text-blue-300">Construction Certificate</Link>
+              <Link href="/estimate" onClick={onClose} className="block py-1 hover:text-blue-300">New Construction</Link>
+              <Link href="/renovation-estimate" onClick={onClose} className="block py-1 hover:text-blue-300">Renovation</Link>
+              <Link href="/extension-estimate" onClick={onClose} className="block py-1 hover:text-blue-300">Renovation + Extension</Link>
+              <Link href="/remaining-work-estimate" onClick={onClose} className="block py-1 hover:text-blue-300">Remaining Work</Link>
+              <Link href="/construction-certificate" onClick={onClose} className="block py-1 hover:text-blue-300">Construction Certificate</Link>
             </div>
           )}
         </div>
 
         {/* DEED DRAFTING */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <Link href="/deed-drafting" className="block px-4 py-2 hover:bg-blue-800 rounded">📝 {!collapsed && 'Deed Drafting'}</Link>
+          <Link href="/deed-drafting" onClick={onClose} className="block px-4 py-2 hover:bg-blue-800 rounded">📝 {!collapsed && 'Deed Drafting'}</Link>
         </div>
 
         {/* DMS */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <Link href="/document-management" className="w-full text-left px-4 py-2 hover:bg-blue-800 flex items-center gap-2 transition-colors rounded">
+          <Link href="/document-management" onClick={onClose} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex items-center gap-2 transition-colors rounded">
             <span>📂</span>
             {!collapsed && <span className="font-bold">DOC. MANAGEMENT</span>}
           </Link>
@@ -167,66 +185,66 @@ export default function Sidebar() {
 
         {/* VALUATION ASSESSMENT */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <Link href="/valuation-assessment" className="w-full text-left px-4 py-2 hover:bg-blue-800 flex items-center gap-2 transition-colors rounded">
+          <Link href="/valuation-assessment" onClick={onClose} className="w-full text-left px-4 py-2 hover:bg-blue-800 flex items-center gap-2 transition-colors rounded">
             <span>🤖</span>
             {!collapsed && <span className="font-bold">VALUATION ASSESSMENT</span>}
           </Link>
         </div>
 
         {/* MIS */}
-        <Link href="/mis" className="block px-4 py-2 hover:bg-blue-800 bg-blue-900/40 rounded">📊 {!collapsed && 'MIS'}</Link>
+        <Link href="/mis" onClick={onClose} className="block px-4 py-2 hover:bg-blue-800 bg-blue-900/40 rounded">📊 {!collapsed && 'MIS'}</Link>
         
         {/* REOPEN CASE */}
-        <Link href="/reopen-old-case" className="block px-4 py-2 hover:bg-blue-800 bg-blue-900/40 rounded">🔄 {!collapsed && 'Reopen Case'}</Link>
+        <Link href="/reopen-old-case" onClick={onClose} className="block px-4 py-2 hover:bg-blue-800 bg-blue-900/40 rounded">🔄 {!collapsed && 'Reopen Case'}</Link>
 
         {/* CLIENT DASHBOARD */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <button onClick={() => !isSidebarRestricted && setShowClient(!showClient)} className="w-full text-left px-4 py-2 hover:bg-blue-800 rounded">
+          <button onClick={() => !isSidebarRestricted && setShowClient(!showClient)} className="w-full text-left px-4 py-2 hover:bg-blue-800 rounded cursor-pointer">
             👥 {!collapsed && 'CLIENT DASHBOARD'}
           </button>
           {!collapsed && showClient && !isSidebarRestricted && (
             <div className="ml-8 space-y-0.5 mb-1 text-xs">
-              <Link href="/client-registration" className="block py-1 hover:text-blue-300">Registration</Link>
-              <Link href="/client-data" className="block py-1 hover:text-blue-300">Client Data</Link>
+              <Link href="/client-registration" onClick={onClose} className="block py-1 hover:text-blue-300">Registration</Link>
+              <Link href="/client-data" onClick={onClose} className="block py-1 hover:text-blue-300">Client Data</Link>
             </div>
           )}
         </div>
 
         {/* Payments Ledger */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <Link href="/payments" className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-amber-400 rounded">
+          <Link href="/payments" onClick={onClose} className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-amber-400 rounded">
             <Banknote size={18} className="shrink-0" /> {!collapsed && <span>Payments Ledger</span>}
           </Link>
         </div>
 
         {/* BILLING & ACCOUNT LEDGER */}
-        <Link href="/wallet-ledger" className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-emerald-400 bg-emerald-950/30 border-y border-emerald-900/50 rounded">
+        <Link href="/wallet-ledger" onClick={onClose} className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-emerald-400 bg-emerald-950/30 border-y border-emerald-900/50 rounded">
           <Banknote size={18} className="shrink-0" /> {!collapsed && <span>{ledgerLabel}</span>}
         </Link>
 
         {/* PARTNER NETWORK */}
         <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-          <Link href="/partner-dashboard" className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-cyan-300 bg-cyan-950/20 rounded">
+          <Link href="/partner-dashboard" onClick={onClose} className="flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-cyan-300 bg-cyan-950/20 rounded">
             <Users size={18} className="shrink-0" /> {!collapsed && <span>Partner Network</span>}
           </Link>
         </div>
 
-        {/* ACCESS CONTROL - CEO, Co-Partner, & Admin ke liye visible */}
+        {/* ACCESS CONTROL */}
         {isEligibleForAccessControl && (
           <div className={isSidebarRestricted ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}>
-            <Link href="/access-control" className={`flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-purple-300 rounded ${pathname === '/access-control' ? 'bg-purple-900 text-white' : 'bg-purple-950/20'}`}>
+            <Link href="/access-control" onClick={onClose} className={`flex items-center gap-3 px-4 py-2 hover:bg-blue-800 text-purple-300 rounded ${pathname === '/access-control' ? 'bg-purple-900 text-white' : 'bg-purple-950/20'}`}>
               <ShieldCheck size={18} className="shrink-0 text-purple-400" /> {!collapsed && <span>Access Control</span>}
             </Link>
           </div>
         )}
 
-        {/* ADMIN DASHBOARD - Sirf System Admin ke liye visible */}
+        {/* ADMIN DASHBOARD */}
         {isAdmin && (
-          <Link href="/admin-dashboard" className={`flex items-center px-4 py-2 hover:bg-blue-800 rounded text-amber-300 ${pathname === '/admin-dashboard' ? 'bg-blue-800 text-white' : ''}`}>
+          <Link href="/admin-dashboard" onClick={onClose} className={`flex items-center px-4 py-2 hover:bg-blue-800 rounded text-amber-300 ${pathname === '/admin-dashboard' ? 'bg-blue-800 text-white' : ''}`}>
             📊 {!collapsed && <span className="ml-2">Admin Dashboard</span>}
           </Link>
         )}
       </nav>
-    </aside>
+    </div>
   );
 }

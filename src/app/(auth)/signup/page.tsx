@@ -6,33 +6,42 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import emailjs from '@emailjs/browser';
 
+// Standardized Official State & District Names Mapping
 const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
+  "ANDAMAN AND NICOBAR ISLANDS": ["Nicobar", "North and Middle Andaman", "South Andaman"],
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
-  "ARUNACHAL PRADESH": ["Tawang", "West Kameng", "East Kameng", "Papum Pare", "Kurung Kumey", "Kra Daadi", "Lower Subansiri", "Upper Subansiri", "West Siang", "East Siang", "Siang", "Upper Siang", "Lower Siang", "Lower Dibang Valley", "Dibang Valley", "Anjaw", "Lohang", "Namsai", "Changlang", "Tirap", "Longding"],
-  "ASSAM": ["Baksa", "Barpeta", "Biswanath", "Bongaigaon", "Cachar", "Charaideo", "Chirang", "Darrang", "Dhemaji", "Dhubri", "Dibrugarh", "Goalpara", "Golaghat", "Hailakandi", "Hojai", "Jorhat", "Kamrup", "Kamrup Metropolitan", "Karbi Anglong", "Karimganj", "Kokrajhar", "Lakhimpur", "Majuli", "Morigaon", "Nagaon", "Nalbari", "Dima Hasao", "Sivasagar", "Sonitpur", "Tinsukia", "Udalguri", "West Karbi Anglong"],
+  "ARUNACHAL PRADESH": ["Anjaw", "Changlang", "Dibang Valley", "East Kameng", "East Siang", "Kamle", "Kra Daadi", "Kurung Kumey", "Lepa Rada", "Lohit", "Longding", "Lower Dibang Valley", "Lower Siang", "Lower Subansiri", "Namsai", "Pakke Kessang", "Papum Pare", "Shi Yomi", "Siang", "Tawang", "Tirap", "Upper Siang", "Upper Subansiri", "West Kameng", "West Siang"],
+  "ASSAM": ["Baksa", "Barpeta", "Biswanath", "Bongaigaon", "Cachar", "Charaideo", "Chirang", "Darrang", "Dhemaji", "Dhubri", "Dibrugarh", "Dima Hasao", "Goalpara", "Golaghat", "Hailakandi", "Hojai", "Jorhat", "Kamrup", "Kamrup Metropolitan", "Karbi Anglong", "Karimganj", "Kokrajhar", "Lakhimpur", "Majuli", "Morigaon", "Nagaon", "Nalbari", "Sivasagar", "Sonitpur", "South Salmara-Mankachar", "Tinsukia", "Udalguri", "West Karbi Anglong"],
   "BIHAR": ["Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar", "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur", "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran", "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"],
-  "CHHATTISGARH": ["Balod", "Baloda Bazar", "Balrampur", "Bastar", "Bemetara", "Bijapur", "Bilaspur", "Dantewada", "Dhamtari", "Durg", "Gariaband", "Janjgir-Champa", "Jashpur", "Kanker", "Kawardha", "Kondagaon", "Korba", "Koriya", "Mahasamund", "Mungeli", "Narayanpur", "Raigarh", "Raipur", "Rajnandgaon", "Sukma", "Surajpur", "Surguja"],
+  "CHANDIGARH": ["Chandigarh"],
+  "CHHATTISGARH": ["Balod", "Baloda Bazar", "Balrampur", "Bastar", "Bemetara", "Bijapur", "Bilaspur", "Dantewada", "Dhamtari", "Durg", "Gariaband", "Gaurela-Pendra-Marwahi", "Janjgir-Champa", "Jashpur", "Kabirdham", "Kanker", "Kondagaon", "Korba", "Koriya", "Mahasamund", "Manendragarh-Chirmiri-Bharatpur", "Mohla-Manpur-Ambagarh Chowki", "Mungeli", "Narayanpur", "Raigarh", "Raipur", "Rajnandgaon", "Sarangarh-Bilaigarh", "Sakti", "Sukma", "Surajpur", "Surguja"],
+  "DADRA AND NAGAR HAVELI AND DAMAN AND DIU": ["Daman", "Diu", "Dadra and Nagar Haveli"],
+  "DELHI": ["Central Delhi", "East Delhi", "New Delhi", "North Delhi", "North East Delhi", "North West Delhi", "Shahdara", "South Delhi", "South East Delhi", "South West Delhi", "West Delhi"],
   "GOA": ["North Goa", "South Goa"],
   "GUJARAT": ["Ahmedabad", "Amreli", "Anand", "Aravalli", "Banaskantha", "Bharuch", "Bhavnagar", "Botad", "Chhota Udaipur", "Dahod", "Dang", "Devbhoomi Dwarka", "Gandhinagar", "Gir Somnath", "Jamnagar", "Junagadh", "Kheda", "Kutch", "Mahisagar", "Mehsana", "Morbi", "Narmada", "Navsari", "Panchmahal", "Patan", "Porbandar", "Rajkot", "Sabarkantha", "Surat", "Surendranagar", "Tapi", "Vadodara", "Valsad"],
-  "HARYANA": ["Ambala", "Bhiwani", "Charkhi Dadri", "Faridabad", "Fatehabad", "Gurugram", "Hisar", "Jhajjar", "Jind", "Kaithal", "Karnal", "Kurukshetra", "Narnaul", "Nuh", "Palwal", "Panchkula", "Panipat", "Rewari", "Rohtak", "Sirsa", "Sonipat", "Yamunanagar"],
+  "HARYANA": ["Ambala", "Bhiwani", "Charkhi Dadri", "Faridabad", "Fatehabad", "Gurugram", "Hisar", "Jhajjar", "Jind", "Kaithal", "Karnal", "Kurukshetra", "Mahendragarh", "Nuh", "Palwal", "Panchkula", "Panipat", "Rewari", "Rohtak", "Sirsa", "Sonipat", "Yamunanagar"],
   "HIMACHAL PRADESH": ["Bilaspur", "Chamba", "Hamirpur", "Kangra", "Kinnaur", "Kullu", "Lahaul and Spiti", "Mandi", "Shimla", "Sirmaur", "Solan", "Una"],
-  "JHARKHAND": ["Bokaro", "Chatra", "Deoghar", "Dhanbad", "Dumka", "East Singhbhum", "Garhwa", "Giridih", "Godda", "Gumla", "Hazaribagh", "Jamtara", "Khunti", "Koderma", "Latehar", "Lohardaga", "Pakur", "Palamu", "Ramgarh", "Ranchi", "Sahibganj", "Seraikela Kharsawan", "Simdega", "West Singhbhum"],
-  "KARNATAKA": ["Bagalkot", "Bangalore Rural", "Bangalore Urban", "Belgaum", "Bellary", "Bidar", "Chamarajanagar", "Chikkaballapur", "Chikkamagaluru", "Chitradurga", "Dakshina Kannada", "Davanagere", "Dharwad", "Gadag", "Gulbarga", "Hassan", "Haveri", "Kodagu", "Kolar", "Koppal", "Mandya", "Mysore", "Raichur", "Ramanagara", "Shimoga", "Tumakuru", "Udupi", "Uttara Kannada", "Vijayapura", "Yadgir"],
+  "JAMMU AND KASHMIR": ["Anantnag", "Bandipora", "Baramulla", "Budgam", "Doda", "Ganderbal", "Jammu", "Kathua", "Kishtwar", "Kulgam", "Kupwara", "Poonch", "Pulwama", "Rajouri", "Ramban", "Reasi", "Samba", "Shopian", "Srinagar", "Udhampur"],
+  "JHARKHAND": ["Bokaro", "Chatra", "Deoghar", "Dhanbad", "Dumka", "East Singhbhum", "Garhwa", "Giridih", "Godda", "Gumla", "Hazaribagh", "Jamtara", "Khunti", "Koderma", "Latehar", "Lohardaga", "Pakur", "Palamu", "Ramgarh", "Ranchi", "Sahibगंज", "Seraikela Kharsawan", "Simdega", "West Singhbhum"],
+  "KARNATAKA": ["Bagalkot", "Ballari", "Belagavi", "Bengaluru Rural", "Bengaluru Urban", "Bidar", "Chamarajanagar", "Chikkaballapura", "Chikkamagaluru", "Chitradurga", "Dakshina Kannada", "Davanagere", "Dharwad", "Gadag", "Hassan", "Haveri", "Kalaburagi", "Kodagu", "Kolar", "Koppal", "Mandya", "Mysuru", "Raichur", "Ramanagara", "Shivamogga", "Tumakuru", "Udupi", "Uttara Kannada", "Vijayanagara", "Vijayapura", "Yadgir"],
   "KERALA": ["Alappuzha", "Ernakulam", "Idukki", "Kannur", "Kasaragod", "Kollam", "Kottayam", "Kozhikode", "Malappuram", "Palakkad", "Pathanamthitta", "Thiruvananthapuram", "Thrissur", "Wayanad"],
-  "MADHYA PRADESH": ["Agar Malwa", "Alirajpur", "Anuppur", "Ashoknagar", "Balaghat", "Barwani", "Betul", "Bhind", "Bhopal", "Burhanpur", "Chhatarpur", "Chhindwara", "Damoh", "Datia", "Dewas", "Dhar", "Dindori", "Guna", "Gwalior", "Harda", "Hoshangabad", "Indore", "Jabalpur", "Jhabua", "Katni", "Khandwa", "Khargone", "Mandla", "Mandsaur", "Morena", "Narsinghpur", "Neemuch", "Panna", "Raisen", "Rajgarh", "Ratlam", "Rewa", "Sagar", "Satna", "Sehore", "Seoni", "Shahdol", "Shajapur", "Sheopur", "Shivpuri", "Sidhi", "Singrauli", "Tikamgarh", "Ujjain", "Umaria", "Vidisha"],
-  "MAHARASHTRA": ["Ahmednagar", "Akola", "Amravati", "Aurangabad", "Beed", "Bhandara", "Buldhana", "Chandrapur", "Dhule", "Gadchiroli", "Gondia", "Hingoli", "Jalgaon", "Jalna", "Kolhapur", "Latur", "Mumbai City", "Mumbai Suburban", "Nagpur", "Nanded", "Nandurbar", "Nashik", "Osmanabad", "Palghar", "Parbhani", "Pune", "Raigad", "Ratnagiri", "Sangli", "Satara", "Sindhudurg", "Solapur", "Thane", "Wardha", "Washim", "Yavatmal"],
+  "LADAKH": ["Kargil", "Leh"],
+  "LAKSHADWEEP": ["Lakshadweep"],
+  "MADHYA PRADESH": ["Agar Malwa", "Alirajpur", "Anuppur", "Ashoknagar", "Balaghat", "Barwani", "Betul", "Bhind", "Bhopal", "Burhanpur", "Chhatarpur", "Chhindwara", "Damoh", "Datia", "Dewas", "Dhar", "Dindori", "Guna", "Gwalior", "Harda", "Hoshangabad", "Indore", "Jabalpur", "Jhabua", "Katni", "Khandwa", "Khargone", "Mandla", "Mandsaur", "Morena", "Narsinghpur", "Neemuch", "Niwari", "Panna", "Raisen", "Rajgarh", "Ratlam", "Rewa", "Sagar", "Satna", "Sehore", "Seoni", "Shahdol", "Shajapur", "Sheopur", "Shivpuri", "Sidhi", "Singrauli", "Tikamgarh", "Ujjain", "Umaria", "Vidisha"],
+  "MAHARASHTRA": ["Ahilyanagar", "Akola", "Amravati", "Chhatrapati Sambhajinagar", "Beed", "Bhandara", "Buldhana", "Chandrapur", "Dhule", "Gadchiroli", "Gondia", "Hingoli", "Jalgaon", "Jalna", "Kolhapur", "Latur", "Mumbai City", "Mumbai Suburban", "Nagpur", "Nanded", "Nandurbar", "Nashik", "Dharashiv", "Palghar", "Parbhani", "Pune", "Raigad", "Ratnagiri", "Sangli", "Satara", "Sindhudurg", "Solapur", "Thane", "Wardha", "Washim", "Yavatmal"],
   "MANIPUR": ["Bishnupur", "Chandel", "Churachandpur", "Imphal East", "Imphal West", "Jiribam", "Kakching", "Kamjong", "Kangpokpi", "Noney", "Pherzawl", "Senapati", "Tamenglong", "Tengnoupal", "Thoubal", "Ukhrul"],
-  "MEGHALAYA": ["East Garo Hills", "East Jaintia Hills", "East Khasi Hills", "North Garo Hills", "Ri Bhoi", "South Garo Hills", "South West Garo Hills", "South West Khasi Hills", "West Garo Hills", "West Jaintia Hills", "West Khasi Hills"],
-  "MIZORAM": ["Aizawl", "Champhai", "Kolasib", "Lawngtlai", "Lunglei", "Mamit", "Saiha", "Serchhip"],
-  "NAGALAND": ["Dimapur", "Kiphire", "Kohima", "Longleng", "Mokokchung", "Mon", "Peren", "Phek", "Tuensang", "Wokha", "Zunheboto"],
+  "MEGHALAYA": ["East Garo Hills", "East Jaintia Hills", "East Khasi Hills", "Eastern West Khasi Hills", "North Garo Hills", "Ri Bhoi", "South Garo Hills", "South West Garo Hills", "South West Khasi Hills", "West Garo Hills", "West Jaintia Hills", "West Khasi Hills"],
+  "MIZORAM": ["Aizawl", "Champhai", "Hnahthial", "Khawzawl", "Kolasib", "Lawngtlai", "Lunglei", "Mamit", "Saiha", "Saitual", "Serchhip"],
+  "NAGALAND": ["Chümoukedima", "Dimapur", "Kiphire", "Kohima", "Longleng", "Mokokchung", "Mon", "Niuland", "Noklak", "Peren", "Phek", "Shamator", "Tuensang", "Wokha", "Zünheboto"],
   "ODISHA": ["Angul", "Balangir", "Balasore", "Bargarh", "Bhadrak", "Boudh", "Cuttack", "Deogarh", "Dhenkanal", "Gajapati", "Ganjam", "Jagatsinghpur", "Jajpur", "Jharsuguda", "Kalahandi", "Kandhamal", "Kendrapara", "Kendujhar", "Khordha", "Koraput", "Malkangiri", "Mayurbhanj", "Nabarangpur", "Nayagarh", "Nuapada", "Puri", "Rayagada", "Sambalpur", "Subarnapur", "Sundargarh"],
-  "PUNJAB": ["Amritsar", "Barnala", "Bathinda", "Faridkot", "Fatehgarh Sahib", "Fazilka", "Firozpur", "Gurdaspur", "Hoshiarpur", "Jalandhar", "Kapurthala", "Ludhiana", "Mansa", "Moga", "Muktsar", "Pathankot", "Patiala", "Rupnagar", "SAS Nagar", "Shaheed Bhagat Singh Nagar", "Sri Muktsar Sahib", "Tarn Taran"],
+  "PUDUCHERRY": ["Karaikal", "Mahe", "Puducherry", "Yanam"],
+  "PUNJAB": ["Amritsar", "Barnala", "Bathinda", "Faridkot", "Fatehgarh Sahib", "Fazilka", "Firozpur", "Gurdaspur", "Hoshiarpur", "Jalandhar", "Kapurthala", "Ludhiana", "Malerkotla", "Mansa", "Moga", "Pathankot", "Patiala", "Rupnagar", "Sahibzada Ajit Singh Nagar", "Shaheed Bhagat Singh Nagar", "Sri Muktsar Sahib", "Tarn Taran"],
   "RAJASTHAN": ["Ajmer", "Alwar", "Banswara", "Baran", "Barmer", "Bharatpur", "Bhilwara", "Bikaner", "Bundi", "Chittorgarh", "Churu", "Dausa", "Dholpur", "Dungarpur", "Hanumangarh", "Jaipur", "Jaisalmer", "Jalore", "Jhalawar", "Jhunjhunu", "Jodhpur", "Karauli", "Kota", "Nagaur", "Pali", "Pratapgarh", "Rajsamand", "Sawai Madhopur", "Sikar", "Sirohi", "Sri Ganganagar", "Tonk", "Udaipur"],
-  "SIKKIM": ["Gangtok", "Mangan", "Namchi", "Gyalshing", "Pakyong", "Soreng"],
+  "SIKKIM": ["Gangtok", "Gyalshing", "Mangan", "Namchi", "Pakyong", "Soreng"],
   "TAMIL NADU": ["Ariyalur", "Chengalpattu", "Chennai", "Coimbatore", "Cuddalore", "Dharmapuri", "Dindigul", "Erode", "Kallakurichi", "Kanchipuram", "Kanyakumari", "Karur", "Krishnagiri", "Madurai", "Mayiladuthurai", "Nagapattinam", "Namakkal", "Nilgiris", "Perambalur", "Pudukkottai", "Ramanathapuram", "Ranipet", "Salem", "Sivaganga", "Tenkasi", "Thanjavur", "Theni", "Thoothukudi", "Tiruchirappalli", "Tirunelveli", "Tirupathur", "Tiruppur", "Tiruvallur", "Tiruvannamalai", "Tiruvarur", "Vellore", "Viluppuram", "Virudhunagar"],
-  "TELANGANA": ["Adilabad", "Bhadradri Kothagudem", "Hanamkonda", "Hyderabad", "Jagtial", "Jangaon", "Jayashanker Bhupalpally", "Jogulamba Gadwal", "Kamareddy", "Karimnagar", "Khammam", "Kumuram Bheem Asifabad", "Mahabubabad", "Mahabubnagar", "Mancherial", "Medak", "Medchal–Malkajgiri", "Mulugu", "Nagarkurnool", "Nalgonda", "Narayanpet", "Nirmal", "Nizamabad", "Peddapalli", "Rajanna Sircilla", "Ranga Reddy", "Sangareddy", "Siddipet", "Suryapet", "Vikarabad", "Wanaparthy", "Warangal", "Yadadri Bhuvanagiri"],
+  "TELANGANA": ["Adilabad", "Bhadradri Kothagudem", "Hanamkonda", "Hyderabad", "Jagtial", "Jangaon", "Jayashanker Bhupalpally", "Jogulamba Gadwal", "Kamareddy", "Karimnagar", "Khammam", "Kumuram Bheem Asifabad", "Mahabubabad", "Mahabubnagar", "Mancherial", "Medak", "Medchal-Malkajgiri", "Mulugu", "Nagarkurnool", "Nalgonda", "Narayanpet", "Nirmal", "Nizamabad", "Peddapalli", "Rajanna Sircilla", "Ranga Reddy", "Sangareddy", "Siddipet", "Suryapet", "Vikarabad", "Wanaparthy", "Warangal", "Yadadri Bhuvanagiri"],
   "TRIPURA": ["Dhalai", "Gomati", "Khowai", "North Tripura", "Sepahijala", "South Tripura", "Unakoti", "West Tripura"],
-  "UTTAR PRADESH": ["Agra", "Aligarh", "Ambedkar Nagar", "Amethi", "Amroha", "Auraiya", "Ayodhya", "Azamgarh", "Badaun", "Baghpat", "Bahraich", "Ballia", "Balrampur", "Banda", "Barabanki", "Bareilly", "Basti", "Bhadohi", "Bijnor", "Budaun", "Bulandshahr", "Chandauli", "Chitrakoot", "Deoria", "Etah", "Etawah", "Farrukhabad", "Fatehpur", "Firozabad", "Gautam Buddha Nagar", "Ghaziabad", "Ghazipur", "Gonda", "Gorakhpur", "Hamirpur", "Hapur", "Hardoi", "Hathras", "Jalaun", "Jaunpur", "Jhansi", "Kannauj", "Kanpur Dehat", "Kanpur Nagar", "Kasganj", "Kaushambi", "Kheri", "Kushinagar", "Lalitpur", "Lucknow", "Maharajganj", "Mahoba", "Mainpuri", "Mathura", "Mau", "Meerut", "Mirzapur", "Moradabad", "Muzaffarnagar", "Pilibhit", "Pratapgarh", "Prayagraj", "Raebareli", "Rampur", "Saharanpur", "Sambhal", "Sant Kabir Nagar", "Shahjahanpur", "Shamli", "Shravasti", "Siddharthnagar", "Sitapur", "Sonbhadra", "Sultanpur", "Unnao", "Varanasi"],
+  "UTTAR PRADESH": ["Agra", "Aligarh", "Ambedkar Nagar", "Amethi", "Amroha", "Auraiya", "Ayodhya", "Azamgarh", "Baghpat", "Bahraich", "Ballia", "Balrampur", "Banda", "Barabanki", "Bareilly", "Basti", "Bhadohi", "Bijnor", "Budaun", "Bulandshahr", "Chandauli", "Chitrakoot", "Deoria", "Etah", "Etawah", "Farrukhabad", "Fatehpur", "Firozabad", "Gautam Buddha Nagar", "Ghaziabad", "Ghazipur", "Gonda", "Gorakhpur", "Hamirpur", "Hapur", "Hardoi", "Hathras", "Jalaun", "Jaunpur", "Jhansi", "Kannauj", "Kanpur Dehat", "Kanpur Nagar", "Kasganj", "Kaushambi", "Kheri", "Kushinagar", "Lalitpur", "Lucknow", "Maharajganj", "Mahoba", "Mainpuri", "Mathura", "Mau", "Meerut", "Mirzapur", "Moradabad", "Muzaffarnagar", "Pilibhit", "Pratapgarh", "Prayagraj", "Raebareli", "Rampur", "Saharanpur", "Sambhal", "Sant Kabir Nagar", "Shahjahanpur", "Shamli", "Shravasti", "Siddharthnagar", "Sitapur", "Sonbhadra", "Sultanpur", "Unnao", "Varanasi"],
   "UTTARAKHAND": ["Almora", "Bageshwar", "Chamoli", "Champawat", "Dehradun", "Haridwar", "Nainital", "Pauri Garhwal", "Pithoragarh", "Rudraprayag", "Tehri Garhwal", "Udham Singh Nagar", "Uttarkashi"],
   "WEST BENGAL": ["Alipurduar", "Bankura", "Birbhum", "Cooch Behar", "Dakshin Dinajpur", "Darjeeling", "Hooghly", "Howrah", "Jalpaiguri", "Jhargram", "Kalimpong", "Kolkata", "Malda", "Murshidabad", "Nadia", "North 24 Parganas", "Paschim Bardhaman", "Paschim Medinipur", "Purba Bardhaman", "Purba Medinipur", "Purulia", "South 24 Parganas", "Uttar Dinajpur"]
 };
@@ -98,6 +107,13 @@ function SignupContent() {
 
     if (!/^\d{10}$/.test(form.mobile)) {
       setError("Please enter a valid 10-digit mobile number!");
+      setLoading(false);
+      return;
+    }
+
+    const uppercaseState = form.state.trim().toUpperCase();
+    if (!Object.keys(INDIAN_STATES_AND_DISTRICTS).includes(uppercaseState)) {
+      setError("Please select a valid State from the provided dropdown list!");
       setLoading(false);
       return;
     }
@@ -181,7 +197,7 @@ function SignupContent() {
         plan_type: 'BASIC PLAN',
         firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
         city: form.city,
-        state: form.state,
+        state: form.state.trim().toUpperCase(),
         user_code: generatedUserId,
         partner_id: form.partnerId || null,
         status: 'active',
@@ -202,16 +218,16 @@ function SignupContent() {
   };
 
   if (!mounted) {
-    return <div className="h-screen w-screen bg-slate-950 flex items-center justify-center text-gray-500 text-xs tracking-widest font-mono">LOADING GATEWAY...</div>;
+    return <div className="h-screen w-full bg-slate-950 flex items-center justify-center text-gray-500 text-xs tracking-widest font-mono">LOADING GATEWAY...</div>;
   }
 
   return (
-    <div className="min-h-screen w-screen flex flex-col bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white overflow-hidden relative">
+    <div className="min-h-screen w-full flex flex-col bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 text-white">
 
       {/* MARQUEE TEXT */}
       <div className="w-full bg-white/5 border-b border-white/10 overflow-hidden relative z-10 flex items-center justify-center">
         <div className="w-full overflow-hidden">
-          <div className="inline-block whitespace-nowrap animate-[scrollLeft_25s_linear_infinite] text-sm md:text-base font-bold text-slate-200 py-3 text-center w-full">
+          <div className="inline-block whitespace-nowrap animate-[scrollLeft_25s_linear_infinite] text-xs md:text-sm font-bold text-slate-200 py-2.5 text-center w-full">
             <span>
               Welcome to <span className="text-yellow-400 font-black">Legal n Tech Consultants</span> • Delivering Fast, Secure & Quality-Driven Legal & Construction Solutions 24x365
             </span>
@@ -220,21 +236,21 @@ function SignupContent() {
       </div>
 
       {/* BACK BUTTON */}
-      <div className="absolute top-14 left-4 z-50">
+      <div className="p-4 sm:absolute sm:top-14 sm:left-4 z-50">
         <Link
           href="/login"
-          className="px-4 py-2 text-xs font-bold uppercase rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition"
+          className="inline-block px-3 py-1.5 text-xs font-bold uppercase rounded-lg bg-white/10 border border-white/20 hover:bg-white/20 transition"
         >
           ← Back Login
         </Link>
       </div>
 
       {/* MAIN CONTENT GRID */}
-      <div className="flex flex-1 items-center justify-between p-6 gap-6">
+      <div className="flex-1 flex flex-col lg:flex-row items-center justify-center p-4 sm:p-6 gap-6 max-w-7xl mx-auto w-full">
 
         {/* LEFT PANEL */}
         <div className="hidden lg:flex flex-1 flex-col justify-center p-6">
-          <h2 className="text-yellow-400 font-black text-base mb-5 text-center tracking-widest">
+          <h2 className="text-yellow-400 font-black text-base mb-5 text-center tracking-widest uppercase">
             SERVICES PANEL
           </h2>
           <div className="space-y-4 leading-7 font-medium text-slate-300">
@@ -248,11 +264,11 @@ function SignupContent() {
         </div>
 
         {/* CENTER PANEL (FORM CONTAINER) */}
-        <div className="w-full max-w-md bg-white text-black rounded-2xl shadow-2xl p-6">
-          <h1 className="text-2xl font-black text-blue-900 text-center uppercase tracking-tight">
+        <div className="w-full max-w-md bg-white text-black rounded-2xl shadow-2xl p-5 sm:p-6 my-auto">
+          <h1 className="text-xl sm:text-2xl font-black text-blue-900 text-center uppercase tracking-tight">
             LnT SIGNUP PORTAL
           </h1>
-          <p className="text-xs text-center text-gray-500 mb-4 font-bold tracking-wider">
+          <p className="text-[11px] sm:text-xs text-center text-gray-500 mb-4 font-bold tracking-wider">
             ACCOUNT REGISTRATION FORM
           </p>
 
@@ -271,20 +287,20 @@ function SignupContent() {
               <input name="password" required type="password" placeholder="PASSWORD" value={form.password} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
 
               {/* STATE & CITY SEARCHABLE DROPDOWN */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <input
                     type="text"
                     name="state"
                     required
-                    placeholder="STATE"
+                    placeholder="SELECT STATE"
                     value={form.state}
                     onChange={handleChange}
                     list="all-states-list"
                     className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
                   />
                   <datalist id="all-states-list">
-                    {Object.keys(INDIAN_STATES_AND_DISTRICTS).map((stateName) => (
+                    {Object.keys(INDIAN_STATES_AND_DISTRICTS).sort().map((stateName) => (
                       <option key={stateName} value={stateName} />
                     ))}
                   </datalist>
@@ -302,8 +318,8 @@ function SignupContent() {
                     className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
                   />
                   <datalist id="all-districts-list">
-                    {form.state && INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()] ? (
-                      INDIAN_STATES_AND_DISTRICTS[form.state.toUpperCase()].map((district) => (
+                    {form.state && INDIAN_STATES_AND_DISTRICTS[form.state.trim().toUpperCase()] ? (
+                      INDIAN_STATES_AND_DISTRICTS[form.state.trim().toUpperCase()].map((district) => (
                         <option key={`${district}-${form.state}`} value={district} />
                       ))
                     ) : (
@@ -418,7 +434,7 @@ function SignupContent() {
           {step === 2 && (
             <form onSubmit={verifyOtp} className="space-y-3">
               <div className="bg-green-50 border border-green-200 text-green-700 text-xs p-2 rounded text-center font-bold">
-                OTP SENT SUCCESSFULLY (Demo: 123456)
+                OTP SENT SUCCESSFULLY (Check your email inbox)
               </div>
 
               <input
@@ -431,7 +447,7 @@ function SignupContent() {
                 className="w-full border-2 p-2 rounded text-center tracking-widest font-black text-xl text-slate-800 focus:ring-2 focus:ring-green-600"
               />
 
-              <button className="w-full bg-green-700 hover:bg-green-600 text-white py-2.5 rounded font-bold transition uppercase tracking-wider text-sm">
+              <button className="w-full bg-green-700 hover:bg-green-600 text-white py-2.5 rounded font-bold transition uppercase tracking-wider text-sm cursor-pointer">
                 {loading ? 'VERIFYING...' : 'VERIFY OTP'}
               </button>
             </form>
@@ -457,7 +473,7 @@ function SignupContent() {
 
               <button
                 onClick={() => router.push('/login')}
-                className="w-full mt-4 bg-blue-900 hover:bg-blue-800 text-white py-2.5 rounded font-bold transition uppercase text-sm tracking-wider"
+                className="w-full mt-4 bg-blue-900 hover:bg-blue-800 text-white py-2.5 rounded font-bold transition uppercase text-sm tracking-wider cursor-pointer"
               >
                 GO TO LOGIN
               </button>
@@ -519,109 +535,109 @@ function SignupContent() {
             </div>
 
             <div className="p-4 overflow-y-auto space-y-4 text-xs text-slate-700 leading-relaxed">
-  <p className="font-bold text-slate-900 border-b pb-1 uppercase tracking-wider">
-    Platform Terms, Legal Disclaimers & Operational Guidelines
-  </p>
+              <p className="font-bold text-slate-900 border-b pb-1 uppercase tracking-wider">
+                Platform Terms, Legal Disclaimers & Operational Guidelines
+              </p>
 
-  {/* 1. STRICT INTERNAL REFERENCE & NON-LEGAL USE */}
-  <div className="space-y-1 bg-red-50/60 p-2.5 rounded-lg border border-red-200">
-    <p className="font-black text-red-800 uppercase tracking-wide">
-      1. Internal Reference Only (Non-Legal Use)
-    </p>
-    <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
-      <li>
-        <b>Strictly Internal Purpose:</b> All reports, estimates, valuation drafts, route maps, and legal documentation generated through this portal are strictly intended for internal client reference and preliminary evaluation purposes only.
-      </li>
-      <li>
-        <b>Not Valid in Court / Legal Proceedings:</b> These documents are <b>NOT valid</b> as formal legal evidence or expert proof in any Court of Law, Judicial Proceeding, Arbitral Tribunal, or Statutory Government Authority.
-      </li>
-      <li>
-        <b>User Responsibility:</b> The user assumes complete responsibility and liability for any unauthorized use, misuse, or disputes arising from presenting these reports in formal legal proceedings.
-      </li>
-    </ul>
-  </div>
+              {/* 1. STRICT INTERNAL REFERENCE & NON-LEGAL USE */}
+              <div className="space-y-1 bg-red-50/60 p-2.5 rounded-lg border border-red-200">
+                <p className="font-black text-red-800 uppercase tracking-wide">
+                  1. Internal Reference Only (Non-Legal Use)
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
+                  <li>
+                    <b>Strictly Internal Purpose:</b> All reports, estimates, valuation drafts, route maps, and legal documentation generated through this portal are strictly intended for internal client reference and preliminary evaluation purposes only.
+                  </li>
+                  <li>
+                    <b>Not Valid in Court / Legal Proceedings:</b> These documents are <b>NOT valid</b> as formal legal evidence or expert proof in any Court of Law, Judicial Proceeding, Arbitral Tribunal, or Statutory Government Authority.
+                  </li>
+                  <li>
+                    <b>User Responsibility:</b> The user assumes complete responsibility and liability for any unauthorized use, misuse, or disputes arising from presenting these reports in formal legal proceedings.
+                  </li>
+                </ul>
+              </div>
 
-  {/* 2. STRICT NO-REFUND POLICY */}
-  <div className="space-y-1 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
-    <p className="font-black text-amber-900 uppercase tracking-wide">
-      2. No-Refund & Payment Deduction Policy
-    </p>
-    <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
-      <li>
-        <b>Strictly Non-Refundable:</b> All payments, wallet deductions, or service fees incurred for report generation, estimation, or drafting services are <b>100% non-refundable</b> under any circumstances.
-      </li>
-      <li>
-        <b>No Reversal or Chargeback:</b> Once a report or service is successfully processed, requests for payment cancellation, refund claims, or chargebacks will not be entertained.
-      </li>
-      <li>
-        <b>Wallet Balance:</b> Funds added to the platform wallet are non-transferable and non-refundable.
-      </li>
-    </ul>
-  </div>
+              {/* 2. STRICT NO-REFUND POLICY */}
+              <div className="space-y-1 bg-amber-50/60 p-2.5 rounded-lg border border-amber-200">
+                <p className="font-black text-amber-900 uppercase tracking-wide">
+                  2. No-Refund & Payment Deduction Policy
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-800 font-medium">
+                  <li>
+                    <b>Strictly Non-Refundable:</b> All payments, wallet deductions, or service fees incurred for report generation, estimation, or drafting services are <b>100% non-refundable</b> under any circumstances.
+                  </li>
+                  <li>
+                    <b>No Reversal or Chargeback:</b> Once a report or service is successfully processed, requests for payment cancellation, refund claims, or chargebacks will not be entertained.
+                  </li>
+                  <li>
+                    <b>Wallet Balance:</b> Funds added to the platform wallet are non-transferable and non-refundable.
+                  </li>
+                </ul>
+              </div>
 
-  {/* 3. LIMITATION OF LIABILITY & REJECTIONS */}
-  <div className="space-y-1">
-    <p className="font-bold text-blue-900 uppercase tracking-wide">
-      3. Bank Rejections & Site Verification
-    </p>
-    <ul className="list-disc pl-4 space-y-1 text-slate-700">
-      <li>
-        <b>No Guarantee for Approvals:</b> Legal n Tech Consultants holds no legal or financial liability in cases of bank loan rejections, municipal authority disapprovals, or third-party refusals.
-      </li>
-      <li>
-        <b>Mandatory Cross-Verification:</b> It is the sole responsibility of the user to physically verify site dimensions, local PWD/CPWD rates, and property legal title documents before finalizing any report.
-      </li>
-    </ul>
-  </div>
+              {/* 3. LIMITATION OF LIABILITY & REJECTIONS */}
+              <div className="space-y-1">
+                <p className="font-bold text-blue-900 uppercase tracking-wide">
+                  3. Bank Rejections & Site Verification
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-700">
+                  <li>
+                    <b>No Guarantee for Approvals:</b> Legal n Tech Consultants holds no legal or financial liability in cases of bank loan rejections, municipal authority disapprovals, or third-party refusals.
+                  </li>
+                  <li>
+                    <b>Mandatory Cross-Verification:</b> It is the sole responsibility of the user to physically verify site dimensions, local PWD/CPWD rates, and property legal title documents before finalizing any report.
+                  </li>
+                </ul>
+              </div>
 
-  {/* 4. WALLET BALANCE & ACCOUNT STATUS */}
-  <div className="space-y-1">
-    <p className="font-bold text-blue-900 uppercase tracking-wide">
-      4. Wallet Balance & Account Status
-    </p>
-    <ul className="list-disc pl-4 space-y-1 text-slate-700">
-      <li>
-        <b>Minimum Balance Requirement:</b> Users must maintain a minimum wallet balance of <b>₹100</b> at all times to ensure uninterrupted access to all platform features and services.
-      </li>
-      <li>
-        <b>Low Balance Restrictions:</b> If your wallet balance falls below ₹100, new service requests will be restricted. However, you will retain access to view and print your previously generated estimates and review old cases.
-      </li>
-      <li>
-        <b>Account Deactivation Policy:</b> If the wallet balance remains below the required minimum and no activity or top-up is recorded for <b>60 days</b>, the account will be temporarily suspended, and estimates older than 60 days will no longer be accessible for opening or editing.
-      </li>
-    </ul>
-  </div>
+              {/* 4. WALLET BALANCE & ACCOUNT STATUS */}
+              <div className="space-y-1">
+                <p className="font-bold text-blue-900 uppercase tracking-wide">
+                  4. Wallet Balance & Account Status
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-700">
+                  <li>
+                    <b>Minimum Balance Requirement:</b> Users must maintain a minimum wallet balance of <b>₹100</b> at all times to ensure uninterrupted access to all platform features and services.
+                  </li>
+                  <li>
+                    <b>Low Balance Restrictions:</b> If your wallet balance falls below ₹100, new service requests will be restricted. However, you will retain access to view and print your previously generated estimates and review old cases.
+                  </li>
+                  <li>
+                    <b>Account Deactivation Policy:</b> If the wallet balance remains below the required minimum and no activity or top-up is recorded for <b>60 days</b>, the account will be temporarily suspended, and estimates older than 60 days will no longer be accessible for opening or editing.
+                  </li>
+                </ul>
+              </div>
 
-  {/* 5. SERVICE, EDITING & CORRECTION GUIDELINES */}
-  <div className="space-y-1">
-    <p className="font-bold text-blue-900 uppercase tracking-wide">
-      5. Service & Estimate Guidelines
-    </p>
-    <ul className="list-disc pl-4 space-y-1 text-slate-700">
-      <li>
-        <b>Activity Requirement:</b> Users must generate at least <b>1 estimate every 2 months</b> to keep their account fully active and operational. Failure to meet this requirement may lead to account suspension.
-      </li>
-      <li>
-        <b>Editing Limits:</b> For every standard service package (including estimates, drafting, mapping, and allied services), users are permitted a maximum of <b>3 free edits</b>.
-      </li>
-      <li>
-        <b>Additional Revisions:</b> Any modifications or edits requested after exhausting the initial 3 revisions will incur standard additional charges for a new request.
-      </li>
-      <li>
-        <b>Name & Address Correction Policy:</b> Only <b>minor typographical or spelling corrections</b> are permitted in the Name and Address fields. Substantial changes to identity or property ownership details are not allowed once submitted.
-      </li>
-    </ul>
-  </div>
+              {/* 5. SERVICE, EDITING & CORRECTION GUIDELINES */}
+              <div className="space-y-1">
+                <p className="font-bold text-blue-900 uppercase tracking-wide">
+                  5. Service & Estimate Guidelines
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-slate-700">
+                  <li>
+                    <b>Activity Requirement:</b> Users must generate at least <b>1 estimate every 2 months</b> to keep their account fully active and operational. Failure to meet this requirement may lead to account suspension.
+                  </li>
+                  <li>
+                    <b>Editing Limits:</b> For every standard service package (including estimates, drafting, mapping, and allied services), users are permitted a maximum of <b>3 free edits</b>.
+                  </li>
+                  <li>
+                    <b>Additional Revisions:</b> Any modifications or edits requested after exhausting the initial 3 revisions will incur standard additional charges for a new request.
+                  </li>
+                  <li>
+                    <b>Name & Address Correction Policy:</b> Only <b>minor typographical or spelling corrections</b> are permitted in the Name and Address fields. Substantial changes to identity or property ownership details are not allowed once submitted.
+                  </li>
+                </ul>
+              </div>
 
-  {/* SUPPORT & ASSISTANCE */}
-  <div className="space-y-1 pt-2 border-t border-gray-200">
-    <p className="font-bold text-slate-900 uppercase">Support & Assistance</p>
-    <p className="text-slate-600">
-      If you encounter any technical issues, platform errors, or require clarification regarding your wallet balance or account status, please contact our Administrator Support Team at:
-    </p>
-    <p className="font-bold text-blue-900">Helpline / WhatsApp: 7987561396</p>
-  </div>
-</div>
+              {/* SUPPORT & ASSISTANCE */}
+              <div className="space-y-1 pt-2 border-t border-gray-200">
+                <p className="font-bold text-slate-900 uppercase">Support & Assistance</p>
+                <p className="text-slate-600">
+                  If you encounter any technical issues, platform errors, or require clarification regarding your wallet balance or account status, please contact our Administrator Support Team at:
+                </p>
+                <p className="font-bold text-blue-900">Helpline / WhatsApp: 7987561396</p>
+              </div>
+            </div>
 
             <div className="p-3 bg-gray-100 border-t border-gray-200 flex justify-end gap-2">
               <button
@@ -651,11 +667,10 @@ function SignupContent() {
   );
 }
 
-// Default export wrapped in Suspense boundary
 export default function SignupPage() {
   return (
     <Suspense fallback={
-      <div className="h-screen w-screen bg-slate-950 flex items-center justify-center text-gray-500 text-xs tracking-widest font-mono">
+      <div className="h-screen w-full bg-slate-950 flex items-center justify-center text-gray-500 text-xs tracking-widest font-mono">
         LOADING GATEWAY...
       </div>
     }>

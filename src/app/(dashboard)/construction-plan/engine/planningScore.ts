@@ -1,5 +1,5 @@
 import { FloorRoom } from './planningTypes';
-import { buildCirculationGraph } from './circulationEngine';
+import { buildCirculationGraph } from './circulationPlanner';
 
 export interface PlanningScore {
   total: number;

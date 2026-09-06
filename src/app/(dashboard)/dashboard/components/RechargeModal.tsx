@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { supabase } from '@/lib/supabase';
 
 interface RechargeModalProps {
   isOpen: boolean;
@@ -33,8 +34,9 @@ export default function RechargeModal({
   const rawUpiUrl = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(payeeName)}&am=${amount || '0'}&cu=INR&tn=${encodeURIComponent(transactionNote)}`;
 
   const handleUpiPayment = (appScheme?: string) => {
-    if (!amount || Number(amount) <= 0) {
-      alert('Please enter a valid amount');
+    const numAmount = Number(amount);
+    if (!amount || isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid amount greater than 0');
       return;
     }
 
@@ -69,6 +71,12 @@ export default function RechargeModal({
   };
 
   const handleSubmit = async () => {
+    const numAmount = Number(amount);
+    if (!amount || isNaN(numAmount) || numAmount <= 0) {
+      alert('Please enter a valid amount greater than 0');
+      return;
+    }
+
     if (utr.trim().length < 12) {
       alert('Please enter a valid 12-digit UTR / Reference number');
       return;
@@ -76,12 +84,54 @@ export default function RechargeModal({
 
     try {
       setLoading(true);
+
+      // --- 1. DUPLICATE UTR CHECK LOGIC ---
+      const { data: existingRecharge, error: checkError } = await supabase
+        .from('wallet_recharges')
+        .select('id, status')
+        .eq('utr_no', utr.trim())
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Error checking duplicate UTR:', checkError);
+      }
+
+      if (existingRecharge) {
+        alert(`❌ This UTR number has already been submitted! (Status: ${existingRecharge.status})`);
+        setLoading(false);
+        return;
+      }
+      // ------------------------------------
+
+      // --- 2. SUPABASE INSERTION LOGIC ---
+      const { error: insertError } = await supabase
+        .from('wallet_recharges')
+        .insert({
+          user_id: userData?.uuid || userData?.id || null,
+          user_email: userData?.email || null,
+          user_name: userData?.name || userData?.fullName || 'User',
+          amount: numAmount,
+          utr_no: utr.trim(),
+          status: 'PENDING'
+        });
+
+      if (insertError) {
+        if (insertError.code === '23505') {
+          throw new Error('This UTR number already exists in the system.');
+        }
+        throw insertError;
+      }
+      // ------------------------------------
+
+      alert('Recharge request submitted successfully! Waiting for Admin approval.');
+
       if (onRechargeSubmitted) {
         await onRechargeSubmitted();
       }
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Submission failed:', error);
+      alert('Failed to submit recharge request: ' + (error.message || error));
     } finally {
       setLoading(false);
     }
@@ -155,7 +205,7 @@ export default function RechargeModal({
               Scan the QR code above to transfer funds, then enter the exact amount paid and UTR / UPI Transaction Reference ID below. After payment, please share the payment screenshot along with the UTR on WhatsApp at <span className="font-bold">{helplineNo}</span> for quick Admin approval.
             </div>
 
-            {/* Recharge Amount Input */}
+            {/* Recharge Amount Input (Numbers & Single Decimal Allowed) */}
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
                 RECHARGE AMOUNT (₹)
@@ -163,10 +213,20 @@ export default function RechargeModal({
               <div className="relative">
                 <span className="absolute left-3 top-2.5 font-bold text-slate-500">₹</span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="e.g. 500"
+                  onChange={(e) => {
+                    let val = e.target.value;
+                    // Sirf numbers aur ek single decimal point allow karega, baki sab remove kar dega
+                    val = val.replace(/[^0-9.]/g, '');
+                    const parts = val.split('.');
+                    if (parts.length > 2) {
+                      val = parts[0] + '.' + parts.slice(1).join('');
+                    }
+                    setAmount(val);
+                  }}
+                  placeholder="e.g. 500.50"
                   className="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 text-base outline-none"
                 />
               </div>
@@ -186,7 +246,7 @@ export default function RechargeModal({
               <p className="text-[11px] font-semibold text-slate-500 mb-2 text-center">Or Direct Pay via Installed App:</p>
               <div className="grid grid-cols-3 gap-2.5">
                 
-                {/* Google Pay Button with Official SVG Icon */}
+                {/* Google Pay Button */}
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('gpay')}
@@ -201,7 +261,7 @@ export default function RechargeModal({
                   <span>Google Pay</span>
                 </button>
 
-                {/* PhonePe Button with Official Purple SVG Icon */}
+                {/* PhonePe Button */}
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('phonepe')}
@@ -214,7 +274,7 @@ export default function RechargeModal({
                   <span>PhonePe</span>
                 </button>
 
-                {/* Paytm Button with Official Cyan SVG Icon */}
+                {/* Paytm Button */}
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('paytm')}

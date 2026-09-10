@@ -123,30 +123,90 @@ export function generateDeedHtmlContent(formData: any): string {
 
   let propertyDescription = "";
 
-  const getLocalizedFloorName = (fName: string) => {
-    const upper = (fName || "").toUpperCase();
-    if (lang === "HINDI") {
-      if (upper.includes("GROUND")) return "भूतल (Ground Floor)";
-      if (upper.includes("FIRST")) return "प्रथम तल (First Floor)";
-      if (upper.includes("SECOND")) return "द्वितीय तल (Second Floor)";
-      if (upper.includes("THIRD")) return "तृतीय तल (Third Floor)";
-      if (upper.includes("TOWER")) return "टावर (Tower)";
-      if (upper.includes("BASEMENT")) return "तहखाना (Basement)";
-    }
-    return fName;
-  };
+const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
+  if (!fName) return "";
+  const upper = fName.toUpperCase();
+
+  // Agar language HINDI hai tabhi localized naam return karega
+  if (lang === "HINDI") {
+    if (upper.includes("GROUND") || upper.includes("0")) return "भूतल (Ground Floor)";
+    if (upper.includes("FIRST") || upper.includes("1")) return "प्रथम तल (First Floor)";
+    if (upper.includes("SECOND") || upper.includes("2")) return "द्वितीय तल (Second Floor)";
+    if (upper.includes("THIRD") || upper.includes("3")) return "तृतीय तल (Third Floor)";
+    if (upper.includes("FOURTH") || upper.includes("4")) return "चतुर्थ तल (Fourth Floor)";
+    if (upper.includes("FIFTH") || upper.includes("5")) return "पंचम तल (Fifth Floor)";
+    if (upper.includes("SIXTH") || upper.includes("6")) return "षष्टम तल (Sixth Floor)";
+    if (upper.includes("SEVENTH") || upper.includes("7")) return "सप्तम तल (Seventh Floor)";
+    if (upper.includes("EIGHTH") || upper.includes("8")) return "अष्टम तल (Eighth Floor)";
+    if (upper.includes("NINTH") || upper.includes("9")) return "नवम तल (Ninth Floor)";
+    if (upper.includes("TENTH") || upper.includes("10")) return "दशम तल (Tenth Floor)";
+    if (upper.includes("ELEVENTH") || upper.includes("11")) return "ग्यारहवां तल (Eleventh Floor)";
+    if (upper.includes("TWELFTH") || upper.includes("12")) return "बारहवां तल (Twelfth Floor)";
+    if (upper.includes("THIRTEENTH") || upper.includes("13")) return "तेरहवां तल (Thirteenth Floor)";
+    if (upper.includes("FOURTEENTH") || upper.includes("14")) return "चौदहवां तल (Fourteenth Floor)";
+    if (upper.includes("FIFTEENTH") || upper.includes("15")) return "पंद्रहवां तल (Fifteenth Floor)";
+    
+    if (upper.includes("TOWER")) return "टावर (Tower)";
+    if (upper.includes("BASEMENT")) return "तहखाना (Basement)";
+  }
+
+  return fName; // Agar language HINDI na ho ya match na kare toh original string wapas bhej dega
+};
 
   if (subType.includes("PLOT") || subType.includes("भूखंड")) {
     const plotAddress = formData.propertyAddress || "भूखंड क्रमांक 81, द्वारका वेली, ग्राम मंगलिया तहसील सांवेर, जिला इंदौर, (म.प्र.)";
     const plotAreaVal = formData.plotArea || "1000";
     const plotUnit = formData.plotAreaUnit || "वर्गफीट";
-    const sqMeters = formData.sqMeters || "92.90";
+
+    // ✅ FIX: agar plotAreaVal me "में से" jaisa pattern hai (total में से X becha ja raha hai),
+    // to conversion ke liye us "से" ke BAAD wala number lo, na ki total wala.
+    const extractSellAreaNumber = (val: string): number | null => {
+      if (val === null || val === undefined) return null;
+      const str = String(val);
+
+      // Agar "में से" ya "में से" jaisa koi divider hai, uske baad wala number nikaalo
+      const afterSePattern = /में\s*से\s*([\d,.]+)/;
+      const afterSeMatch = str.match(afterSePattern);
+      if (afterSeMatch) {
+        const num = parseFloat(afterSeMatch[1].replace(/,/g, ""));
+        if (!isNaN(num)) return num;
+      }
+
+      // Warna string me jitne bhi number mile unme se AKHRI number lo
+      // (kyunki "1500 (30x50) में से 750" jaisi cases me last number hi actual sell area hota hai)
+      const allNumbers = str.match(/[\d,.]+/g);
+      if (allNumbers && allNumbers.length > 0) {
+        const lastNum = parseFloat(allNumbers[allNumbers.length - 1].replace(/,/g, ""));
+        if (!isNaN(lastNum)) return lastNum;
+      }
+
+      return null;
+    };
+
+    // ✅ sqMeters ab dynamically, sahi (sell) area number se calculate hoga
+    let sqMeters = formData.sqMeters;
+    if (!sqMeters) {
+      const areaNum = extractSellAreaNumber(plotAreaVal);
+      if (areaNum !== null) {
+        const unitLower = (plotUnit || "").toLowerCase();
+        const isSqMt = unitLower.includes("मीटर") || unitLower.includes("mt") || unitLower.includes("meter");
+
+        if (isSqMt) {
+          sqMeters = areaNum.toFixed(2); // already sq.mt
+        } else {
+          sqMeters = (areaNum / 10.7639).toFixed(2); // sq.ft -> sq.mt (aapke bataye 10.76 ka precise version)
+        }
+      } else {
+        sqMeters = "........";
+      }
+    }
+
     const registryOffice = formData.registryOffice || "जिला इंदौर";
-    const registryDate = formData.registryDate || "13/12/2025";
-    const registryNo = formData.registryNo || "MP319522023A114771720";
+    const registryDate = formData.registryDate || "........";
+    const registryNo = formData.registryNo || "........";
 
     propertyDescription = `
-      <p><b>1.</b> यह कि प्रथमपक्ष / विक्रेतापक्ष के एकमात्र स्वामित्व एवं आधिपत्य का यह भूखंड <b>${plotAddress}</b> सा स्थित है | जिसका एरिया <b>${plotAreaVal} ${plotUnit}</b> (अर्थात <b>${sqMeters} वर्गमीटर</b>) है जिसका पंजीयक कार्यालय <b>${registryOffice}</b> में दिनांक <b>${registryDate}</b> को कराया है जिसका क्रमांक <b>${registryNo}</b> पर पंजीकृत है सदर भूखंड वर्तमान में रिक्त अवस्था में होकर उस पर किसी भी प्रकार का कोई निर्माण कार्य नहीं किया गया है सदर संपत्ति का उपयोग एवं उपभोग विक्रेता पक्ष द्वारा मालिक एवं स्वामी के रूप में किया जा रहा है। इस प्रकार उक्त संपत्ति को विक्रय (बेचने) करने का पूर्ण एवं वैधानिक अधिकार विक्रेता पक्ष को प्राप्त है।</p>
+      <p><b>1.</b> यह कि प्रथमपक्ष / विक्रेतापक्ष के एकमात्र स्वामित्व एवं आधिपत्य का यह <b>${plotAddress}</b> सा स्थित है | जिसका एरिया <b>${plotAreaVal} ${plotUnit}</b> (अर्थात <b>${sqMeters} वर्गमीटर</b>) है जिसका पंजीयक कार्यालय <b>${registryOffice}</b> में दिनांक <b>${registryDate}</b> को कराया है जिसका क्रमांक <b>${registryNo}</b> पर पंजीकृत है सदर भूखंड वर्तमान में रिक्त अवस्था में होकर उस पर किसी भी प्रकार का कोई निर्माण कार्य नहीं किया गया है सदर संपत्ति का उपयोग एवं उपभोग विक्रेता पक्ष द्वारा मालिक एवं स्वामी के रूप में किया जा रहा है। इस प्रकार उक्त संपत्ति को विक्रय (बेचने) करने का पूर्ण एवं वैधानिक अधिकार विक्रेता पक्ष को प्राप्त है।</p>
       
       <p style="text-align: center; font-weight: bold; margin-top: 15px;">!! विक्रीत भूखंड का वर्णन !!</p>
       <p><b>${plotAddress}</b> में स्थित है | उक्त भूखंड का कुल क्षेत्रफल <b>${plotAreaVal} ${plotUnit}</b> (अर्थात <b>${sqMeters} वर्गमीटर</b>) है सदर भूखंड वर्तमान में रिक्त अवस्था में होकर उस पर किसी भी प्रकार का कोई निर्माण कार्य नहीं किया गया है जिसे इस लेख के माध्यम से विक्रेतापक्ष द्वारा क्रेतापक्ष को विक्रय किया जा रहा है</p>

@@ -14,14 +14,15 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
   const [clients, setClients] = useState<any[]>([]);
   const [filteredReps, setFilteredReps] = useState<string[]>([]);
   const [allRepresentatives, setAllRepresentatives] = useState<string[]>([]);
+  const [registeredFee, setRegisteredFee] = useState<number>(0);
 
-  // Fetch clients and representatives from Supabase just like in EstimatePage
+  // Fetch clients and reps on mount
   useEffect(() => {
     const fetchClientsData = async () => {
       const { data: clientsTable, error } = await supabase
         .from('clients')
         .select('client_name, representative_name');
-      
+
       if (error) {
         console.error("Error fetching clients:", error);
         return;
@@ -41,8 +42,31 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
     fetchClientsData();
   }, []);
 
+  // ✅ FIX: re‑fetch fee whenever clientName changes (handles edit/reopen)
+  useEffect(() => {
+    if (formData.clientName && formData.clientName.trim() !== "") {
+      supabase
+        .from('clients')
+        .select('estimate_fee')
+        .eq('client_name', formData.clientName)
+        .maybeSingle()
+        .then(({ data }) => {
+          const fee = data?.estimate_fee || 0;
+          setRegisteredFee(fee);
+          // If fee mode is Auto, sync feeAmount immediately
+          if (setFormData && formData.feeMode !== "Manual") {
+            setFormData((prev: any) => ({ ...prev, feeAmount: fee }));
+          }
+        });
+    } else {
+      setRegisteredFee(0);
+      if (setFormData) {
+        setFormData((prev: any) => ({ ...prev, feeAmount: 0 }));
+      }
+    }
+  }, [formData.clientName, setFormData, formData.feeMode]); // ✅ dependency added
+
   const handleClientNameSelect = (name: string) => {
-    // Mimic parent change or direct form update if setFormData is available
     const event = {
       target: { name: "clientName", value: name }
     };
@@ -52,15 +76,43 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
       .filter((c: any) => c.client_name === name && c.representative_name)
       .map((c: any) => c.representative_name as string);
 
-      if (matches.length > 0) {
-        const uniqueReps = Array.from(new Set(matches)) as string[];
-        setFilteredReps(uniqueReps);
-        if (uniqueReps.length === 1 && setFormData) {
-          setFormData((prev: any) => ({ ...prev, representativeName: uniqueReps[0] }));
-        }
-      } else {
-        setFilteredReps(allRepresentatives);
+    if (matches.length > 0) {
+      const uniqueReps = Array.from(new Set(matches)) as string[];
+      setFilteredReps(uniqueReps);
+      if (uniqueReps.length === 1 && setFormData) {
+        setFormData((prev: any) => ({ ...prev, representativeName: uniqueReps[0] }));
       }
+    } else {
+      setFilteredReps(allRepresentatives);
+    }
+
+    if (!name || name.trim() === "") {
+      setRegisteredFee(0);
+      if (setFormData) {
+        setFormData((prev: any) => ({ ...prev, feeAmount: 0 }));
+      }
+      return;
+    }
+
+    supabase
+      .from('clients')
+      .select('estimate_fee')
+      .eq('client_name', name)
+      .maybeSingle()
+      .then(({ data }) => {
+        const fee = data?.estimate_fee || 0;
+        setRegisteredFee(fee);
+        if (setFormData && formData.feeMode !== "Manual") {
+          setFormData((prev: any) => ({ ...prev, feeAmount: fee }));
+        }
+      });
+  };
+
+  const handleFeeModeChange = (e: any) => {
+    handleChange(e);
+    if (e.target.value === "Auto" && setFormData) {
+      setFormData((prev: any) => ({ ...prev, feeAmount: registeredFee }));
+    }
   };
 
   return (
@@ -68,33 +120,53 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
       <h2 className="text-xs font-black text-blue-900 uppercase tracking-wider">
         SECTION 1: Case & General Information
       </h2>
-      
-      {/* Mobile 2 columns, Desktop 4 columns */}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
+        {/* CASE TYPE */}
         <div>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">CASE TYPE</label>
           <input type="text" name="caseType" value={formData.caseType} readOnly className="w-full p-2 border rounded text-xs sm:text-sm bg-gray-100 font-bold" />
         </div>
-        
+
+        {/* FEE MODE with Auto/Manual logic */}
         <div>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">FEE MODE</label>
-          <select name="feeMode" value={formData.feeMode} onChange={handleChange} className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-bold">
+          <select name="feeMode" value={formData.feeMode} onChange={handleFeeModeChange} className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-bold">
             <option value="Auto">Auto Calculation</option>
             <option value="Manual">Manual Entry</option>
           </select>
+
+          {formData.feeMode === "Manual" ? (
+            <input
+              type="number"
+              name="feeAmount"
+              placeholder="ENTER FEE"
+              value={formData.feeAmount || ""}
+              onChange={handleChange}
+              className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-bold mt-1"
+            />
+          ) : (
+            <input
+              type="text"
+              readOnly
+              value={registeredFee ? `₹ ${registeredFee}` : "₹ 0 (No fee set)"}
+              className="w-full p-2 border rounded text-xs sm:text-sm bg-gray-100 font-bold mt-1"
+            />
+          )}
         </div>
 
+        {/* CLIENT NAME */}
         <div>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">CLIENT NAME *</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             list="section-clients-list"
-            name="clientName" 
-            required 
-            placeholder="SEARCH CLIENT..." 
-            value={formData.clientName} 
-            onChange={(e) => handleClientNameSelect(e.target.value)} 
-            className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase font-semibold" 
+            name="clientName"
+            required
+            placeholder="SEARCH CLIENT..."
+            value={formData.clientName}
+            onChange={(e) => handleClientNameSelect(e.target.value)}
+            className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase font-semibold"
           />
           <datalist id="section-clients-list">
             {[...new Set(clients.map(c => c.client_name))].map((name, i) => (
@@ -103,16 +175,17 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
           </datalist>
         </div>
 
+        {/* REPRESENTATIVE NAME */}
         <div>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">REPRESENTATIVE NAME</label>
-          <input 
-            type="text" 
+          <input
+            type="text"
             list="section-reps-list"
-            name="representativeName" 
-            placeholder="SEARCH REP..." 
-            value={formData.representativeName} 
-            onChange={handleChange} 
-            className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase" 
+            name="representativeName"
+            placeholder="SEARCH REP..."
+            value={formData.representativeName}
+            onChange={handleChange}
+            className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase"
           />
           <datalist id="section-reps-list">
             {filteredReps.map((rep, i) => (
@@ -122,7 +195,7 @@ export default function Section1CaseInfo({ formData, handleChange, setFormData }
         </div>
       </div>
 
-      {/* Mobile 2 columns, Desktop 5 columns */}
+      {/* Other fields unchanged */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-2 sm:gap-3 pt-2">
         <div>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">STATE (ALL INDIA)</label>

@@ -27,8 +27,15 @@ export interface SharedBoundary {
   length: number;
 }
 
+export interface SetbackMosSpec {
+  front: number;
+  back: number;
+  left: number;
+  right: number;
+}
+
 const TOLERANCE = 0.08;
-const EXT_TOLERANCE = 0.5; // Outer boundary tolerance for main gate detection
+const EXT_TOLERANCE = 0.5;
 const EDGE_OFFSET = 0.5;
 
 export function calculateDoorsAndWindows(totalBuiltUpArea: number, floorCount: number, hasTower: boolean): DoorWindowSpec {
@@ -86,14 +93,20 @@ export function findSharedBoundary(r1: RoomLayout, idx1: number, r2: RoomLayout,
   return null;
 }
 
-function localOffset(boundary: SharedBoundary, side: "A" | "B", width: number, room: RoomLayout): number {
+function localOffset(boundary: SharedBoundary, side: "A" | "B", width: number, room: RoomLayout, roomType: string): number {
   const vertical = boundary.wallForA === "LEFT" || boundary.wallForA === "RIGHT";
   const start = boundary.overlapStart;
   const end = boundary.overlapEnd;
+  const roomStart = vertical ? room.y : room.x;
+
+  if (roomType === "bedroom" || roomType === "master-bedroom") {
+    const preferredOffset = (start - roomStart) + 1.2;
+    const maxLimit = (end - roomStart) - width - 0.5;
+    return Math.max(EDGE_OFFSET, Math.min(preferredOffset, maxLimit));
+  }
+
   const center = (start + end) / 2;
   const centerStart = center - width / 2;
-  const roomStart = vertical ? room.y : room.x;
-  void side;
   return Math.max(EDGE_OFFSET, centerStart - roomStart);
 }
 
@@ -135,7 +148,7 @@ function addWindow(room: RoomLayout, wall: PlacedWindow["wall"], offsetFeet: num
   room.windows = room.windows || [];
   const max = wall === "LEFT" || wall === "RIGHT" ? room.h : room.w;
   const length = Math.min(lengthFeet, Math.max(2, max - 1.0));
-  const offset = Math.max(0.5, Math.min(offsetFeet, Math.max(0.5, max - length - 0.5)));
+  const offset = Math.max(0.5, (max - length) / 2); // Centered engineering pattern |==================|
   const exists = room.windows.some((w) => w.wall === wall && Math.abs(w.offsetFeet - offset) < 0.75);
   if (!exists) room.windows.push({ id, wall, offsetFeet: offset, lengthFeet: length, windowType });
 }
@@ -155,8 +168,13 @@ function exteriorWallForRoom(room: RoomLayout, floorW: number, floorH: number): 
   return null;
 }
 
-/** Builds a connected circulation graph from actual shared boundaries. */
-export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NORTH" | "SOUTH" | "EAST" | "WEST" = "SOUTH", floorW?: number, floorH?: number): RoomLayout[] {
+export function generateFloorOpenings(
+  rooms: RoomLayout[], 
+  _roadOrientation: "NORTH" | "SOUTH" | "EAST" | "WEST" = "SOUTH", 
+  floorW?: number, 
+  floorH?: number,
+  setbacks?: SetbackMosSpec
+): RoomLayout[] {
   const updated = rooms.map((r) => ({ ...r, doors: [...(r.doors || [])], windows: [...(r.windows || [])] }));
   const W = Number(floorW || Math.max(...updated.map((r) => r.x + r.w), 0));
   const H = Number(floorH || Math.max(...updated.map((r) => r.y + r.h), 0));
@@ -172,20 +190,14 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
     if (ta === "duct" || tb === "duct") return false;
     if (ta === "bathroom" && tb === "bathroom") return false;
     if (ta === "parking" && tb === "parking") return false;
-
-    // Strict Rule: Parking MUST ONLY connect to Living Room/Hall (Never directly to Kitchen, Bedroom, Pooja, etc.)
     if (ta === "parking" && tb !== "hall") return false;
     if (tb === "parking" && ta !== "hall") return false;
 
-    // Bedrooms should not be connected directly to another bedroom.
-    // They must connect through the public/circulation network so a private
-    // room never becomes the accidental passage to another private room.
+    // Kitchen aur Hall connect ho sakte hain, taaki wall mein opening/cut aaye!
+    // Par inka connection open arch ki tarah treat hoga (no door symbol).
+
     const privateTypes = ["bedroom", "master-bedroom"];
     if (privateTypes.includes(ta) && privateTypes.includes(tb)) return false;
-
-    // Attached bathroom access is allowed to its own master bedroom, but a
-    // bathroom must not become a through-route between unrelated rooms.
-    if (ta === "bathroom" && tb === "bathroom") return false;
 
     return true;
   };
@@ -200,16 +212,10 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
       const tb = normalizeType(updated[j]);
       let score = boundary.length;
 
-      // Circulation Priorities
       if ((ta === "parking" && tb === "hall") || (ta === "hall" && tb === "parking")) score += 1000;
       if ((ta === "hall" && tb === "stairs") || (ta === "stairs" && tb === "hall")) score += 700;
-      if ((ta === "hall" && ["pooja", "study"].includes(tb)) || (tb === "hall" && ["pooja", "study"].includes(ta))) score += 680;
-      if ((ta === "hall" && ["kitchen", "dining"].includes(tb)) || (tb === "hall" && ["kitchen", "dining"].includes(ta))) score += 620;
+      if ((ta === "hall" && ["kitchen", "dining"].includes(tb)) || (tb === "hall" && ["kitchen", "dining"].includes(ta))) score += 850; // High priority for kitchen-hall opening
       if ((ta === "hall" && ["bedroom", "master-bedroom"].includes(tb)) || (tb === "hall" && ["bedroom", "master-bedroom"].includes(ta))) score += 580;
-      if ((ta === "stairs" && (tb === "hall")) || (tb === "stairs" && (ta === "hall"))) score += 760;
-      if ((ta === "stairs" && (isWet(updated[j]) || ["bedroom", "master-bedroom"].includes(tb))) || (tb === "stairs" && (isWet(updated[i]) || ["bedroom", "master-bedroom"].includes(ta)))) score += 120;
-      if ((ta === "hall" && ["bedroom", "master-bedroom"].includes(tb)) || (tb === "hall" && ["bedroom", "master-bedroom"].includes(ta))) score += 600;
-      if ((ta === "hall" && tb === "bathroom") || (tb === "hall" && ta === "bathroom")) score += 560;
       if (isService(updated[i]) && isService(updated[j])) score -= 100;
 
       adjacency.push({ a: i, b: j, boundary, score });
@@ -222,7 +228,6 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
   const connected = new Set<number>([root]);
   const usedEdges = new Set<string>();
 
-  // Ensure Parking to Living Room door connection
   if (rootParking >= 0 && rootHall >= 0) {
     const idxEdge = adjacency.findIndex((e) => (e.a === rootParking && e.b === rootHall) || (e.a === rootHall && e.b === rootParking));
     if (idxEdge >= 0) {
@@ -231,14 +236,13 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
       const b = updated[edge.b];
       const width = 3.5;
       const sharedId = `shared-parking-hall-${edge.a}-${edge.b}`;
-      addDoor(a, edge.boundary.wallForA, localOffset(edge.boundary, "A", width, a), width, "INTERNAL", `shared-${sharedId}`, true);
-      addDoor(b, edge.boundary.wallForB, localOffset(edge.boundary, "B", width, b), width, "INTERNAL", `shared-${sharedId}`, false);
+      addDoor(a, edge.boundary.wallForA, localOffset(edge.boundary, "A", width, a, normalizeType(a)), width, "INTERNAL", `shared-${sharedId}`, true);
+      addDoor(b, edge.boundary.wallForB, localOffset(edge.boundary, "B", width, b, normalizeType(b)), width, "INTERNAL", `shared-${sharedId}`, false);
       connected.add(rootParking); connected.add(rootHall);
       usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
     }
   }
 
-  // Connect remaining room graph safely
   while (connected.size < updated.length) {
     const candidates = adjacency
       .filter((e) => connected.has(e.a) !== connected.has(e.b))
@@ -253,23 +257,38 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
 
     const isBathroom = ta === "bathroom" || tb === "bathroom";
     const isPooja = ta === "pooja" || tb === "pooja";
-    const width = isBathroom ? 2.5 : isPooja ? 2.5 : 3.0;
+    const isKitchenHall = (ta === "kitchen" && tb === "hall") || (ta === "hall" && tb === "kitchen");
     
-    // For Pooja & Study Room: ensure door opens towards Living Room inner wall only (TOP or LEFT)
+    const width = isBathroom ? 2.5 : isPooja ? 2.5 : isKitchenHall ? 3.5 : 3.0;
+    
     if (isPooja && (edge.boundary.wallForA === "BOTTOM" || edge.boundary.wallForB === "BOTTOM")) {
       usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
       continue;
     }
 
     const sharedId = `shared-${edge.a}-${edge.b}`;
-    addDoor(roomA, edge.boundary.wallForA, localOffset(edge.boundary, "A", width, roomA), width, isBathroom ? "BATHROOM" : "INTERNAL", `shared-${sharedId}`, true);
-    addDoor(roomB, edge.boundary.wallForB, localOffset(edge.boundary, "B", width, roomB), width, isBathroom ? "BATHROOM" : "INTERNAL", `shared-${sharedId}`, false);
+    const isPassageOrKitchen = ta === "passage" || tb === "passage" || isKitchenHall;
+    const openingDoorType = isBathroom ? "BATHROOM" : "INTERNAL";
+
+    // Kitchen aur Passage connections ke liye renderSymbol = false rahega taaki wall cut ho par door swing render na ho!
+    // A shared/internal door is ONE physical opening — only side A draws the swing-arc
+    // symbol; drawing it on both A and B produced two overlapping symbols on one wall.
+    addDoor(roomA, edge.boundary.wallForA, localOffset(edge.boundary, "A", width, roomA, ta), width, openingDoorType, `shared-${sharedId}`, !isPassageOrKitchen);
+    addDoor(roomB, edge.boundary.wallForB, localOffset(edge.boundary, "B", width, roomB, tb), width, openingDoorType, `shared-${sharedId}`, false);
+    
+    for (const rr of [roomA, roomB]) {
+      const dd = (rr.doors || []).find((d: any) => d.id === `shared-${sharedId}`);
+      if (dd && isPassageOrKitchen) {
+        (dd as any).openingKind = isKitchenHall ? "KITCHEN_OPEN_ARCH" : "PASSAGE_OPENING";
+        (dd as any).renderSymbol = false;
+      }
+    }
     connected.add(edge.a);
     connected.add(edge.b);
     usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
   }
 
-  // --- MAIN ENTRY GATE LOGIC (Force 2 Swing / Double Leaf Gate on Bottom Boundary) ---
+  // --- MAIN ENTRY GATE LOGIC ---
   const bottomParking = updated
     .filter((r) => is(r, "parking"))
     .sort((a, b) => (b.y + b.h) - (a.y + a.h))[0];
@@ -277,24 +296,40 @@ export function generateFloorOpenings(rooms: RoomLayout[], _roadOrientation: "NO
   if (bottomParking) {
     const gateWidth = Math.min(8.0, Math.max(6.0, bottomParking.w * 0.75));
     const offset = Math.max(0.5, (bottomParking.w - gateWidth) / 2);
-    // leaves = 2 renders a 2-panel double swing arc on main entrance
     addDoor(bottomParking, "BOTTOM", offset, gateWidth, "MAIN", "d-parking-main-gate", true, 2);
-  } else if (rootHall >= 0) {
-    const h = updated[rootHall];
-    const mainWidth = 5.0;
-    const offset = Math.max(0.5, (h.w - mainWidth) / 2);
-    addDoor(h, "BOTTOM", offset, mainWidth, "MAIN", "d-main-road-gate", true, 2);
+    const gate = (bottomParking.doors || []).find((d: any) => d.id === "d-parking-main-gate") as any;
+    if (gate) {
+      gate.isExternalOpening = true;
+      gate.cutsExternalWall = true;
+      gate.entryRole = "MAIN_ROAD_VEHICLE_GATE";
+      gate.entryStrategy = "ROAD → PARKING → LIVING";
+    }
   }
 
-  // Exterior Window/Ventilator Logic
+  // --- WINDOW & MOS (SETBACK) VALIDATION LOGIC ---
+  const leftMos = setbacks?.left ?? 0;
+  const rightMos = setbacks?.right ?? 0;
+  const frontMos = setbacks?.front ?? 0;
+  const backMos = setbacks?.back ?? 0;
+
   updated.forEach((room, index) => {
     const type = normalizeType(room);
     const ext = exteriorWallForRoom(room, W, H);
     if (!ext || type === "parking" || type === "stairs" || type === "duct") return;
+
+    let hasValidMos = true;
+    if (ext === "LEFT" && leftMos <= 0) hasValidMos = false;
+    if (ext === "RIGHT" && rightMos <= 0) hasValidMos = false;
+    if (ext === "TOP" && backMos <= 0) hasValidMos = false;
+    if (ext === "BOTTOM" && frontMos <= 0) hasValidMos = false;
+
+    if (!hasValidMos) return;
+
     const horizontal = ext === "TOP" || ext === "BOTTOM";
     const span = horizontal ? room.w : room.h;
     const desired = type === "bathroom" ? Math.min(2, span * 0.5) : Math.min(4, span * 0.65);
-    const offset = Math.max(0.5, (span - desired) / 2);
+    const offset = Math.max(0.5, (span - desired) / 2); // Centered engineering pattern |==================|
+
     addWindow(room, ext, offset, desired, type === "bathroom" ? "VENTILATOR" : "STANDARD", `${type === "bathroom" ? "vent" : "win"}-${index}`);
   });
 

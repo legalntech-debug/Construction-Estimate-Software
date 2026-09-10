@@ -1,18 +1,17 @@
 /* =========================================================
    CONSTRUCTION PLAN SYSTEM — SINGLE RESIDENTIAL ROOM PLANNER
    ---------------------------------------------------------
-   This module owns room-program interpretation and spatial placement.
-   It deliberately does NOT use plot-size presets. Every placement is
-   calculated from the current floor footprint + the current floor room
-   requirements.
+   Is file mein room placement ka pura logic hai. User diye gaye
+   exact dimensions (Width/Length) ko respect kiya jata hai.
 ========================================================= */
 
-import { FloorRoom, PlanningMode } from './planningTypes';
+import { FloorRoom, PlanningMode, ParkingMode } from './planningTypes';
 import { BHK_PRESETS, getRoomDefinition } from './roomRules';
 import { calculateStaircase, StaircaseType } from './stairPlanner';
 import { getRoadOrientation } from './roadOrientation';
 import { selectParkingCandidate } from './parkingPlanner';
 
+// 1. Floor Plan ka Input Interface (User kya deta hai)
 export interface ArchitecturalPlanRequest {
   floorName: string;
   width: number;
@@ -24,8 +23,10 @@ export interface ArchitecturalPlanRequest {
   hasParking?: boolean;
   floorToFloorHeightFeet?: number;
   planningArea?: number;
+  parkingMode?: ParkingMode;
 }
 
+// 2. Room ki Practical Rules ka Structure (Min aur Preferred size)
 export interface PracticalRoomRule {
   minWidth: number;
   minDepth: number;
@@ -34,6 +35,7 @@ export interface PracticalRoomRule {
   furniture: string;
 }
 
+// 3. Floor Plan ka Output Result (Kya return hota hai)
 export interface ArchitecturalPlanResult {
   rooms: FloorRoom[];
   warnings: string[];
@@ -45,20 +47,26 @@ export interface ArchitecturalPlanResult {
   orientation: ReturnType<typeof getRoadOrientation>;
 }
 
+// 4. Internal Room Spec (Engine ke andar process karne ke liye) - FIXED: w/h add kiya
 type RoomSpec = {
   key: string;
   count: number;
   areaMode: 'AUTO' | 'MANUAL';
   areaPerRoom?: number;
+  width?: number;   // User ka diya Width
+  length?: number;  // User ka diya Length
+  w?: number;       // UI / FloorRoom Compatibility ke liye (FIX)
+  h?: number;       // UI / FloorRoom Compatibility ke liye (FIX)
 };
 
+// 5. Practical Room Rules (Har room ke standard size aur furniture)
 export const PRACTICAL_ROOM_RULES: Record<string, PracticalRoomRule> = {
-  'MASTER BEDROOM': { minWidth: 11, minDepth: 12, preferredWidth: 12, preferredDepth: 14, furniture: 'double bed + wardrobe + clear bedside access' },
-  'BEDROOM': { minWidth: 10, minDepth: 10, preferredWidth: 11, preferredDepth: 12, furniture: 'bed + wardrobe + clear walking path' },
-  'LIVING ROOM': { minWidth: 10, minDepth: 12, preferredWidth: 12, preferredDepth: 14, furniture: 'sofa set + TV wall + circulation' },
-  'HALL': { minWidth: 9, minDepth: 11, preferredWidth: 11, preferredDepth: 13, furniture: 'seating + entry circulation' },
+  'MASTER BEDROOM': { minWidth: 10.5, minDepth: 10.5, preferredWidth: 12, preferredDepth: 14, furniture: 'double bed + wardrobe + clear bedside access' },
+  'BEDROOM': { minWidth: 9, minDepth: 9, preferredWidth: 11, preferredDepth: 12, furniture: 'bed + wardrobe + clear walking path' },
+  'LIVING ROOM': { minWidth: 10, minDepth: 9, preferredWidth: 12, preferredDepth: 14, furniture: 'sofa set + TV wall + circulation' },
+  'HALL': { minWidth: 9, minDepth: 9, preferredWidth: 11, preferredDepth: 13, furniture: 'seating + entry circulation' },
   'KITCHEN': { minWidth: 7, minDepth: 8, preferredWidth: 8, preferredDepth: 10, furniture: 'counter run + fridge + working aisle' },
-  'KITCHEN CUM DINING': { minWidth: 9, minDepth: 10, preferredWidth: 11, preferredDepth: 12, furniture: 'kitchen counter + dining table + working aisle' },
+  'KITCHEN CUM DINING': { minWidth: 9, minDepth: 9, preferredWidth: 11, preferredDepth: 12, furniture: 'kitchen counter + dining table + working aisle' },
   'DINING': { minWidth: 7, minDepth: 8, preferredWidth: 8, preferredDepth: 10, furniture: '4–6 seat dining table + circulation' },
   'POOJA ROOM': { minWidth: 4, minDepth: 5, preferredWidth: 5, preferredDepth: 6, furniture: 'altar + standing space' },
   'STUDY ROOM': { minWidth: 6, minDepth: 7, preferredWidth: 7, preferredDepth: 8, furniture: 'desk + chair + storage' },
@@ -66,33 +74,37 @@ export const PRACTICAL_ROOM_RULES: Record<string, PracticalRoomRule> = {
   'ATTACHED TOILET': { minWidth: 5, minDepth: 7, preferredWidth: 5, preferredDepth: 7, furniture: 'WC + basin + bathing clear space' },
   'BATHROOM': { minWidth: 5, minDepth: 7, preferredWidth: 5, preferredDepth: 7, furniture: 'WC + basin + bathing clear space' },
   'STAIRCASE': { minWidth: 5.5, minDepth: 8.5, preferredWidth: 6.0, preferredDepth: 10, furniture: 'two-flight stair + landing/headroom zone' },
-  'PARKING': { minWidth: 9, minDepth: 15, preferredWidth: 10, preferredDepth: 18, furniture: 'car bay + door/vehicle clearance' },
+  'PARKING': { minWidth: 9, minDepth: 10, preferredWidth: 10, preferredDepth: 12, furniture: 'car bay + door/vehicle clearance' },
   'DUCT': { minWidth: 1.5, minDepth: 4, preferredWidth: 2, preferredDepth: 6, furniture: 'ventilation/service shaft' },
   'PASSAGE': { minWidth: 3, minDepth: 6, preferredWidth: 3.25, preferredDepth: 12, furniture: 'clear circulation path' },
   'BALCONY': { minWidth: 4, minDepth: 5, preferredWidth: 5, preferredDepth: 8, furniture: 'open circulation / sit-out' },
 };
 
+// 6. Safe Number Converter (invalid value ko 0 karne ke liye)
 function n(v: any, d = 0) {
   const x = Number(v);
   return Number.isFinite(x) ? x : d;
 }
 
+// 7. String Cleaner (space aur case ko sahi karta hai)
 function clean(s: any) { return String(s || '').trim().toUpperCase(); }
 
+// 8. Room Name Normalizer (e.g., "kitchen cum dining" ko canonical naam deta hai)
 function canonical(raw: any): string {
   const s = clean(raw);
   if (s.includes('KITCHEN') && (s.includes('DINING') || s.includes('CUM'))) return 'KITCHEN CUM DINING';
   if (s.includes('MASTER')) return 'MASTER BEDROOM';
   if (s.includes('BEDROOM') || s === 'BED') return 'BEDROOM';
-  if (s.includes('LIVING') || s.includes('DRAWING') || s === 'HALL') return 'LIVING ROOM';
+  if (s.includes('STAIR')) return 'STAIRCASE'; // must run before LIVING/HALL check, else "STAIR IN LIVING ROOM" wrongly canonicalizes
+  if (s.includes('LIVING') || s.includes('DRAWING') || s.includes('HALL') || s.includes('LOUNGE')) return 'LIVING ROOM';
   if (s.includes('ATTACHED') && (s.includes('TOILET') || s.includes('BATH'))) return 'ATTACHED TOILET';
   if (s.includes('COMMON') && (s.includes('TOILET') || s.includes('BATH'))) return 'COMMON TOILET';
-  if (s.includes('TOILET') || s.includes('BATH') || s === 'WC') return 'COMMON TOILET';
+  if (s.includes('BATH') || s.includes('BATHROOM')) return 'BATHROOM';
+  if (s.includes('TOILET') || s === 'WC') return 'COMMON TOILET';
   if (s.includes('KITCHEN')) return 'KITCHEN';
   if (s.includes('DINING')) return 'DINING';
   if (s.includes('POOJA')) return 'POOJA ROOM';
   if (s.includes('STUDY')) return 'STUDY ROOM';
-  if (s.includes('STAIR')) return 'STAIRCASE';
   if (s.includes('PARK') || s.includes('PORCH')) return 'PARKING';
   if (s.includes('DUCT') || s.includes('OTS') || s.includes('SHAFT')) return 'DUCT';
   if (s.includes('PASSAGE') || s.includes('CORRIDOR')) return 'PASSAGE';
@@ -103,6 +115,7 @@ function canonical(raw: any): string {
   return s || 'ROOM';
 }
 
+// 9. Furniture Placement Logic (Room ke andar furniture ka layout)
 function furnitureAssumptions(key: string, w: number, h: number): any[] {
   const fw = Math.max(0.1, w), fh = Math.max(0.1, h);
   if (key === 'MASTER BEDROOM' || key === 'BEDROOM') {
@@ -118,6 +131,7 @@ function furnitureAssumptions(key: string, w: number, h: number): any[] {
   return [];
 }
 
+// 10. Room Object Creator (Position aur dimensions ke sath room banata hai)
 function makeRoom(key: string, index: number, x: number, y: number, w: number, h: number, extras: any = {}): FloorRoom {
   const roomType = key === 'LIVING ROOM' ? 'living' : key === 'PARKING' ? 'parking' : key === 'STAIRCASE' ? 'stairs' : key === 'DUCT' ? 'duct' : key.includes('TOILET') || key === 'BATHROOM' ? 'toilet' : key === 'PASSAGE' ? 'passage' : key.toLowerCase().replace(/\s+/g, '-');
   return {
@@ -139,17 +153,20 @@ function makeRoom(key: string, index: number, x: number, y: number, w: number, h
   };
 }
 
+// 11. Room Counter (Program mein kitni baar room aaya hai)
 function roomCounts(program: string[]) {
   const counts: Record<string, number> = {};
   for (const key of program) counts[key] = (counts[key] || 0) + 1;
   return counts;
 }
 
+// 12. Overlap Checker (Do rooms ek dusre par toh nahi chadhe)
 function overlap(a: FloorRoom, b: FloorRoom) {
   return Math.min((a.x! + a.w!), (b.x! + b.w!)) > Math.max(a.x!, b.x!) + 0.02 &&
     Math.min((a.y! + a.h!), (b.y! + b.h!)) > Math.max(a.y!, b.y!) + 0.02;
 }
 
+// 13. Specs Extractor (UI se Width/Length nikalne ka function) - **CRITICAL FIX**
 function extractSpecs(selectedRooms: any): RoomSpec[] {
   const out: RoomSpec[] = [];
   const push = (rawKey: any, value: any) => {
@@ -160,9 +177,30 @@ function extractSpecs(selectedRooms: any): RoomSpec[] {
     const count = Math.max(1, Math.floor(n(item.count, 1)));
     const areaMode = String(item.areaMode || 'AUTO').toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO';
     const areaPerRoom = areaMode === 'MANUAL' && n(item.areaPerRoom, 0) > 0 ? n(item.areaPerRoom) : undefined;
-    const existing = out.find(x => x.key === key && x.areaMode === areaMode && x.areaPerRoom === areaPerRoom);
+    
+    // ==== FIX: "parking_with_stair" ko specially handle karein ====
+    // Yahaan hum Parking aur Staircase dono ko alag-alag add karte hain
+    if (String(rawKey).toLowerCase().includes('parking_with_stair')) {
+        out.push({
+            key: 'PARKING', count, areaMode, areaPerRoom,
+            width: item.width || item.w,   // User ka 10
+            length: item.length || item.h  // User ka 16
+        } as RoomSpec);
+        out.push({
+            key: 'STAIRCASE', count: 1, areaMode: 'AUTO',
+            areaPerRoom: 65
+        } as RoomSpec);
+        return;
+    }
+    // =============================================================
+
+    // FIX: Dono `width/length` aur `w/h` read karo (UI consistency ke liye)
+    const width = Number(item.width) > 0 ? Number(item.width) : (Number(item.w) > 0 ? Number(item.w) : undefined);
+    const length = Number(item.length) > 0 ? Number(item.length) : (Number(item.h) > 0 ? Number(item.h) : undefined);
+    
+    const existing = out.find(x => x.key === key && x.areaMode === areaMode && x.areaPerRoom === areaPerRoom && x.width === width && x.length === length);
     if (existing) existing.count += count;
-    else out.push({ key, count, areaMode, areaPerRoom });
+    else out.push({ key, count, areaMode, areaPerRoom, width, length });
   };
 
   if (Array.isArray(selectedRooms)) {
@@ -176,6 +214,7 @@ function extractSpecs(selectedRooms: any): RoomSpec[] {
   return out;
 }
 
+// 14. Program Builder (Selected rooms ko proper program list mein convert karta hai)
 function programFromInput(selectedRooms: any, bhk: string, floorArea: number, ground: boolean, mode: string, layoutW = 0, layoutH = 0): string[] {
   const explicit = extractSpecs(selectedRooms);
   const result: string[] = [];
@@ -188,32 +227,30 @@ function programFromInput(selectedRooms: any, bhk: string, floorArea: number, gr
 
   if (!hasExplicit && auto) {
     if (ground) {
-      // Ground AUTO: propose a second bedroom only when BOTH area and usable
-      // frontage support it. This prevents the recurring 20x50 / sub-22-ft mismatch.
-      if (area <= 1200 || layoutW < 22) {
+      if (area <= 1200) {
         add('MASTER BEDROOM'); add('ATTACHED TOILET'); add('COMMON TOILET'); add('KITCHEN CUM DINING'); add('LIVING ROOM'); add('PARKING'); add('STAIRCASE');
       } else if (area <= 1500) {
         add('MASTER BEDROOM'); add('BEDROOM'); add('ATTACHED TOILET'); add('COMMON TOILET'); add('KITCHEN CUM DINING'); add('LIVING ROOM'); add('PARKING'); add('STAIRCASE');
       } else {
         add('MASTER BEDROOM'); add('BEDROOM'); add('ATTACHED TOILET'); add('COMMON TOILET'); add('KITCHEN'); add('DINING'); add('LIVING ROOM'); add('PARKING'); add('STAIRCASE'); add('POOJA ROOM'); add('UTILITY');
-        if (area >= 1800 && layoutW >= 28 && layoutH >= 40) add('BEDROOM');
-        if (area >= 2200 && layoutW >= 32 && layoutH >= 45) add('STUDY ROOM');
-        if (area >= 2400 && layoutW >= 34 && layoutH >= 48) add('STORE');
       }
     } else {
       let presetKey = clean(bhk) || 'AUTO';
       if (presetKey === 'AUTO') {
-        presetKey = area >= 1800 && layoutW >= 32 ? '3 BHK' : area >= 1100 && layoutW >= 20 ? '2 BHK' : '1 BHK';
+        if (area >= 550 && layoutW >= 13) presetKey = '2 BHK ATTACHED';
+        else presetKey = '1 BHK';
       }
-      const preset = (BHK_PRESETS as any)[presetKey] || (BHK_PRESETS as any)['1 BHK'];
-      for (const [key, count] of preset) add(String(key), n(count, 1));
+      if (presetKey === '2 BHK ATTACHED') {
+        add('MASTER BEDROOM'); add('BEDROOM'); add('ATTACHED TOILET', 2);
+      } else {
+        const preset = (BHK_PRESETS as any)[presetKey] || (BHK_PRESETS as any)['1 BHK'];
+        for (const [key, count] of preset) add(String(key), n(count, 1));
+      }
       add('STAIRCASE');
-      if (area >= 1100) add('COMMON TOILET');
+      if (area >= 1100 && !result.includes('COMMON TOILET')) add('COMMON TOILET');
     }
   }
 
-  // Explicit AUTO selection still receives the essential functional rooms, but the
-  // user's selected room identities/counts are never silently discarded.
   if (auto && hasExplicit) {
     if (!result.includes('LIVING ROOM')) add('LIVING ROOM');
     if (!result.includes('KITCHEN') && !result.includes('KITCHEN CUM DINING')) add('KITCHEN');
@@ -225,34 +262,45 @@ function programFromInput(selectedRooms: any, bhk: string, floorArea: number, gr
     if (!result.includes('STAIRCASE')) add('STAIRCASE');
   }
 
+  if (ground && auto && area <= 1000) {
+    const allowed = new Set(['MASTER BEDROOM','ATTACHED TOILET','COMMON TOILET','KITCHEN','KITCHEN CUM DINING','LIVING ROOM','PARKING','STAIRCASE']);
+    const cleaned = result.filter(k => allowed.has(k) && k !== 'BEDROOM');
+    result.length = 0;
+    result.push(...cleaned.filter(k => !['MASTER BEDROOM','ATTACHED TOILET','COMMON TOILET'].includes(k)));
+    result.push('MASTER BEDROOM','ATTACHED TOILET','COMMON TOILET');
+    const unique: string[] = [];
+    for (const k of result) if (!unique.includes(k)) unique.push(k);
+    result.length = 0; result.push(...unique);
+  }
+
   if (!result.length && !hasExplicit) {
     const preset = (BHK_PRESETS as any)[clean(bhk) || '1 BHK'] || (BHK_PRESETS as any)['1 BHK'];
     for (const [key, count] of preset) add(String(key), n(count, 1));
   }
 
-  // Do not deduplicate user-selected counts. The UI count is part of the architectural
-  // requirement and must reach the planner unchanged. AUTO tiers above have already
-  // produced their own deterministic mandatory counts.
   return result;
 }
 
+// 15. Desired Area Calculator (User ka area ya default area return karta hai)
 function desiredArea(specs: RoomSpec[], key: string, fallback: number): number {
   const spec = specs.find(s => s.key === key);
+  if (spec?.width && spec?.length) return spec.width * spec.length;
   if (spec?.areaMode === 'MANUAL' && spec.areaPerRoom && spec.areaPerRoom > 0) return spec.areaPerRoom;
   const def = getRoomDefinition(key);
   return Math.max(def.minArea || 1, def.defaultArea || fallback);
 }
 
+// 16. Stair Type Selector (Plot ke hisab se stair ka type)
 function chooseStairType(W: number, H: number): StaircaseType {
-  // Prefer a two-flight L/U-compatible core once the usable width reaches ~18 ft.
-  // Straight stairs consume excessive depth on narrow homes and break the circulation chain.
   if (W >= 28 && H >= 45) return 'DOG_LEGGED';
   if (W >= 18 && H >= 38) return 'L_SHAPED';
   return 'STRAIGHT';
 }
 
+// 17. Clamp Function (Value ko min/max ke andar rakhta hai)
 function clamp(v: number, min: number, max: number) { return Math.max(min, Math.min(max, v)); }
 
+// 18. Fit Rectangle (Area ke hisab se best W/H nikalta hai)
 function fitRectForArea(key: string, area: number, maxW: number, maxH: number): { w: number; h: number } {
   const rule = PRACTICAL_ROOM_RULES[key] || { minWidth: 3, minDepth: 3, preferredWidth: 5, preferredDepth: 6, furniture: '' };
   const preferredW = clamp(Math.sqrt(Math.max(1, area) * (rule.preferredWidth / Math.max(1, rule.preferredDepth))), rule.minWidth, maxW);
@@ -265,18 +313,8 @@ function fitRectForArea(key: string, area: number, maxW: number, maxH: number): 
   return { w: Math.min(maxW, w), h: Math.min(maxH, h) };
 }
 
-/**
- * Builds a connected residential plan in normalized coordinates:
- * y=H is always the road/front edge before the orientation renderer rotates the sheet.
- * Narrow plots use a side circulation spine; wider plots use a central service strategy.
- */
-function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number, H: number, ground: boolean, stairSpec: ReturnType<typeof calculateStaircase>): FloorRoom[] {
-  /**
-   * Candidate-based architectural zoning.
-   * Coordinates are normalized so the MAIN ROAD is always at local BOTTOM (y = H).
-   * No plot-size preset is used: every dimension is derived from the current W/H,
-   * required program, room minimums, stair geometry and available area.
-   */
+// 19. Main Layout Builder (Ye sabse important function hai - saare rooms yahin place hote hain)
+function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number, H: number, ground: boolean, stairSpec: ReturnType<typeof calculateStaircase>, parkingMode: ParkingMode = 'CAR'): FloorRoom[] {
   const rooms: FloorRoom[] = [];
   let id = 0;
   const counts = roomCounts(program);
@@ -292,7 +330,9 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   const hasKD = has('KITCHEN CUM DINING');
   const hasDining = has('DINING');
   const hasStair = has('STAIRCASE');
-  const hasCommon = has('COMMON TOILET');
+  const bathroomCount = counts['BATHROOM'] || 0;
+  const commonToiletCount = Math.max(counts['COMMON TOILET'] || 0, bathroomCount);
+  const hasCommon = commonToiletCount > 0;
   const hasAttached = has('ATTACHED TOILET');
 
   const min = (key: string) => PRACTICAL_ROOM_RULES[key] || { minWidth: 3, minDepth: 3, preferredWidth: 5, preferredDepth: 6, furniture: '' };
@@ -301,8 +341,31 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   const fit = (key: string, area: number, maxW: number, maxH: number) => fitRectForArea(key, area, Math.max(0.1, maxW), Math.max(0.1, maxH));
   const usableW = Math.max(1, W), usableH = Math.max(1, H);
 
-  // Candidate zoning bands are computed from requirements. The front band is always
-  // the road/entry band; private rooms are kept away from the public edge where possible.
+  // Reads the user's EXACT selected Width/Length for a room (from PART 1 of the
+  // input form) whenever available, instead of a hardcoded plot-ratio formula.
+  // Used across every layout strategy below so a selected 6.5x10 KITCHEN or a
+  // 12x15 MASTER BEDROOM actually renders at that size, not an auto-guessed one.
+  const getSpecDim = (key: string, minW: number, minH: number, maxW: number, maxH: number): { w: number; h: number } => {
+    const spec = specs.find(s => s.key === key);
+    const rule = PRACTICAL_ROOM_RULES[key];
+    const preferredW = Math.min(rule?.preferredWidth || 10, maxW);
+    const preferredH = Math.min(rule?.preferredDepth || 12, maxH);
+
+    const inputW = spec?.width || spec?.w;
+    const inputL = spec?.length || spec?.h;
+
+    if (inputW && inputL) return { w: Math.max(minW, Math.min(inputW, maxW)), h: Math.max(minH, Math.min(inputL, maxH)) };
+    if (inputW && !inputL) return { w: Math.max(minW, Math.min(inputW, maxW)), h: Math.max(minH, preferredH) };
+    if (!inputW && inputL) return { w: Math.max(minW, preferredW), h: Math.max(minH, Math.min(inputL, maxH)) };
+
+    // AUTO mode fallback: derive from the requested area (still respects a
+    // MANUAL areaPerRoom if the user set one) rather than always the same box.
+    const area = roomArea(key, preferredW * preferredH);
+    const fitted = fitRectForArea(key, area, maxW, maxH);
+    return { w: Math.max(minW, fitted.w), h: Math.max(minH, fitted.h) };
+  };
+
+
   const parkingDepth = hasParking ? clamp(Math.min(usableH * 0.24, 16), 10, Math.max(10, usableH - 20)) : 0;
   const frontDepth = hasParking ? Math.max(15, parkingDepth) : clamp(usableH * 0.20, 8, 12);
   const stairDepth = hasStair ? Math.max(9, stairSpec.requiredLengthFt) : 0;
@@ -310,12 +373,407 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   const privateDepth = bedrooms.length ? Math.min(usableH * 0.55, Math.max(12, bedroomDepths.reduce((a,b)=>a+b,0) + (bedrooms.length > 1 ? 0.5 : 0))) : 0;
   const middleDepth = Math.max(8, usableH - frontDepth - privateDepth);
 
+  // ==========================================================
+  // NARROW PLOT MASTER STRATEGY (Vertical Stack - Exact Size & Conditional)
+  // ==========================================================
+   if (ground && hasParking && W <= 24 && H >= 34) {
+      const pDim = getSpecDim('PARKING', 9, 10, W, H);
+      const parkingH = pDim.h;
+      const pY = H - parkingH;
+      addRoom('PARKING', 0, pY, pDim.w, parkingH, {
+        parkingShape: 'CAR', parkingZone: 'FRONT_ROAD_CONNECTED',
+        vehicleFit: true, vehicleClearanceRequired: true, parkingMode,
+        entryRole: 'MAIN_ROAD_VEHICLE_GATE',
+      });
+
+      let currentY = pY;
+
+      if (hasLiving) {
+          const lDim = getSpecDim('LIVING ROOM', 10, 9, W, H);
+          const lY = currentY - lDim.h;
+          addRoom('LIVING ROOM', 0, lY, lDim.w, lDim.h, {
+              entryZone: true, publicCore: true, parkingAdjacent: true, behindParking: true,
+          });
+          currentY = lY;
+      }
+
+      if (hasKD || hasKitchen || hasCommon || hasStair) {
+          // Compute the kitchen's dimensions FIRST (respecting the user's exact
+          // selected Width AND Length), then size the shared row height to fit
+          // it — instead of forcing height = a fixed serviceH regardless of the
+          // user's requested Length (that was the earlier bug: 9x9 no matter
+          // what Length was entered).
+          const kitchenKey = hasKD ? 'KITCHEN CUM DINING' : 'KITCHEN';
+          const kitchenMaxW = Math.max(6, W - (hasCommon ? 6 : 0) - (hasStair ? 5.5 : 0));
+          const defaultServiceH = clamp(H * 0.25, 7, 9);
+          const kitchenMaxH = Math.max(defaultServiceH, Math.min(H * 0.4, 14));
+          const kitchenDim = (hasKD || hasKitchen)
+            ? getSpecDim(kitchenKey, 6, defaultServiceH, kitchenMaxW, kitchenMaxH)
+            : { w: 0, h: defaultServiceH };
+          const serviceH = Math.max(defaultServiceH, kitchenDim.h);
+          const sY = currentY - serviceH;
+          let cursorX = 0;
+
+          const kitchenW = kitchenDim.w;
+          if (hasKD) addRoom('KITCHEN CUM DINING', 0, sY, kitchenW, serviceH, { serviceZone: true, ventilationRequired: true });
+          else if (hasKitchen) addRoom('KITCHEN', 0, sY, kitchenW, serviceH, { serviceZone: true, ventilationRequired: true });
+          cursorX += kitchenW;
+
+          if (hasCommon) {
+              addRoom('COMMON TOILET', cursorX, sY, 4.5, serviceH, { serviceCore: true, ventilationRequired: true });
+              cursorX += 4.5;
+              addRoom('DUCT', cursorX, sY, 1.5, serviceH, { ventilationFor: 'COMMON TOILET', openToSky: true });
+              cursorX += 1.5;
+          }
+
+          if (hasStair) {
+              const stairW = Math.max(5.5, W - cursorX);
+              addRoom('STAIRCASE', cursorX, sY, stairW, serviceH, {
+                  staircaseType: stairSpec.staircaseType, staircaseSpec: stairSpec,
+                  verticalCore: true, accessSide: 'BOTTOM', upperFloorCore: true,
+              });
+          }
+          currentY = sY;
+      }
+
+      if (bedrooms.length >= 1) {
+          const privateH = Math.max(10.5, currentY - 2);
+          const passageW = 3.25;
+          const attachedW = hasAttached ? 5.0 : 0;
+          // Width respects the user's exact selected MASTER BEDROOM width when
+          // given (previously always W - passageW - attachedW regardless of
+          // selection). Height stays = privateH to line up with the PASSAGE.
+          const masterMaxW = Math.max(minDim('MASTER BEDROOM'), W - passageW - attachedW);
+          const bedroomW = getSpecDim('MASTER BEDROOM', minDim('MASTER BEDROOM'), privateH, masterMaxW, privateH).w;
+
+          addRoom('PASSAGE', 0, 0, passageW, privateH, {
+              circulationZone: true, protectedCorridor: true, corridorWidthFt: passageW,
+              connects: ['LIVING ROOM', 'MASTER BEDROOM', 'BEDROOM', 'STAIRCASE'],
+              orientation: 'VERTICAL_PRIVATE_SPINE',
+          });
+
+          addRoom('MASTER BEDROOM', passageW, 0, bedroomW, privateH, {
+              privateZone: true, furnitureValidated: true,
+          });
+          
+          const masterIndex = rooms.length - 1;
+
+          if (hasAttached) {
+              const master = rooms[masterIndex];
+              addRoom('ATTACHED TOILET', passageW + bedroomW, 0, attachedW, Math.min(7, privateH), {
+                  attachedTo: master.id, subZoneOf: master.id, isSubRoom: true,
+                  serviceCore: true, ventilationRequired: true,
+              });
+          }
+      }
+      return rooms;
+  }
+
+  // -------- PRIMARY ARCHITECTURAL ZONING CANDIDATE --------
+  if (hasLiving && hasStair && (hasParking || !ground) && W >= 13.0 && H >= 34.0) {
+    const parkingMinimum = selectParkingCandidate(W, H, parkingDepth || 15, parkingMode);
+    const carLike = parkingMode === 'CAR' || parkingMode === 'CAR_BIKE_PEDESTRIAN';
+    const parkingDepthActual = Math.min(H, Math.max(12, parkingMinimum.depth));
+    const passageW = bedrooms.length ? 3.25 : 0;
+    const livingMinW = (ground && (usableW * usableH) <= 1000) ? 9.0 : min('LIVING ROOM').minWidth;
+
+    let frontY = H - parkingDepthActual;
+    let parking: any = null;
+    let living: any = null;
+
+    if (ground && hasParking && W >= parkingMinimum.width + livingMinW + 0.5) {
+      const parkingW = Math.min(parkingMinimum.width, W - livingMinW - 0.5);
+      parking = { ...parkingMinimum, x: W - parkingW, y: frontY, w: parkingW, h: parkingDepthActual };
+      addRoom('PARKING', parking.x, parking.y, parking.w, parking.h, {
+        parkingShape: parking.shape || parking.type,
+        parkingZone: 'FRONT_ROAD_CONNECTED', vehicleFit: parking.vehicleFit,
+        candidateScore: parking.score, vehicleClearanceRequired: carLike,
+        parkingMode, bikeZone: parking.bikeZone, pedestrianZone: parking.pedestrianZone,
+        entryRole: 'MAIN_ROAD_VEHICLE_GATE',
+      });
+      const livingW = W - parkingW;
+      living = { x: 0, y: frontY, w: livingW, h: parkingDepthActual };
+      addRoom('LIVING ROOM', living.x, living.y, living.w, living.h, {
+        entryZone: true, publicCore: true, parkingAdjacent: true, parkingFirstAccess: true,
+      });
+    } else if (ground && hasParking) {
+      const parkingW = Math.min(W, Math.max(parkingMinimum.width, W));
+      parking = { ...parkingMinimum, x: 0, y: H - parkingDepthActual, w: parkingW, h: parkingDepthActual };
+      addRoom('PARKING', 0, parking.y, parking.w, parking.h, {
+        parkingShape: parking.shape || parking.type, parkingZone: 'FRONT_ROAD_CONNECTED',
+        vehicleFit: parking.vehicleFit, candidateScore: parking.score,
+        vehicleClearanceRequired: carLike, parkingMode, bikeZone: parking.bikeZone,
+        pedestrianZone: parking.pedestrianZone, entryRole: 'MAIN_ROAD_VEHICLE_GATE',
+      });
+      const livingH = Math.min(10, Math.max(8.5, roomArea('LIVING ROOM', 120) / Math.max(1, W)));
+      frontY = H - parkingDepthActual - livingH;
+      living = { x: 0, y: frontY, w: W, h: livingH };
+      if (living.h >= livingMinW) addRoom('LIVING ROOM', living.x, living.y, living.w, living.h, {
+        entryZone: true, publicCore: true, parkingAdjacent: true, parkingFirstAccess: true, behindParking: true,
+      });
+    } else {
+      const livingH = Math.min(10, Math.max(8.5, roomArea('LIVING ROOM', 120) / Math.max(1, W - passageW)));
+      frontY = H - livingH;
+      addRoom('LIVING ROOM', passageW, frontY, Math.max(7, W - passageW), livingH, {
+        entryZone: true, publicCore: true, upperFloorLiving: true,
+      });
+    }
+
+    const livingRoom = rooms.find(r => canonical(r.name) === 'LIVING ROOM');
+    const stairW = Math.min(6, Math.max(5.5, stairSpec.requiredWidthFt || 5.5));
+    const stairH = Math.min(Math.max(7.5, stairSpec.requiredLengthFt || 8), Math.max(7.5, livingRoom?.h || 8.5));
+    if (livingRoom && stairW <= livingRoom.w - 0.4 && stairH <= livingRoom.h) {
+      addRoom('STAIRCASE', livingRoom.x + livingRoom.w - stairW, livingRoom.y, stairW, stairH, {
+        staircaseType: stairSpec.staircaseType, staircaseSpec: stairSpec, verticalCore: true,
+        accessSide: 'BOTTOM', landingRequired: true, upperFloorCore: true,
+        subZoneOf: livingRoom.id, isSubRoom: true, stairAccessZone: 'LIVING/PASSAGE',
+      });
+    }
+
+    const serviceH = Math.min(7, Math.max(6.5, H * 0.15));
+    const serviceY = frontY - serviceH;
+    const serviceRight = W;
+    if (bedrooms.length) {
+      addRoom('PASSAGE', 0, 0, passageW, Math.max(6, frontY), {
+        circulationZone: true, protectedCorridor: true, corridorWidthFt: passageW,
+        pinkGuideLines: true, accessRole: 'PRIMARY_INTERNAL_SPINE',
+        connects: ['PARKING', 'LIVING ROOM', 'STAIRCASE', 'KITCHEN', 'COMMON TOILET', 'PRIVATE ROOMS'],
+      });
+    }
+
+    const usableServiceW = Math.max(0, serviceRight - passageW);
+    let cursorX = passageW;
+    const toiletW = hasCommon ? Math.min(4.5, Math.max(4.5, usableServiceW - 7)) : 0;
+    const ductW = hasCommon && usableServiceW - toiletW >= 8.5 ? 1.5 : 0;
+    const kitchenW = hasKD || hasKitchen ? Math.max(6.5, usableServiceW - toiletW - ductW) : 0;
+
+    if (hasKD && kitchenW >= min('KITCHEN CUM DINING').minWidth) {
+      addRoom('KITCHEN CUM DINING', cursorX, serviceY, kitchenW, serviceH, { serviceZone: true, diningAdjacent: true, ventilationRequired: true });
+      cursorX += kitchenW;
+    } else if (hasKitchen && kitchenW >= min('KITCHEN').minWidth) {
+      addRoom('KITCHEN', cursorX, serviceY, kitchenW, serviceH, { serviceZone: true, ventilationRequired: true });
+      cursorX += kitchenW;
+    }
+
+    if (hasCommon && toiletW >= 4.0) {
+      addRoom('COMMON TOILET', cursorX, serviceY, toiletW, Math.min(7, serviceH), {
+        serviceCore: true, privacy: 'PUBLIC_SERVICE', ventilationRequired: true,
+      });
+      cursorX += toiletW;
+      if (ductW >= 1.2) {
+        addRoom('DUCT', cursorX, serviceY, ductW, Math.min(7, serviceH), {
+          ventilationFor: 'COMMON TOILET / KITCHEN', openToSky: true, serviceCore: true,
+          verticalStack: true,
+        });
+      }
+    }
+
+    const privateTop = Math.max(0, serviceY);
+    const privateH = privateTop;
+    const rearW = Math.max(0, W - passageW);
+    if (bedrooms.length === 1 && rearW >= min('MASTER BEDROOM').minWidth && privateH >= min('MASTER BEDROOM').minDepth) {
+      const masterH = privateH;
+      const attachedW = hasAttached && rearW >= 11.5 ? Math.min(5, Math.max(4.5, rearW - min('MASTER BEDROOM').minWidth)) : 0;
+      addRoom('MASTER BEDROOM', passageW, 0, rearW - attachedW, masterH, {
+        privateZone: true, requestedArea: roomArea('MASTER BEDROOM', 140),
+        furnitureValidated: true,
+      });
+      if (attachedW) {
+        const master = rooms[rooms.length - 1];
+        addRoom('ATTACHED TOILET', W - attachedW, Math.max(0, masterH - Math.min(7, masterH)), attachedW, Math.min(7, masterH), {
+          attachedTo: master.id, subZoneOf: master.id, isSubRoom: true,
+          serviceCore: true, ventilationRequired: true,
+        });
+      }
+    } else if (bedrooms.length >= 2 && rearW >= 20 && privateH >= 20) {
+      const bayW = (rearW) / 2;
+      const bedH = privateH / 2;
+      addRoom('MASTER BEDROOM', passageW, bedH, bayW, bedH, { privateZone: true, furnitureValidated: true, requestedArea: roomArea('MASTER BEDROOM', 140) });
+      addRoom('BEDROOM', passageW + bayW, bedH, bayW, bedH, { privateZone: true, furnitureValidated: true, requestedArea: roomArea('BEDROOM', 110) });
+      if (hasAttached && bayW >= 11.5) {
+        const master = rooms.find(r => canonical(r.name) === 'MASTER BEDROOM');
+        if (master) {
+          const tw = Math.min(5, Math.max(4.5, master.w - min('MASTER BEDROOM').minWidth));
+          const th = Math.min(7, master.h);
+          if (tw >= 4.5 && th >= 6.5) addRoom('ATTACHED TOILET', master.x + master.w - tw, master.y + master.h - th, tw, th, {
+            attachedTo: master.id, subZoneOf: master.id, isSubRoom: true, serviceCore: true, ventilationRequired: true,
+          });
+        }
+      }
+    }
+
+    if (has('BALCONY')) {
+      const l = rooms.find(r => canonical(r.name) === 'LIVING ROOM');
+      if (l && l.w >= 5 && l.h >= 5) {
+        addRoom('BALCONY', l.x, Math.max(0, l.y - 4.0), Math.min(6, l.w), 4.0, {
+          subZoneOf: l.id, isSubRoom: true, isOpen: true, attachedTo: l.id, exteriorProjection: false,
+        });
+      }
+    }
+
+    return rooms;
+  }
+
+  // -------- UPPER-FLOOR BEDROOM + ATTACHED-TOILET CANDIDATE --------
+  if (!hasParking && hasStair && bedrooms.length >= 1 && W >= 13 && H >= 34) {
+    const sidePassW = 3.25;
+    let publicH = 0;
+    let livingRoom: FloorRoom | null = null;
+
+    if (hasLiving) {
+      publicH = Math.min(10, Math.max(8.5, roomArea('LIVING ROOM', 120) / Math.max(1, W - sidePassW)));
+      const livingY = H - publicH;
+      addRoom('LIVING ROOM', sidePassW, livingY, W - sidePassW, publicH, { publicCore: true, upperFloorLiving: true });
+      livingRoom = rooms[rooms.length - 1];
+    }
+
+    const stairW = Math.min(6, Math.max(5.5, stairSpec.requiredWidthFt || 5.5));
+    const stairH = Math.min(Math.max(7.5, stairSpec.requiredLengthFt || 8), Math.max(7.5, publicH || 10.17));
+    const stairY = H - Math.max(publicH, stairH);
+    if (hasLiving && livingRoom && stairW <= livingRoom.w - 0.25) {
+      addRoom('STAIRCASE', livingRoom.x + livingRoom.w - stairW, livingRoom.y, stairW, Math.min(stairH, livingRoom.h), {
+        staircaseType: stairSpec.staircaseType, staircaseSpec: stairSpec, verticalCore: true,
+        accessSide: 'LEFT', landingRequired: true, upperFloorCore: true,
+        subZoneOf: livingRoom.id, isSubRoom: true, stairAccessZone: 'LIVING/PASSAGE',
+      });
+    } else {
+      addRoom('STAIRCASE', sidePassW, stairY, stairW, stairH, {
+        staircaseType: stairSpec.staircaseType, staircaseSpec: stairSpec, verticalCore: true,
+        accessSide: 'LEFT', landingRequired: true, upperFloorCore: true,
+        stairAccessZone: 'PASSAGE',
+        allowGroundAlignment: false,
+      });
+    }
+
+    const serviceH = hasKitchen || hasKD || hasCommon ? Math.min(7.5, Math.max(6.5, H * 0.16)) : 0;
+    const serviceY = H - publicH - serviceH - (hasLiving ? 0 : stairH);
+    if (serviceH > 0 && serviceY > 12) {
+      if (hasKitchen) addRoom('KITCHEN', sidePassW, serviceY, Math.max(6.5, W - sidePassW - (hasCommon ? 4.5 : 0)), serviceH, { serviceZone: true, ventilationRequired: true });
+      else if (hasKD) addRoom('KITCHEN CUM DINING', sidePassW, serviceY, Math.max(9, W - sidePassW - (hasCommon ? 4.5 : 0)), serviceH, { serviceZone: true, diningAdjacent: true, ventilationRequired: true });
+      if (hasCommon) addRoom('COMMON TOILET', sidePassW, serviceY, 4.5, Math.min(7, serviceH), { serviceCore: true, ventilationRequired: true, accessRole: 'PUBLIC_SERVICE' });
+    }
+
+    const passageH = Math.max(12, serviceY);
+    addRoom('PASSAGE', 0, 0, sidePassW, passageH, {
+      circulationZone: true, protectedCorridor: true, corridorWidthFt: sidePassW,
+      pinkGuideLines: true, accessRole: 'PRIMARY_INTERNAL_SPINE',
+      connects: ['STAIRCASE', 'LIVING ROOM', 'MASTER BEDROOM', 'BEDROOM'],
+    });
+
+    const rearW = Math.max(0, W - sidePassW);
+    const bedroomZoneH = passageH;
+    if (bedrooms.length === 1) {
+      const key = bedrooms[0];
+      if (rearW >= min(key).minWidth && bedroomZoneH >= min(key).minDepth) {
+        addRoom(key, sidePassW, 0, rearW, bedroomZoneH, { privateZone: true, furnitureValidated: true, requestedArea: roomArea(key, 140) });
+        if (hasAttached && rearW >= 10 && bedroomZoneH >= 13) {
+          const bedroom = rooms[rooms.length - 1];
+          const tw = 5;
+          if (bedroom.w >= min(key).minWidth + 0.25) addRoom('ATTACHED TOILET', bedroom.x + bedroom.w - tw, bedroom.y + bedroom.h - 7, tw, 7, {
+            attachedTo: bedroom.id, subZoneOf: bedroom.id, isSubRoom: true, serviceCore: true, ventilationRequired: true,
+          });
+        }
+      }
+    } else if (bedroomZoneH >= 20 && rearW >= 10) {
+      const bedH = bedroomZoneH / 2;
+      const keyA = bedrooms[0], keyB = bedrooms[1];
+      addRoom(keyA, sidePassW, bedH, rearW, bedH, { privateZone: true, furnitureValidated: true, requestedArea: roomArea(keyA, 140) });
+      addRoom(keyB, sidePassW, 0, rearW, bedH, { privateZone: true, furnitureValidated: true, requestedArea: roomArea(keyB, 110) });
+      if (hasAttached && rearW >= 10 && bedH >= 9.5) {
+        const bedroomA = rooms[rooms.length - 2];
+        const bedroomB = rooms[rooms.length - 1];
+        for (const bedroom of [bedroomA, bedroomB]) {
+          const tw = 5;
+          if (bedroom.w >= 10 && bedroom.h >= 7) addRoom('ATTACHED TOILET', bedroom.x + bedroom.w - tw, bedroom.y + bedroom.h - 7, tw, 7, {
+            attachedTo: bedroom.id, subZoneOf: bedroom.id, isSubRoom: true, serviceCore: true, ventilationRequired: true,
+          });
+        }
+      }
+    }
+    return rooms;
+  }
+
+  // -------- Upper-floor no-parking candidate --------
+  if (!hasParking && hasLiving && hasStair && W >= 17.0 && H >= 35.0) {
+    const livingH2 = 8.5;
+    const serviceH2 = Math.max(6.5, Math.min(7.0, H * 0.18));
+    const passageW2 = bedrooms.length ? 3.25 : 0;
+    const privateNeeded = bedrooms.length >= 2 ? 20.0 : bedrooms.length ? 10.5 : 0;
+    const requiredH2 = livingH2 + serviceH2 + privateNeeded;
+    if (requiredH2 <= H + 0.25) {
+      const livingY2 = H - livingH2;
+      addRoom('LIVING ROOM', 0, livingY2, W, livingH2, { publicCore: true, upperFloorLiving: true });
+      const livingId = rooms[rooms.length - 1].id;
+      const stairW2 = Math.min(6, Math.max(5.5, stairSpec.requiredWidthFt || 5.5));
+      const stairH2 = Math.min(livingH2, Math.max(7.5, stairSpec.requiredLengthFt || 8));
+      if (stairW2 <= W - 0.5) addRoom('STAIRCASE', W - stairW2, livingY2, stairW2, stairH2, {
+        staircaseType: stairSpec.staircaseType, staircaseSpec: stairSpec, verticalCore: true,
+        accessSide: 'BOTTOM', landingRequired: true, upperFloorCore: true, subZoneOf: livingId, isSubRoom: true,
+      });
+
+      const serviceY2 = livingY2 - serviceH2;
+      const wetCount2 = Math.max(0, commonToiletCount);
+      const wetW2 = wetCount2 * 4.0;
+      const serviceW2 = W - passageW2 - wetW2;
+      if (serviceW2 >= 7.0) {
+        if (hasKD) addRoom('KITCHEN CUM DINING', 0, serviceY2, serviceW2, serviceH2, { serviceZone: true, diningAdjacent: true, ventilationRequired: true });
+        else if (hasKitchen) addRoom('KITCHEN', 0, serviceY2, serviceW2, serviceH2, { serviceZone: true, ventilationRequired: true });
+
+        for (let bi = 0; bi < Math.max(0, counts['COMMON TOILET'] || 0); bi++) {
+          addRoom('COMMON TOILET', serviceW2 + bi * 4, serviceY2, 4, serviceH2, { serviceCore: true, ventilationRequired: true });
+        }
+
+        if (bedrooms.length) {
+          const privateTop2 = serviceY2;
+          const sideX = W - passageW2;
+          addRoom('PASSAGE', sideX, 0, passageW2, privateTop2, {
+            circulationZone: true, protectedCorridor: true, corridorWidthFt: passageW2, pinkGuideLines: true,
+            connects: ['LIVING ROOM', 'STAIRCASE', 'KITCHEN', 'COMMON TOILET', 'MASTER BEDROOM', 'BEDROOM'],
+            orientation: 'VERTICAL_PRIVATE_SPINE',
+          });
+
+          if (bedrooms.length >= 2) {
+            const masterH = 10.5;
+            const bedH = Math.max(9.5, privateTop2 - masterH);
+            const privateW = sideX;
+            if (privateW >= 10.5 && bedH >= 9.5) {
+              addRoom('MASTER BEDROOM', 0, bedH, privateW, masterH, { privateZone: true, requestedArea: roomArea('MASTER BEDROOM', 140), furnitureValidated: true });
+              const master = rooms[rooms.length - 1];
+              let bathPlaced = 0;
+              if (bathroomCount > bathPlaced && privateW >= 15) {
+                addRoom('ATTACHED TOILET', privateW - 5, bedH, 5, Math.min(7, masterH), { attachedTo: master.id, subZoneOf: master.id, isSubRoom: true, serviceCore: true, ventilationRequired: true });
+                bathPlaced++;
+              }
+              addRoom('BEDROOM', 0, 0, privateW, bedH, { privateZone: true, requestedArea: roomArea('BEDROOM', 110), furnitureValidated: true });
+              const second = rooms[rooms.length - 1];
+              if (bathroomCount > bathPlaced && privateW >= 15) {
+                addRoom('ATTACHED TOILET', privateW - 5, 0, 5, Math.min(7, bedH), { attachedTo: second.id, subZoneOf: second.id, isSubRoom: true, serviceCore: true, ventilationRequired: true });
+                bathPlaced++;
+              }
+              for (let bi = bathPlaced; bi < bathroomCount; bi++) {
+                const x = serviceW2 + ((bi - bathPlaced) * 4);
+                if (x + 4 <= W - passageW2 + 0.01) addRoom('BATHROOM', x, serviceY2, 4, serviceH2, { serviceCore: true, ventilationRequired: true, bathroomIndex: bi + 1 });
+              }
+            }
+          } else {
+            const h = Math.min(10.5, privateTop2);
+            const privateW = sideX;
+            if (privateW >= 11 && h >= 10) {
+              addRoom('MASTER BEDROOM', 0, privateTop2 - h, privateW, h, { privateZone: true, requestedArea: roomArea('MASTER BEDROOM', 140), furnitureValidated: true });
+              const master = rooms[rooms.length - 1];
+              if (bathroomCount > 0 && privateW >= 15) addRoom('ATTACHED TOILET', privateW - 5, master.y || 0, 5, Math.min(7, h), { attachedTo: master.id, subZoneOf: master.id, isSubRoom: true, serviceCore: true, ventilationRequired: true });
+            }
+          }
+          return rooms;
+        }
+        return rooms;
+      }
+    }
+  }
+
   // -------- Medium frontage / two-bedroom candidate --------
-  // 22–28 ft homes: bedrooms share a rear band side-by-side, while a horizontal protected
-  // corridor separates the private zone from service/public zones. This is more efficient
-  // than a vertical spine and preserves bedroom width.
   if (W >= 22 && W < 28 && H >= 42 && hasLiving && hasStair && bedrooms.length >= 2 && hasParking) {
-    const parking = scoreAndPlaceParking(W, 15, W, H);
+    const parking = scoreAndPlaceParking(W, 15, W, H, parkingMode);
     const parkingH = 15;
     const livingH = 10;
     const stairW = 6;
@@ -329,7 +787,7 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
     if (parking.w >= 9 && totalH <= H + 0.25 && W >= 22) {
       addRoom('PARKING', parking.x, H - parkingH, parking.w, parkingH, {
         parkingShape: parking.shape, parkingZone: 'FRONT_ROAD_CONNECTED', vehicleFit: parking.vehicleFit,
-        candidateScore: parking.score, vehicleClearanceRequired: true,
+        candidateScore: parking.score, vehicleClearanceRequired: true, parkingMode,
       });
       const livingY = H - parkingH - livingH;
       addRoom('LIVING ROOM', 0, livingY, W, livingH, { entryZone: true, roadConnected: true, publicCore: true });
@@ -371,11 +829,9 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
     }
   }
 
-  // -------- Compact architectural candidate (narrow/medium frontage) --------
-  // Circulation-first strategy for sub-24-ft homes. The corridor is a protected
-  // geometric zone; it is never treated as accidental leftover space.
+  // -------- Compact architectural candidate --------
   if (W < 24 && H >= 38 && hasLiving && hasStair) {
-    const parking = hasParking ? scoreAndPlaceParking(W, 15, W, H) : null;
+    const parking = hasParking ? scoreAndPlaceParking(W, 15, W, H, parkingMode) : null;
     const parkingH = parking ? 15 : 0;
     const livingH = clamp(roomArea('LIVING ROOM', 120) / Math.max(1, W), 10, 10.5);
     const stairW = clamp(stairSpec.requiredWidthFt || 5.5, 5.5, Math.min(6, W * 0.34));
@@ -504,12 +960,12 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   let livingY = H - frontDepth;
   let livingH = 0;
   if (hasParking) {
-    const parking = scoreAndPlaceParking(usableW, frontDepth, W, H);
+    const parking = scoreAndPlaceParking(usableW, frontDepth, W, H, parkingMode);
     addRoom('PARKING', parking.x, parking.y, parking.w, parking.h, {
       parkingShape: parking.shape,
       parkingZone: 'FRONT_ROAD_CONNECTED',
       vehicleFit: parking.vehicleFit,
-      candidateScore: parking.score,
+      candidateScore: parking.score, parkingMode,
     });
 
     if (hasLiving) {
@@ -517,8 +973,6 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
       if (remainingW >= minDim('LIVING ROOM')) {
         addRoom('LIVING ROOM', 0, H - frontDepth, remainingW, frontDepth, { entryZone: true, roadConnected: true });
       } else {
-        // Narrow frontage: do NOT squeeze living beside the car. Move the living room
-        // into the next full-width band immediately behind the parking/entry zone.
         livingH = Math.min(12, Math.max(10, middleDepth * 0.62));
         livingY = H - frontDepth - livingH;
         addRoom('LIVING ROOM', 0, livingY, usableW, livingH, { entryZone: true, roadConnected: true, behindParking: true });
@@ -530,8 +984,6 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   }
 
   // -------- Private/rear zone --------
-  // Bedrooms are stacked along the depth when frontage is narrow. This avoids the
-  // classic 20-ft problem where two bedrooms are placed side-by-side with no passage.
   const rearBottom = 0;
   let cursorY = rearBottom;
   const orderedBedrooms = [...bedrooms].sort((a,b) => a === 'MASTER BEDROOM' ? -1 : b === 'MASTER BEDROOM' ? 1 : 0);
@@ -542,7 +994,6 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
     const h = Math.max(minDim(key, false), Math.min(remainingH, targetH));
     if (h < minDim(key, false)) return;
 
-    // Master gets a private attached toilet carved from its side when the width allows.
     let roomW = usableW;
     let attachedW = 0;
     if (key === 'MASTER BEDROOM' && hasAttached && usableW >= 15) {
@@ -568,13 +1019,9 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   const effectiveFrontDepth = frontDepth + livingH;
   const middleH = Math.max(7, H - privateDepth - effectiveFrontDepth);
   const stairW = hasStair ? clamp(stairSpec.requiredWidthFt || 5.5, 5.5, Math.min(7, W * 0.36)) : 0;
-  // For narrow/medium plots use a real service/circulation spine between rooms and the
-  // stair rather than a decorative corridor rectangle that can overlap other geometry.
   const stairX = hasStair ? Math.max(0, W - stairW) : W;
   if (hasStair && middleH >= stairSpec.requiredLengthFt) {
     const stairH = Math.min(middleH, stairSpec.requiredLengthFt);
-    // Keep the vertical core on the front edge of the service band so the living/entry
-    // zone can open directly to the stair landing and the same core can continue upward.
     const stairY = Math.max(middleY, H - effectiveFrontDepth - stairH);
     addRoom('STAIRCASE', stairX, stairY, stairW, stairH, {
       staircaseType: stairSpec.staircaseType,
@@ -587,40 +1034,37 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   }
 
   const serviceRight = hasStair ? stairX : W;
-
-  // Wet rooms must not collide with the stair. Prefer a compact wet/service bay on the
-  // non-stair side; when width is tight it is stacked vertically against the kitchen edge.
   const wetW = hasCommon ? Math.min(4.5, Math.max(4.0, serviceRight - 7.0)) : 0;
   const ductW = hasCommon ? 1.5 : 0;
   const foodW = Math.max(7.0, serviceRight);
 
   if (hasKD) {
-    // Preferred topology for compact plots: kitchen/dining occupies the left bay,
-    // wet/service core sits immediately beside it, and the stair remains a separate
-    // vertical core. The three bays are dimensioned from the current footprint.
     const sideCoreW = hasCommon ? wetW + ductW : 0;
     const kdW = Math.max(7, serviceRight - sideCoreW);
     const minKD = min('KITCHEN CUM DINING');
     const targetKD = roomArea('KITCHEN CUM DINING', 130);
 
-    if (hasCommon && kdW >= minKD.minWidth && middleH >= minKD.minDepth + 0.25) {
-      const toiletH = Math.min(7, middleH * 0.48);
+    const toiletH = Math.min(7, middleH * 0.48);
+    const canUseDuct = hasCommon && ductW >= 1.5 && serviceRight - (wetW + ductW) >= minKD.minWidth;
+    const effectiveSideCoreW = hasCommon ? wetW + (canUseDuct ? ductW : 0) : 0;
+    const effectiveKDWidth = serviceRight - effectiveSideCoreW;
+
+    if (hasCommon && effectiveKDWidth >= minKD.minWidth && middleH >= minKD.minDepth + 0.25) {
       const kdH = middleH;
-      addRoom('KITCHEN CUM DINING', 0, middleY, kdW, kdH, {
+      addRoom('KITCHEN CUM DINING', 0, middleY, effectiveKDWidth, kdH, {
         ventilationEdge: 'LEFT', diningAdjacent: true, serviceZone: true, requestedArea: targetKD,
       });
-      const commonX = kdW;
+      const commonX = effectiveKDWidth;
       if (wetW >= 4.5 && toiletH >= 7) {
         addRoom('COMMON TOILET', commonX, middleY, wetW, toiletH, {
           serviceCore: true, privacy: 'LANDING_SIDE_AVOIDED', ventilationRequired: true,
+          ventilationEdge: canUseDuct ? 'DUCT' : 'RIGHT',
         });
-        if (ductW >= 1.5) addRoom('DUCT', commonX + wetW, middleY, ductW, toiletH, {
+        if (canUseDuct) addRoom('DUCT', commonX + wetW, middleY, ductW, toiletH, {
           ventilationFor: 'COMMON TOILET', openToSky: true, serviceCore: true,
         });
       }
     } else {
-      // If the requested combined kitchen/dining cannot coexist with the wet core at
-      // this width, keep it intact and search for a free wet bay instead of overlapping it.
       addRoom('KITCHEN CUM DINING', 0, middleY, serviceRight, middleH, {
         ventilationEdge: 'LEFT', diningAdjacent: true, serviceZone: true, requestedArea: targetKD,
       });
@@ -647,8 +1091,6 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
     if (free) addRoom('COMMON TOILET', free.x, free.y, wetW, toiletH, { serviceCore: true, privacy: 'LANDING_SIDE_AVOIDED', ventilationRequired: true });
   }
 
-  // If the requested room set has more bedrooms than the rear band can support, place
-  // remaining bedrooms in free rectangles only after minimum dimensions are respected.
   const placedBedroomCount = rooms.filter(r => ['MASTER BEDROOM','BEDROOM'].includes(canonical(r.name))).length;
   if (placedBedroomCount < bedrooms.length) {
     for (let i = placedBedroomCount; i < bedrooms.length; i++) {
@@ -659,7 +1101,6 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
     }
   }
 
-  // Optional rooms are fitted into genuinely free space, never by shrinking required rooms.
   if (has('POOJA ROOM')) {
     const free = findFreeRectangle(rooms, W, H, 5, 5, middleY, H - frontDepth);
     if (free) addRoom('POOJA ROOM', free.x, free.y, 5, 5, { optionalZone: true });
@@ -678,10 +1119,12 @@ function buildResidentialLayout(program: string[], specs: RoomSpec[], W: number,
   return rooms;
 }
 
+// 20. Rectangle Overlap Checker (CAD ke liye)
 function rectanglesOverlap(a: any, b: any): boolean {
   return Math.min(a.x + a.w, b.x + b.w) > Math.max(a.x, b.x) + 0.05 && Math.min(a.y + a.h, b.y + b.h) > Math.max(a.y, b.y) + 0.05;
 }
 
+// 21. Free Rectangle Finder (Khaali jagah dhundhta hai)
 function findFreeRectangle(rooms: FloorRoom[], W: number, H: number, rw: number, rh: number, yMin = 0, yMax = H): {x:number;y:number}|null {
   const step = 0.5;
   for (let y = Math.max(0, yMin); y + rh <= Math.min(H, yMax) + 0.01; y += step) {
@@ -698,11 +1141,13 @@ function findFreeRectangle(rooms: FloorRoom[], W: number, H: number, rw: number,
   return null;
 }
 
-function scoreAndPlaceParking(W: number, frontDepth: number, plotW: number, plotH: number) {
-  const c = selectParkingCandidate(plotW, plotH, frontDepth);
-  return { x: c.x, y: plotH - c.depth, w: c.width, h: c.depth, shape: c.type, vehicleFit: c.vehicleFit, score: c.score };
+// 22. Parking Sizer (Parking ka shape aur score nikalta hai)
+function scoreAndPlaceParking(W: number, frontDepth: number, plotW: number, plotH: number, parkingMode: ParkingMode = 'CAR') {
+  const c = selectParkingCandidate(plotW, plotH, frontDepth, parkingMode);
+  return { x: c.x, y: plotH - c.depth, w: c.width, h: c.depth, shape: c.type, vehicleFit: c.vehicleFit, score: c.score, parkingMode: c.parkingMode, bikeZone: c.bikeZone, pedestrianZone: c.pedestrianZone, minimumArea: c.area };
 }
 
+// 23. Furniture Validator (Room mein furniture fit hoga ya nahi)
 function validateFurniture(room: FloorRoom): { ok: boolean; note: string } {
   const key = canonical(room.name);
   const rule = PRACTICAL_ROOM_RULES[key];
@@ -715,6 +1160,7 @@ function validateFurniture(room: FloorRoom): { ok: boolean; note: string } {
   return { ok: true, note: `${rule.furniture}; clear circulation assumed and checked.` };
 }
 
+// 24. Main Export Function (Ye sabko jodta hai aur final result deta hai)
 export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest): ArchitecturalPlanResult {
   const W = Math.max(1, n(request.width, 20));
   const H = Math.max(1, n(request.length, 40));
@@ -727,7 +1173,8 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   const program = programFromInput(request.selectedRooms, request.bhk || 'AUTO', area, ground, mode, W, H);
   const stairType = chooseStairType(W, H);
   const staircase = calculateStaircase(n(request.floorToFloorHeightFeet, 10), 6.8, stairType);
-  const rooms = buildResidentialLayout(program, specs, W, H, ground, staircase);
+  const parkingMode = (String(request.parkingMode || 'CAR').toUpperCase() as ParkingMode);
+  const rooms = buildResidentialLayout(program, specs, W, H, ground, staircase, parkingMode);
   if (typeof console !== 'undefined') {
     console.log('[ROOM PLANNER] INPUT → PROGRAM', { floorName, width: W, length: H, area, mode, program });
     console.log('[ROOM PLANNER] ARCHITECTURAL DECISION', {
@@ -749,11 +1196,12 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   const errors: string[] = [];
   const furnitureChecks: ArchitecturalPlanResult['furnitureChecks'] = [];
 
-  // Required program presence is a HARD check. A requested kitchen/bedroom/etc. may not silently disappear.
   const requestedCounts = roomCounts(program);
   const presentCounts = roomCounts(rooms.map(r => canonical(r.name)));
   for (const [key, wanted] of Object.entries(requestedCounts)) {
-    const got = presentCounts[key] || 0;
+    const got = key === 'BATHROOM'
+      ? (presentCounts['BATHROOM'] || 0) + (presentCounts['ATTACHED TOILET'] || 0)
+      : (presentCounts[key] || 0);
     if (got < wanted) errors.push(`${floorName}: REQUIRED ROOM MISSING → ${key}. Requested ${wanted}, generated ${got}.`);
   }
 
@@ -784,7 +1232,7 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   if (ground && parking && Math.abs((parking.y || 0) + (parking.h || 0) - H) > 0.2) {
     errors.push(`${floorName}: PARKING is not on the normalized road/front edge.`);
   }
-  if (parking && (!(parking as any).vehicleFit || (parking.w || 0) < 9 || (parking.h || 0) < 15)) {
+  if (parking && (!(parking as any).vehicleFit || (parking.w || 0) < 9 || (parking.h || 0) < 10)) {
     warnings.push(`${floorName}: parking candidate is below preferred car-bay clearance; it must not be treated as a full car bay.`);
   }
 
@@ -793,8 +1241,6 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   }
   if (staircase.treadInches < 10) errors.push(`${floorName}: Stair tread ${staircase.treadInches}" is below configured minimum.`);
 
-  // Logical room access graph: touching is necessary but a door/opening is created later by openingPlanner.
-  // Here we require each non-open room to physically touch the circulation/public/service network.
   const solid = rooms.filter(r => !['DUCT', 'PARKING'].includes(canonical(r.name)) && !(r as any).subZoneOf && !String(r.name || '').includes('OPEN TERRACE'));
   const roots = solid.filter(r => ['LIVING ROOM', 'PASSAGE', 'STAIRCASE'].includes(canonical(r.name)));
   const visited = new Set<FloorRoom>();
@@ -837,6 +1283,7 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   };
 }
 
+// 25. Helper for Program Generation (For testing / other modules)
 export function roomProgramForFloor(selectedRooms: any, bhk: string, floorArea: number, isGround: boolean, mode: string, width = 0, length = 0): string[] {
   return programFromInput(selectedRooms, bhk, floorArea, isGround, mode, width, length);
 }

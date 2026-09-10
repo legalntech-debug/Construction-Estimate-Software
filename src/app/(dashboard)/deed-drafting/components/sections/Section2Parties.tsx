@@ -17,8 +17,8 @@ export default function Section2Parties({ formData, setFormData }: Section2Props
     buyerTitle: "2nd Box: Second Party / Buyer Details (द्वितीय पक्ष / क्रेता)",
     addSeller: "+ Add Seller",
     addBuyer: "+ Add Buyer",
-    namePlaceholder: "पूरा नाम दर्ज करें (Full Name)",
-    detailsPlaceholder: "पिता/पति का नाम एवं पूर्ण पता (KYC & Address)",
+    namePlaceholder: "पूरा नाम पिता/पति का नाम दर्ज करें (Full Name)",
+    detailsPlaceholder: "  पूर्ण पता एवं (KYC & Address)",
     sellerBadge: "विक्रेता / प्रथम पक्ष",
     buyerBadge: "क्रेता / द्वितीय पक्ष",
   };

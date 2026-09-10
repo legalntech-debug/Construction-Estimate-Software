@@ -190,11 +190,25 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
                     className="w-full p-2 border rounded text-xs bg-white font-semibold"
                   >
                     <option value="GROUND FLOOR">Ground Floor (भूतल)</option>
-                    <option value="FIRST FLOOR">First Floor (प्रथम तल)</option>
-                    <option value="SECOND FLOOR">Second Floor (द्वितीय तल)</option>
-                    <option value="THIRD FLOOR">Third Floor (तृतीय तल)</option>
-                    <option value="TOWER ">Tower (टावर)</option>
-                    <option value="BASEMENT">Basement (तहखाना)</option>
+<option value="BASEMENT">Basement (तहखाना)</option>
+<option value="FIRST FLOOR">First Floor (प्रथम तल)</option>
+<option value="SECOND FLOOR">Second Floor (द्वितीय तल)</option>
+<option value="THIRD FLOOR">Third Floor (तृतीय तल)</option>
+<option value="TOWER">Tower (टावर)</option>
+<option value="FOURTH FLOOR">Fourth Floor (चतुर्थ तल)</option>
+<option value="FIFTH FLOOR">Fifth Floor (पंचम तल)</option>
+<option value="SIXTH FLOOR">Sixth Floor (षष्टम तल)</option>
+<option value="SEVENTH FLOOR">Seventh Floor (सप्तम तल)</option>
+<option value="EIGHTH FLOOR">Eighth Floor (अष्टम तल)</option>
+<option value="NINTH FLOOR">Ninth Floor (नवम तल)</option>
+<option value="TENTH FLOOR">Tenth Floor (दशम तल)</option>
+<option value="ELEVENTH FLOOR">Eleventh Floor (ग्यारहवां तल)</option>
+<option value="TWELFTH FLOOR">Twelfth Floor (बारहवां तल)</option>
+<option value="THIRTEENTH FLOOR">Thirteenth Floor (तेरहवां तल)</option>
+<option value="FOURTEENTH FLOOR">Fourteenth Floor (चौदहवां तल)</option>
+<option value="FIFTEENTH FLOOR">Fifteenth Floor (पंद्रहवां तल)</option>
+
+
                   </select>
                 </div>
 

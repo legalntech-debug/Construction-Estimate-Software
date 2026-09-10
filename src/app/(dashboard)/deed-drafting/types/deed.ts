@@ -20,6 +20,7 @@ export interface PaymentInstallment {
 export interface DeedFormData {
   caseType: string;
   feeMode: string;
+  feeAmount?: number; 
   clientName: string;
   representativeName: string;
   stateName: string;

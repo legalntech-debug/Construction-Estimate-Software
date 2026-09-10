@@ -15,9 +15,6 @@ interface DeedFormLayoutProps {
   initialData?: any;
 }
 
-/**
- * Generates a dynamic reference number for deeds (Starting with D for Draft).
- */
 const generateReferenceNumber = (userFullName: string, sequenceNumber: number | string): string => {
   const today = new Date();
   const currentMonth = today.getMonth(); 
@@ -54,6 +51,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       return {
         caseType: "Deed Draft",
         feeMode: "Auto",
+        feeAmount: 0,
         clientName: "",
         representativeName: "",
         stateName: "MADHYA PRADESH",
@@ -86,6 +84,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
     return {
       caseType: "Deed Draft",
       feeMode: "Auto",
+      feeAmount: 0,
       clientName: "",
       representativeName: "",
       stateName: "MADHYA PRADESH",
@@ -202,6 +201,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       setFormData({
         caseType: "Deed Draft",
         feeMode: "Auto",
+        feeAmount: 0,
         clientName: "",
         representativeName: "",
         stateName: userProfileState,
@@ -351,26 +351,26 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   };
 
   const fetchDynamicFee = async (clientName: string, repName: string) => {
-    if (!clientName) return 0;
+  if (!clientName) return 0;
 
-    const targetColumn = "deed_fee"; 
-    const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
-    const cleanRName = repName?.split(/[.\s]+/)[0].trim();
-    
-    const { data, error } = await supabase
-      .from("clients")
-      .select(targetColumn)
-      .ilike("client_name", `${cleanCName}%`) 
-      .ilike("representative_name", `${cleanRName}%`)
-      .maybeSingle();
+  const targetColumn = "drafting_fee";   // ✅ correct column for deed fee
+  const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
+  const cleanRName = repName?.split(/[.\s]+/)[0].trim();
+  
+  const { data, error } = await supabase
+    .from("clients")
+    .select(targetColumn)
+    .ilike("client_name", `${cleanCName}%`) 
+    .ilike("representative_name", `${cleanRName}%`)
+    .maybeSingle();
 
-    if (error) {
-      console.error("Error fetching dynamic fee:", error);
-      return 0;
-    }
+  if (error) {
+    console.error("Error fetching dynamic fee:", error);
+    return 0;
+  }
 
-    return data ? Number(data[targetColumn] || 0) : 0; 
-  };
+  return data ? Number(data[targetColumn] || 0) : 0; 
+};
 
   const handleGenerateDraft = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -379,12 +379,11 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
     try {
       const targetState = userProfileState || formData.stateName;
 
-      // FIXED FEE LOGIC: No 500 fallback, strictly uses fetched dynamic fee or 0
       let userServiceFeeAmount = 0;
       if (formData.feeMode === "Auto") {
         userServiceFeeAmount = await fetchDynamicFee(formData.clientName, formData.representativeName);
       } else {
-        userServiceFeeAmount = Number((formData as any).manualFeeAmount) || 0;
+        userServiceFeeAmount = Number((formData as any).feeAmount) || 0;
       }
 
       const gatewayFeeAmount = 50; 
@@ -434,6 +433,59 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           });
 
           if (matchedRecord) {
+            // ✅ UPDATE ALL FIELDS (not just fee) for reopened case
+            try {
+              const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
+                ? parseFloat(formData.plotArea) 
+                : null;
+
+              // 1. Update service_records
+              await supabase
+                .from('service_records')
+                .update({
+                  client_name: formData.clientName || "Valued Client",
+                  representative: formData.representativeName,
+                  state_name: userProfileState || formData.stateName,
+                  city_district: formData.cityName,
+                  property_type: formData.propertyType,
+                  deed_type: formData.deedType,
+                  output_language: formData.outputLanguage,
+                  plot_area: parsedPlotArea,
+                  property_address: formData.propertyAddress,
+                  fee_standard: userServiceFeeAmount,
+                  user_service_fee: userServiceFeeAmount,
+                  user_payment: userServiceFeeAmount,
+                  fee_mode: formData.feeMode,
+                  boundary_east: formData.boundaryEast,
+                  boundary_west: formData.boundaryWest,
+                  boundary_north: formData.boundaryNorth,
+                  boundary_south: formData.boundarySouth,
+                  form_snapshot: { ...formData, refNo: matchedRecord.ref_no },
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('ref_no', matchedRecord.ref_no);
+
+              // 2. Update mis_records
+              await supabase
+                .from('mis_records')
+                .update({
+                  customer_name: formData.buyers?.[0]?.name || "Customer",
+                  client_name: formData.clientName || "Valued Client",
+                  representative: formData.representativeName || "Self",
+                  fee_standard: userServiceFeeAmount,
+                  property_address: formData.propertyAddress,
+                  plot_area: parsedPlotArea,
+                  property_type: formData.propertyType || 'HOUSE',
+                  // Optionally update status if needed (default PENDING)
+                })
+                .eq('ref_no', matchedRecord.ref_no);
+
+              console.log(`✅ Updated record for ref ${matchedRecord.ref_no}`);
+            } catch (err) {
+              console.error("❌ Failed to update existing record:", err);
+            }
+
+            // Show draft with updated data
             setCurrentRefNo(matchedRecord.ref_no);
             const printableHtml = buildPrintableHtml(matchedRecord.ref_no, formData);
             setGeneratedDocHtml(printableHtml);
@@ -443,6 +495,9 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         }
       }
 
+      // ----------------------------------------------
+      // NEW DRAFT (no existing match)
+      // ----------------------------------------------
       const nextSeq = await fetchNextSequenceNumber();
       const userFirstName = userFullName ? userFullName.trim().split(" ")[0].replace(/[^a-zA-Z]/g, "") : "Client";
       const uniqueRefNo = generateReferenceNumber(userFirstName, nextSeq);
@@ -636,7 +691,11 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       <form onSubmit={handleGenerateDraft} className="space-y-4 sm:space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-1 gap-4 sm:gap-6">
           <div className="col-span-1">
-            <Section1CaseInfo formData={formData} handleChange={handleChange} />
+            <Section1CaseInfo 
+              formData={formData} 
+              handleChange={handleChange} 
+              setFormData={setFormData} 
+            />
           </div>
           <div className="col-span-1">
             <Section2Parties formData={formData} setFormData={setFormData} />

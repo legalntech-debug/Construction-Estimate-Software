@@ -6,7 +6,9 @@ import {
   DoorPosition,
   FloorPlanningSettings as FloorPlanningSettingsType,
   PlanningMode,
+  ParkingMode,
 } from "../engine/planningTypes";
+import { getParkingMinimum } from "../engine/parkingPlanner";
 
 interface Props {
   floor: string;
@@ -74,8 +76,7 @@ export default function FloorPlanningSettings({ floor, value, onChange, onClose 
             value={settings.planningMode || settings.mode || "AUTO"}
             onChange={(e) => {
               const selectedMode = e.target.value as PlanningMode;
-              set("planningMode", selectedMode);
-              set("mode", selectedMode);
+              onChange({ ...settings, planningMode: selectedMode, mode: selectedMode });
             }}
             className="border-2 border-black p-2 text-xs font-black bg-white"
           >
@@ -83,6 +84,38 @@ export default function FloorPlanningSettings({ floor, value, onChange, onClose 
             <option value="MANUAL">MANUAL — CUSTOM</option>
           </select>
         </label>
+
+        {isGround && (
+          <div className="md:col-span-3 border-2 border-black bg-slate-50 p-3">
+            <div className="text-[10px] font-black mb-2">PARKING REQUIREMENT — AUTO CALCULATED</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-black">PARKING TYPE</span>
+                <select
+                  value={(settings.parkingMode || "CAR") as ParkingMode}
+                  onChange={(e) => set("parkingMode", e.target.value as ParkingMode)}
+                  className="border-2 border-black p-2 text-xs font-black bg-white"
+                >
+                  <option value="TWO_WHEELER">2-WHEELER</option>
+                  <option value="CAR">CAR</option>
+                  <option value="CAR_BIKE_PEDESTRIAN">CAR + BIKE + PEDESTRIAN</option>
+                  <option value="GENERIC">ONLY PARKING / ENTRY ZONE</option>
+                </select>
+              </label>
+              <div className="border-2 border-black bg-white p-2">
+                <div className="text-[9px] font-black">PLANNING BASELINE</div>
+                <div className="text-sm font-black mt-1">{getParkingMinimum((settings.parkingMode || "CAR") as ParkingMode).minWidth.toFixed(1)}' × {getParkingMinimum((settings.parkingMode || "CAR") as ParkingMode).minDepth.toFixed(1)}'</div>
+              </div>
+              <div className="border-2 border-black bg-white p-2">
+                <div className="text-[9px] font-black">MIN. PLANNING AREA</div>
+                <div className="text-sm font-black mt-1">{Math.round(getParkingMinimum((settings.parkingMode || "CAR") as ParkingMode).minArea)} SQ.FT</div>
+              </div>
+            </div>
+            <div className="mt-2 text-[9px] font-bold text-gray-700">
+              {getParkingMinimum((settings.parkingMode || "CAR") as ParkingMode).note} The engine also checks available frontage/depth and pedestrian access before accepting the candidate.
+            </div>
+          </div>
+        )}
 
         {(settings.planningMode === "MANUAL" || settings.mode === "MANUAL") && (
           <>

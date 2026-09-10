@@ -315,9 +315,9 @@ export default function CadModalView({
       initialTouchDistance = 0;
     };
 
-    element.addEventListener("touchstart", handleTouchStart, { passive: true });
+    element.addEventListener("touchstart", handleTouchStart, { passive: false });
     element.addEventListener("touchmove", handleTouchMove, { passive: false });
-    element.addEventListener("touchend", handleTouchEnd, { passive: true });
+    element.addEventListener("touchend", handleTouchEnd, { passive: false });
 
     return () => {
       element.removeEventListener("touchstart", handleTouchStart);

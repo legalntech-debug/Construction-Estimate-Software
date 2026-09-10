@@ -1,46 +1,47 @@
+'use type';
+
 'use client';
 
 import React, { useState, useEffect } from "react";
-import { FloorData, FloorRoom } from "../engine/planningTypes";
+import { FloorData, FloorRoom as BaseFloorRoom } from "../engine/planningTypes";
+
+// Extend FloorRoom interface locally or ensure your planningTypes include width/length
+export interface FloorRoom extends BaseFloorRoom {
+  width?: number;
+  length?: number;
+  areaMode?: "AUTO" | "MANUAL";
+  areaPerRoom?: number;
+}
 
 // ============================================================================
 // COMPREHENSIVE IS CODE & NBC TECHNICAL MINIMUM STANDARDS
 // ============================================================================
 export const IS_CODE_MINIMUMS = {
-  // Building & Floor Heights
-  floorHeightFt: 10.0,            // Floor to Floor Clear Height (Min 9.5' - 10')
-  plinthHeightFt: 1.5,            // Ground level to GF slab (Min 1.5')
-  plinthSlabThickIn: 4.0,         // Plinth Slab Thickness (Min 4")
-  floorSlabThickIn: 5.0,          // RCC Slab Min Thickness
-
-  // Structural Members (Standard Residential R.C.C.)
-  beamWidthIn: 9.0,               // Min Beam Width
-  beamDepthIn: 12.0,              // Min Beam Depth
-  columnWidthIn: 9.0,             // Min Column Width
-  columnDepthIn: 9.0,             // Min Column Depth
-
-  // Door Dimensions (As per NBC Standards)
-  mainDoorWidthFt: 3.5,           // Main Entrance Door Width (3.5')
-  mainDoorHeightFt: 7.0,          // Main Entrance Door Height (7')
-  internalDoorWidthFt: 3.0,       // Bedrooms / Kitchen Door Width (3.0')
-  internalDoorHeightFt: 7.0,      // Internal Door Height (7')
-  toiletDoorWidthFt: 2.5,         // Bathroom / WC Door Width (2.5')
-  toiletDoorHeightFt: 7.0,        // Bathroom / WC Door Height (7')
-
-  // Window & Ventilation Dimensions
-  windowWidthFt: 4.0,             // Standard Window Width
-  windowHeightFt: 4.0,            // Standard Window Height (4')
-  windowSillHeightFt: 3.0,        // Window Sill height from floor level
-  ventilatorWidthFt: 2.0,         // Toilet/Duct Ventilator Width
-  ventilatorHeightFt: 2.0,        // Toilet/Duct Ventilator Height
-
-  // Staircase Detailed Technical Norms (IS 456 / NBC)
-  stairRiserIn: 6.0,              // Riser Height (Max 6"-7")
-  stairTreadIn: 10.0,             // Tread Width (Min 10")
-  stairFlightWidthFt: 3.25,       // Clear Staircase Width (Min 3' to 3.5')
-  stairLandingWidthFt: 3.25,      // Landing Width (Min equal to flight width)
-  stairHeadroomFt: 7.25,          // Vertical Headroom Clearance (Min 7')
-  stairHandrailHeightFt: 3.0,     // Handrail Safety Height (Min 3')
+  floorHeightFt: 10.0,
+  plinthHeightFt: 1.5,
+  plinthSlabThickIn: 4.0,
+  floorSlabThickIn: 5.0,
+  beamWidthIn: 9.0,
+  beamDepthIn: 12.0,
+  columnWidthIn: 9.0,
+  columnDepthIn: 9.0,
+  mainDoorWidthFt: 3.5,
+  mainDoorHeightFt: 7.0,
+  internalDoorWidthFt: 3.0,
+  internalDoorHeightFt: 7.0,
+  toiletDoorWidthFt: 2.5,
+  toiletDoorHeightFt: 7.0,
+  windowWidthFt: 4.0,
+  windowHeightFt: 4.0,
+  windowSillHeightFt: 3.0,
+  ventilatorWidthFt: 2.0,
+  ventilatorHeightFt: 2.0,
+  stairRiserIn: 6.0,
+  stairTreadIn: 10.0,
+  stairFlightWidthFt: 3.25,
+  stairLandingWidthFt: 3.25,
+  stairHeadroomFt: 7.25,
+  stairHandrailHeightFt: 3.0,
 };
 
 export interface TechnicalSpecs {
@@ -52,35 +53,28 @@ export interface TechnicalSpecs {
   beamDepthIn: number;
   columnWidthIn: number;
   columnDepthIn: number;
-
-  // Door Details
   mainDoorWidthFt: number;
   mainDoorHeightFt: number;
   internalDoorWidthFt: number;
   internalDoorHeightFt: number;
   toiletDoorWidthFt: number;
   toiletDoorHeightFt: number;
-
-  // Window & Ventilator Details
   windowWidthFt: number;
   windowHeightFt: number;
   windowSillHeightFt: number;
   ventilatorWidthFt: number;
   ventilatorHeightFt: number;
-
-  // Staircase Detailed Specs
   stairRiserIn: number;
   stairTreadIn: number;
   stairFlightWidthFt: number;
   stairLandingWidthFt: number;
   stairHeadroomFt: number;
   stairHandrailHeightFt: number;
-
   [key: string]: any;
 }
 
 // ============================================================================
-// HELPER: DYNAMIC DOOR/WINDOW/VENTILATOR COUNTER BASED ON SELECTED ROOMS
+// HELPER: DYNAMIC DOOR/WINDOW/VENTILATOR COUNTER
 // ============================================================================
 export function calculateFloorOpenings(floorRoomsMap: Record<string, FloorRoom>) {
   let mainDoors = 0;
@@ -120,7 +114,7 @@ export function calculateFloorOpenings(floorRoomsMap: Record<string, FloorRoom>)
 }
 
 // ============================================================================
-// STANDARD BANK / ARCHITECT PRESETS DATABASE FOR NEAREST MATCHING
+// STANDARD PRESETS DATABASE
 // ============================================================================
 export const STANDARD_LOAN_PRESETS: Record<string, { label: string; width: number; length: number }> = {
   "10x20": { label: "10' x 20' (200 SQ.FT)", width: 10, length: 20 },
@@ -151,9 +145,6 @@ export const STANDARD_LOAN_PRESETS: Record<string, { label: string; width: numbe
   "50x50": { label: "50' x 50' (2,500 SQ.FT)", width: 50, length: 50 },
 };
 
-// ============================================================================
-// NEAREST DIMENSION FINDER LOGIC
-// ============================================================================
 export function getNearestPreset(w: number, l: number) {
   let nearestKey = "20x50";
   let minDiff = Infinity;
@@ -169,9 +160,6 @@ export function getNearestPreset(w: number, l: number) {
   return { key: nearestKey, ...STANDARD_LOAN_PRESETS[nearestKey] };
 }
 
-// ============================================================================
-// DYNAMIC AUTO-PLANNING LOGIC
-// ============================================================================
 export function getAutoRoomsForFloor(floorName: string, width: number, length: number): string[] {
   const upper = floorName.toUpperCase();
   const area = Math.max(0, Number(width) || 0) * Math.max(0, Number(length) || 0);
@@ -179,21 +167,17 @@ export function getAutoRoomsForFloor(floorName: string, width: number, length: n
   const isTower = upper.includes("TOWER") || upper.includes("MUMTY");
   if (isTower) return area >= 80 ? ["staircase", "terrace_garden", "utility"] : ["staircase"];
 
-  // AUTO recommendations are based on the ACTUAL input dimensions/area.
-  // Standard presets remain only for user convenience and never drive the final geometry.
+  // PDF D349 Style: 20x35 (700 sqft) -> Parking, Hall, Kitchen cum Dining, Master Bedroom, Stair
   if (isGround) {
-    if (area < 500 || width < 11) return ["parking_with_stair", "hall", "kitchen", "wc", "duct"];
-    if (area <= 750) return ["parking_with_stair", "hall", "kitchen_cum_dining", "bedroom", "common_bathroom", "duct"];
-    if (area < 1200 || width < 20) return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "attached_bathroom", "common_bathroom", "duct"];
-    if (area < 1600 || width < 28) return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "pooja_room", "duct"];
-    if (width >= 34 && length >= 50) return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "pooja_room", "study_room", "duct"];
-    return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "pooja_room", "duct"];
+    if (area < 400 || width < 10) return ["parking_with_stair", "hall", "kitchen", "wc", "duct"];
+    if (area <= 1200) return ["parking", "hall", "kitchen_cum_dining", "master_bedroom", "attached_bathroom", "common_bathroom", "staircase", "duct"];
+    if (width >= 34 && length >= 50) return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "pooja_room", "study_room", "duct"];
+    return ["parking_with_stair", "hall", "kitchen_cum_dining", "master_bedroom", "bedroom", "attached_bathroom", "common_bathroom", "pooja_room", "duct"];
   }
 
-  if (area < 500 || width < 12) return ["staircase", "living_room", "bedroom", "common_bathroom", "balcony", "duct"];
-  if (area < 1200 || width < 20) return ["staircase", "living_room", "master_bedroom", "bedroom", "attached_bathroom", "common_bathroom", "balcony", "duct"];
-  if (area < 1600 || width < 28) return ["staircase", "hall", "master_bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "balcony", "duct"];
-  return ["staircase", "hall", "master_bedroom", "bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "study_room", "balcony", "duct"];
+  if (area < 500 || width < 12) return ["staircase", "living_room", "master_bedroom", "common_bathroom", "balcony", "duct"];
+  if (area <= 1200 || width < 20) return ["staircase", "living_room", "master_bedroom", "attached_bathroom", "common_bathroom", "balcony", "duct"];
+  return ["staircase", "hall", "master_bedroom", "bedroom", "bedroom", "attached_bathroom", "common_bathroom", "study_room", "balcony", "duct"];
 }
 
 interface FloorManagerSectionProps {
@@ -237,31 +221,31 @@ interface SetbackType {
 }
 
 export const ROOM_CATALOG = [
-  { key: "parking", label: "PARKING", defaultArea: 120, minArea: 100, category: "Ground" },
-  { key: "parking_with_stair", label: "PARKING WITH STAIRCASE", defaultArea: 160, minArea: 130, category: "Ground" },
-  { key: "staircase", label: "STAIRCASE", defaultArea: 65, minArea: 40, category: "Core" },
-  { key: "stair_in_living", label: "STAIR IN LIVING ROOM", defaultArea: 80, minArea: 50, category: "Core" },
-  { key: "verandah", label: "VERANDAH / PORCH", defaultArea: 75, minArea: 40, category: "Exterior" },
-  { key: "living_room", label: "LIVING ROOM / FAMILY LOUNGE", defaultArea: 180, minArea: 130, category: "Living" },
-  { key: "hall", label: "MAIN HALL", defaultArea: 150, minArea: 100, category: "Living" },
-  { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultArea: 65, minArea: 45, category: "Kitchen" },
-  { key: "kitchen_cum_dining", label: "KITCHEN CUM DINING", defaultArea: 130, minArea: 85, category: "Kitchen" },
-  { key: "store_room", label: "STORE ROOM", defaultArea: 40, minArea: 25, category: "Utility" },
-  { key: "master_bedroom", label: "MASTER BEDROOM", defaultArea: 180, minArea: 130, category: "Bedroom" },
-  { key: "bedroom", label: "BEDROOM", defaultArea: 140, minArea: 100, category: "Bedroom" },
-  { key: "dressing", label: "DRESSING ROOM", defaultArea: 40, minArea: 25, category: "Bedroom" },
-  { key: "common_bathroom", label: "COMMON BATHROOM", defaultArea: 45, minArea: 25, category: "Bathroom" },
-  { key: "attached_bathroom", label: "ATTACHED BATHROOM", defaultArea: 50, minArea: 30, category: "Bathroom" },
-  { key: "wc", label: "WC (TOILET)", defaultArea: 25, minArea: 15, category: "Bathroom" },
-  { key: "pooja_room", label: "POOJA ROOM", defaultArea: 30, minArea: 20, category: "Common" },
-  { key: "study_room", label: "STUDY / KIDS ROOM", defaultArea: 70, minArea: 45, category: "Common" },
-  { key: "utility", label: "UTILITY / WASH AREA", defaultArea: 35, minArea: 20, category: "Utility" },
-  { key: "balcony", label: "BALCONY", defaultArea: 45, minArea: 25, category: "Exterior" },
-  { key: "duct", label: "VENTILATION DUCT", defaultArea: 25, minArea: 15, mandatory: true, category: "Core" },
-  { key: "lift", label: "LIFT / ELEVATOR", defaultArea: 35, minArea: 28, category: "Core" },
-  { key: "ground_garden", label: "GROUND FLOOR GARDEN / LAWN", defaultArea: 200, minArea: 100, category: "Exterior" },
-  { key: "terrace_garden", label: "TERRACE GARDEN", defaultArea: 150, minArea: 80, category: "Exterior" },
-  { key: "swimming_pool", label: "SWIMMING POOL", defaultArea: 300, minArea: 150, category: "Exterior" },
+  { key: "parking", label: "PARKING", defaultWidth: 10, defaultLength: 12, minWidth: 8, minLength: 10, defaultArea: 120, minArea: 80, category: "Ground" },
+  { key: "parking_with_stair", label: "PARKING WITH STAIRCASE", defaultWidth: 10, defaultLength: 16, minWidth: 8, minLength: 14, defaultArea: 160, minArea: 110, category: "Ground" },
+  { key: "staircase", label: "STAIRCASE", defaultWidth: 6.5, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 65, minArea: 48, category: "Core" },
+  { key: "stair_in_living", label: "STAIR IN LIVING ROOM", defaultWidth: 8, defaultLength: 10, minWidth: 7, minLength: 8, defaultArea: 80, minArea: 56, category: "Core" },
+  { key: "verandah", label: "VERANDAH / PORCH", defaultWidth: 7.5, defaultLength: 10, minWidth: 5, minLength: 8, defaultArea: 75, minArea: 40, category: "Exterior" },
+  { key: "living_room", label: "LIVING ROOM / FAMILY LOUNGE", defaultWidth: 12, defaultLength: 15, minWidth: 10, minLength: 12, defaultArea: 180, minArea: 120, category: "Living" },
+  { key: "hall", label: "MAIN HALL", defaultWidth: 10, defaultLength: 15, minWidth: 9, minLength: 12, defaultArea: 150, minArea: 100, category: "Living" },
+  { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultWidth: 6.5, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 65, minArea: 48, category: "Kitchen" },
+  { key: "kitchen_cum_dining", label: "KITCHEN CUM DINING", defaultWidth: 10, defaultLength: 13, minWidth: 8, minLength: 10, defaultArea: 130, minArea: 80, category: "Kitchen" },
+  { key: "store_room", label: "STORE ROOM", defaultWidth: 5, defaultLength: 8, minWidth: 4, minLength: 6, defaultArea: 40, minArea: 24, category: "Utility" },
+  { key: "master_bedroom", label: "MASTER BEDROOM (WITH TOILET)", defaultWidth: 12, defaultLength: 15, minWidth: 11, minLength: 12, defaultArea: 180, minArea: 130, category: "Bedroom" },
+  { key: "bedroom", label: "BEDROOM", defaultWidth: 10, defaultLength: 14, minWidth: 9, minLength: 10, defaultArea: 140, minArea: 90, category: "Bedroom" },
+  { key: "dressing", label: "DRESSING ROOM", defaultWidth: 5, defaultLength: 8, minWidth: 4, minLength: 5, defaultArea: 40, minArea: 20, category: "Bedroom" },
+  { key: "common_bathroom", label: "COMMON BATHROOM", defaultWidth: 5, defaultLength: 9, minWidth: 4, minLength: 6, defaultArea: 45, minArea: 24, category: "Bathroom" },
+  { key: "attached_bathroom", label: "ATTACHED BATHROOM", defaultWidth: 5, defaultLength: 10, minWidth: 4.5, minLength: 6.5, defaultArea: 50, minArea: 28, category: "Bathroom" },
+  { key: "wc", label: "WC (TOILET)", defaultWidth: 4, defaultLength: 6, minWidth: 3.5, minLength: 4.5, defaultArea: 24, minArea: 15, category: "Bathroom" },
+  { key: "pooja_room", label: "POOJA ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Common" },
+  { key: "study_room", label: "STUDY / KIDS ROOM", defaultWidth: 7, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 70, minArea: 48, category: "Common" },
+  { key: "utility", label: "UTILITY / WASH AREA", defaultWidth: 5, defaultLength: 7, minWidth: 4, minLength: 5, defaultArea: 35, minArea: 20, category: "Utility" },
+  { key: "balcony", label: "BALCONY", defaultWidth: 4.5, defaultLength: 10, minWidth: 3.5, minLength: 6, defaultArea: 45, minArea: 21, category: "Exterior" },
+  { key: "duct", label: "VENTILATION DUCT", defaultWidth: 4, defaultLength: 6, minWidth: 3, minLength: 3, defaultArea: 24, minArea: 9, mandatory: true, category: "Core" },
+  { key: "lift", label: "LIFT / ELEVATOR", defaultWidth: 5, defaultLength: 7, minWidth: 4.5, minLength: 5, defaultArea: 35, minArea: 22.5, category: "Core" },
+  { key: "ground_garden", label: "GROUND FLOOR GARDEN / LAWN", defaultWidth: 10, defaultLength: 20, minWidth: 8, minLength: 10, defaultArea: 200, minArea: 80, category: "Exterior" },
+  { key: "terrace_garden", label: "TERRACE GARDEN", defaultWidth: 10, defaultLength: 15, minWidth: 8, minLength: 10, defaultArea: 150, minArea: 80, category: "Exterior" },
+  { key: "swimming_pool", label: "SWIMMING POOL", defaultWidth: 15, defaultLength: 20, minWidth: 10, minLength: 15, defaultArea: 300, minArea: 150, category: "Exterior" },
 ];
 
 export default function FloorManagerSection({
@@ -481,7 +465,10 @@ export default function FloorManagerSection({
               ROOM_CATALOG.forEach(cat => {
                 const roomInfo = floorRoomMap[cat.key];
                 if (roomInfo && roomInfo.selected) {
-                  allocatedRoomArea += Number(roomInfo.count || 1) * Number(roomInfo.areaPerRoom || cat.defaultArea);
+                  const rWidth = Number(roomInfo.width || cat.defaultWidth);
+                  const rLength = Number(roomInfo.length || cat.defaultLength);
+                  const rArea = roomInfo.areaMode === "MANUAL" ? Number(roomInfo.areaPerRoom || (rWidth * rLength)) : Number((rWidth * rLength).toFixed(2));
+                  allocatedRoomArea += Number(roomInfo.count || 1) * rArea;
                   selectedRoomLabels.push(cat.label);
                 }
               });
@@ -663,7 +650,7 @@ export default function FloorManagerSection({
                         <div className="border-2 border-black bg-white p-3">
                           <div className="flex flex-col sm:flex-row justify-between items-center mb-3 border-b-2 border-black pb-2 gap-2">
                             <div className="font-black text-xs uppercase text-slate-900 text-left">
-                              SEQUENTIAL ROOM PLANNING FOR {floor} (SMART FILTERED BY AREA: {totalFloorBuiltUp} SQ.FT)
+                              SEQUENTIAL ROOM PLANNING FOR {floor} (DIMENSIONS WITH MIN LIMITS & AREA CALCULATION)
                             </div>
                             <div className="text-xs font-black flex gap-3 items-center">
                               <span className="bg-slate-200 px-3 py-1 border border-black">
@@ -682,9 +669,10 @@ export default function FloorManagerSection({
                           )}
 
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                            {/* PART 1: SELECT CATALOG & DIMENSIONS */}
                             <div className="border-2 border-black p-3 bg-white">
                               <div className="bg-slate-900 text-white p-2 text-xs font-black mb-2 flex justify-between items-center">
-                                <span>PART 1: SELECT COMPATIBLE ITEMS (CATALOG)</span>
+                                <span>PART 1: SELECT ITEMS, WIDTH & LENGTH (MIN LIMITS)</span>
                                 {resetFloorRooms && (
                                   <button
                                     type="button"
@@ -695,15 +683,16 @@ export default function FloorManagerSection({
                                   </button>
                                 )}
                               </div>
-                              <div className="max-h-[380px] overflow-auto">
+                              <div className="max-h-[420px] overflow-auto">
                                 <table className="w-full border-collapse text-xs">
                                   <thead className="bg-slate-200 sticky top-0">
                                     <tr>
-                                      <th className="border border-black p-1.5 font-black text-center w-10">SEL</th>
-                                      <th className="border border-black p-1.5 font-black text-left pl-2">ITEM / ROOM</th>
-                                      <th className="border border-black p-1.5 font-black text-center w-12">NOS</th>
-                                      <th className="border border-black p-1.5 font-black text-center w-20">MODE</th>
-                                      <th className="border border-black p-1.5 font-black text-center w-20">SQ.FT</th>
+                                      <th className="border border-black p-1.5 font-black text-center w-8">SEL</th>
+                                      <th className="border border-black p-1.5 font-black text-left pl-2">ROOM / ITEM</th>
+                                      <th className="border border-black p-1.5 font-black text-center w-10">NOS</th>
+                                      <th className="border border-black p-1.5 font-black text-center w-16">W (FT)<br/><span className="text-[8px] font-normal text-gray-700">Min: W</span></th>
+                                      <th className="border border-black p-1.5 font-black text-center w-16">L (FT)<br/><span className="text-[8px] font-normal text-gray-700">Min: L</span></th>
+                                      <th className="border border-black p-1.5 font-black text-center w-16">SQ.FT</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -711,10 +700,15 @@ export default function FloorManagerSection({
                                       const current = floorRoomMap[room.key] || {
                                         selected: room.mandatory && isFullCoverage ? true : false,
                                         count: 1,
+                                        width: room.defaultWidth,
+                                        length: room.defaultLength,
                                         areaMode: "AUTO" as const,
                                         areaPerRoom: room.defaultArea,
                                       };
-                                      const itemTotalArea = Number(current.count || 1) * Number(current.areaPerRoom || room.defaultArea);
+                                      const rW = Number(current.width || room.defaultWidth);
+                                      const rL = Number(current.length || room.defaultLength);
+                                      const rArea = current.areaMode === "MANUAL" ? Number(current.areaPerRoom || (rW * rL)) : Number((rW * rL).toFixed(2));
+                                      const itemTotalArea = Number(current.count || 1) * rArea;
 
                                       return (
                                         <tr key={room.key} className={current.selected ? "bg-amber-50" : ""}>
@@ -734,7 +728,9 @@ export default function FloorManagerSection({
                                             />
                                           </td>
                                           <td className="border border-black p-1.5 font-bold text-left pl-2">
-                                            {room.label} {room.mandatory && <span className="text-[8px] bg-amber-400 px-1 ml-1 font-black">MANDATORY</span>}
+                                            {room.label} 
+                                            {room.key === "stair_in_living" && <span className="block text-[8px] text-amber-800 font-bold">✨ Adjusts Living Area</span>}
+                                            {room.key === "master_bedroom" && <span className="block text-[8px] text-blue-800 font-bold">✨ Includes Attached Toilet sizing</span>}
                                           </td>
                                           <td className="border border-black p-1.5 text-center">
                                             <input
@@ -743,29 +739,43 @@ export default function FloorManagerSection({
                                               value={current.count || 1}
                                               disabled={!current.selected}
                                               onChange={(e) => updateRoom(floor, room.key, { count: Math.max(1, Number(e.target.value) || 1) })}
-                                              className="w-12 border border-black p-1 text-center font-bold text-xs bg-white"
+                                              className="w-10 border border-black p-1 text-center font-bold text-xs bg-white"
                                             />
-                                          </td>
-                                          <td className="border border-black p-1.5 text-center">
-                                            <select
-                                              disabled={!current.selected}
-                                              value={current.areaMode || "AUTO"}
-                                              onChange={(e) => updateRoom(floor, room.key, { areaMode: e.target.value as "AUTO" | "MANUAL" })}
-                                              className="border border-black p-1 text-[10px] font-bold bg-white"
-                                            >
-                                              <option value="AUTO">AUTO</option>
-                                              <option value="MANUAL">MANUAL</option>
-                                            </select>
                                           </td>
                                           <td className="border border-black p-1.5 text-center">
                                             <input
                                               type="number"
-                                              min={room.minArea}
-                                              disabled={!current.selected || current.areaMode === "AUTO"}
-                                              value={current.areaPerRoom || room.defaultArea}
-                                              onChange={(e) => updateRoom(floor, room.key, { areaPerRoom: Number(e.target.value) || room.defaultArea })}
-                                              className={`w-16 border border-black p-1 text-center font-bold text-xs ${current.areaMode === "AUTO" ? "bg-gray-100" : "bg-white"}`}
+                                              step="0.5"
+                                              min={room.minWidth}
+                                              disabled={!current.selected}
+                                              value={rW}
+                                              onChange={(e) => {
+                                                const val = Math.max(room.minWidth, Number(e.target.value) || room.minWidth);
+                                                updateRoom(floor, room.key, { width: val, areaPerRoom: Number((val * rL).toFixed(2)) });
+                                              }}
+                                              title={`Min Width: ${room.minWidth}'`}
+                                              className="w-14 border border-black p-1 text-center font-bold text-xs bg-white"
                                             />
+                                            <span className="block text-[8px] text-gray-500">min {room.minWidth}&apos;</span>
+                                          </td>
+                                          <td className="border border-black p-1.5 text-center">
+                                            <input
+                                              type="number"
+                                              step="0.5"
+                                              min={room.minLength}
+                                              disabled={!current.selected}
+                                              value={rL}
+                                              onChange={(e) => {
+                                                const val = Math.max(room.minLength, Number(e.target.value) || room.minLength);
+                                                updateRoom(floor, room.key, { length: val, areaPerRoom: Number((rW * val).toFixed(2)) });
+                                              }}
+                                              title={`Min Length: ${room.minLength}'`}
+                                              className="w-14 border border-black p-1 text-center font-bold text-xs bg-white"
+                                            />
+                                            <span className="block text-[8px] text-gray-500">min {room.minLength}&apos;</span>
+                                          </td>
+                                          <td className="border border-black p-1.5 text-center font-bold">
+                                            {rArea.toFixed(0)}
                                           </td>
                                         </tr>
                                       );
@@ -775,17 +785,18 @@ export default function FloorManagerSection({
                               </div>
                             </div>
 
+                            {/* PART 2: SELECTED LIST & SUMMARY */}
                             <div className="border-2 border-black p-3 bg-white">
                               <div className="bg-slate-900 text-white p-2 text-xs font-black mb-2 text-left pl-2">
-                                PART 2: SELECTED ITEMS LIST & SUMMARY (SEQUENTIAL)
+                                PART 2: SELECTED ITEMS LIST & DIMENSIONS SUMMARY
                               </div>
-                              <div className="max-h-[380px] overflow-auto">
+                              <div className="max-h-[420px] overflow-auto">
                                 <table className="w-full border-collapse text-xs">
                                   <thead className="bg-slate-200 sticky top-0">
                                     <tr>
                                       <th className="border border-black p-1.5 font-black text-left pl-2">SELECTED ITEM</th>
                                       <th className="border border-black p-1.5 font-black text-center">NOS</th>
-                                      <th className="border border-black p-1.5 font-black text-center">SQ.FT / UNIT</th>
+                                      <th className="border border-black p-1.5 font-black text-center">DIMENSION (W×L)</th>
                                       <th className="border border-black p-1.5 font-black text-right pr-2">TOTAL</th>
                                     </tr>
                                   </thead>
@@ -799,12 +810,16 @@ export default function FloorManagerSection({
                                     ) : (
                                       ROOM_CATALOG.filter(room => floorRoomMap[room.key]?.selected).map((room) => {
                                         const current = floorRoomMap[room.key];
-                                        const total = Number(current.count || 1) * Number(current.areaPerRoom || room.defaultArea);
+                                        const rW = Number(current.width || room.defaultWidth);
+                                        const rL = Number(current.length || room.defaultLength);
+                                        const rArea = Number((rW * rL).toFixed(2));
+                                        const total = Number(current.count || 1) * rArea;
+
                                         return (
                                           <tr key={`sel-${room.key}`} className="bg-green-50">
                                             <td className="border border-black p-1.5 font-bold text-left pl-2">{room.label}</td>
                                             <td className="border border-black p-1.5 text-center font-bold">{current.count || 1}</td>
-                                            <td className="border border-black p-1.5 text-center font-bold">{current.areaPerRoom || room.defaultArea}</td>
+                                            <td className="border border-black p-1.5 text-center font-bold">{rW}&apos; × {rL}&apos;</td>
                                             <td className="border border-black p-1.5 text-right pr-2 font-black">{total.toFixed(2)} SQ.FT</td>
                                           </tr>
                                         );
@@ -824,7 +839,7 @@ export default function FloorManagerSection({
                                   </div>
                                 </div>
                                 <div className="mt-1 text-gray-700 border-t border-gray-300 pt-1">
-                                  ℹ️ Remaining space dynamically adjusts in Hall / Living Room to optimize coverage.
+                                  ℹ️ Living Room & Master Bedroom layouts automatically coordinate with attached toilets and interior stair integrations.
                                 </div>
                               </div>
                             </div>
@@ -841,7 +856,7 @@ export default function FloorManagerSection({
         </table>
       </div>
 
-      {/* COMPREHENSIVE STRUCTURAL & TECHNICAL SETTINGS MODAL */}
+      {/* MODAL FOR STRUCTURAL & TECHNICAL SETTINGS */}
       {activeGearFloor && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white border-2 border-black w-full max-w-2xl p-5 font-sans uppercase shadow-2xl max-h-[90vh] overflow-y-auto">
@@ -880,7 +895,6 @@ export default function FloorManagerSection({
             </p>
 
             <div className="space-y-4 text-[10px]">
-              {/* PLINTH DETAILS FOR GROUND FLOOR */}
               {activeGearFloor.toUpperCase().includes("GROUND") && (
                 <div className="border border-black p-3 bg-amber-50">
                   <h4 className="font-black border-b border-black pb-1 mb-2 text-amber-900">
@@ -888,7 +902,7 @@ export default function FloorManagerSection({
                   </h4>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-bold mb-1">PLINTH HEIGHT (FT) [MIN: 1.5']</label>
+                      <label className="block font-bold mb-1">PLINTH HEIGHT (FT) [MIN: 1.5&apos;]</label>
                       <input
                         type="number"
                         step="0.1"
@@ -901,7 +915,7 @@ export default function FloorManagerSection({
                       />
                     </div>
                     <div>
-                      <label className="block font-bold mb-1">PLINTH SLAB THICKNESS (INCH) [MIN: 4"]</label>
+                      <label className="block font-bold mb-1">PLINTH SLAB THICKNESS (INCH) [MIN: 4&quot;]</label>
                       <input
                         type="number"
                         step="0.5"
@@ -917,12 +931,11 @@ export default function FloorManagerSection({
                 </div>
               )}
 
-              {/* FLOOR HEIGHT & STRUCTURAL MEMBERS */}
               <div className="border border-black p-3 bg-slate-50">
                 <h4 className="font-black border-b border-black pb-1 mb-2 text-slate-800">FLOOR HEIGHT & STRUCTURAL SPECIFICATIONS</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block font-bold mb-1">FLOOR HEIGHT (FT) [STD: 10']</label>
+                    <label className="block font-bold mb-1">FLOOR HEIGHT (FT) [STD: 10&apos;]</label>
                     <input
                       type="number"
                       step="0.5"
@@ -935,7 +948,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">SLAB THICKNESS (INCH) [MIN: 5"]</label>
+                    <label className="block font-bold mb-1">SLAB THICKNESS (INCH) [MIN: 5&quot;]</label>
                     <input
                       type="number"
                       step="0.5"
@@ -998,12 +1011,11 @@ export default function FloorManagerSection({
                 </div>
               </div>
 
-              {/* STAIRCASE NORMS */}
               <div className="border border-black p-3 bg-blue-50">
                 <h4 className="font-black border-b border-blue-900 pb-1 mb-2 text-blue-900">STAIRCASE TECHNICAL NORMS (IS 456 / NBC)</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="block font-bold mb-1">RISER (INCH) [MAX 6"-7"]</label>
+                    <label className="block font-bold mb-1">RISER (INCH) [MAX 6&quot;-7&quot;]</label>
                     <input
                       type="number"
                       step="0.25"
@@ -1016,7 +1028,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">TREAD (INCH) [MIN 10"]</label>
+                    <label className="block font-bold mb-1">TREAD (INCH) [MIN 10&quot;]</label>
                     <input
                       type="number"
                       step="0.5"
@@ -1029,7 +1041,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">FLIGHT WIDTH (FT) [MIN 3.25']</label>
+                    <label className="block font-bold mb-1">FLIGHT WIDTH (FT) [MIN 3.25&apos;]</label>
                     <input
                       type="number"
                       step="0.25"
@@ -1042,7 +1054,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">LANDING WIDTH (FT) [MIN 3.25']</label>
+                    <label className="block font-bold mb-1">LANDING WIDTH (FT) [MIN 3.25&apos;]</label>
                     <input
                       type="number"
                       step="0.25"
@@ -1055,7 +1067,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">HEADROOM CLEAR (FT) [MIN 7.25']</label>
+                    <label className="block font-bold mb-1">HEADROOM CLEAR (FT) [MIN 7.25&apos;]</label>
                     <input
                       type="number"
                       step="0.25"
@@ -1068,7 +1080,7 @@ export default function FloorManagerSection({
                     />
                   </div>
                   <div>
-                    <label className="block font-bold mb-1">HANDRAIL HT (FT) [MIN 3']</label>
+                    <label className="block font-bold mb-1">HANDRAIL HT (FT) [MIN 3&apos;]</label>
                     <input
                       type="number"
                       step="0.25"
@@ -1083,7 +1095,6 @@ export default function FloorManagerSection({
                 </div>
               </div>
 
-              {/* DOOR & WINDOW DETAILS BY TYPE */}
               <div className="border border-black p-3 bg-gray-50">
                 <h4 className="font-black border-b border-black pb-1 mb-2">DOOR & WINDOW NORMS BY TYPE</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

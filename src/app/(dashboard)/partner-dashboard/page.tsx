@@ -21,6 +21,7 @@ export default function PartnerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [isAdmin, setIsAdmin] = useState(false); // Strictly for Admin only (Settlement entry)
   const [isAdminOrCEO, setIsAdminOrCEO] = useState(false);
   const [isLevel1Approver, setIsLevel1Approver] = useState(false);
 
@@ -59,6 +60,13 @@ export default function PartnerDashboardPage() {
   const [payoutRef, setPayoutRef] = useState('');
   const [payoutNotes, setPayoutNotes] = useState('');
 
+  // Official Management Contacts for WhatsApp Notifications
+  const MANAGEMENT_CONTACTS = {
+    admin: "917987561396",      // Admin
+    coPartner: "918249169703",  // Madhusmita Co-Partner
+    ceo: "918103804355"         // Jayant Tomar CEO
+  };
+
   useEffect(() => {
     if (sessionStorage.getItem('partner_ledger_unlocked') === 'true') {
       setIsUnlocked(true);
@@ -70,7 +78,7 @@ export default function PartnerDashboardPage() {
   useEffect(() => {
     if (!isUnlocked || !session) return;
     const interval = setInterval(() => {
-      if (isAdminOrCEO && selectedPartnerId) {
+      if ((isAdminOrCEO || isLevel1Approver) && selectedPartnerId) {
         const selected = allPartners.find((p) => p.partner_id === selectedPartnerId);
         if (selected) loadPartnerDetails(selected.partner_id, selected.user_id);
       } else if (partnerProfile) {
@@ -78,7 +86,7 @@ export default function PartnerDashboardPage() {
       }
     }, 8000);
     return () => clearInterval(interval);
-  }, [isUnlocked, session, selectedPartnerId, partnerProfile, isAdminOrCEO, allPartners]);
+  }, [isUnlocked, session, selectedPartnerId, partnerProfile, isAdminOrCEO, isLevel1Approver, allPartners]);
 
   const fetchInitialData = async () => {
     setLoading(true);
@@ -93,32 +101,44 @@ export default function PartnerDashboardPage() {
       .single();
 
     setProfile(userProfile);
-    const hasAdminAccess = ['Admin', 'admin', 'CEO', 'ceo'].includes(userProfile?.user_type || userProfile?.role);
-    const isL1 = ['Co-Partner', 'CO PARTNER', 'ENGINEER', 'CEO', 'Admin'].includes(userProfile?.role || userProfile?.user_type);
+    
+    const userRole = (userProfile?.role || '').toLowerCase();
+    const userType = (userProfile?.user_type || '').toLowerCase();
+    const userCode = (userProfile?.user_code || '').toLowerCase();
+
+    const strictlyAdmin = userRole === 'admin' || userType === 'admin' || userCode === 'admin001';
+    setIsAdmin(strictlyAdmin);
+
+    const hasAdminAccess = strictlyAdmin || ['ceo', 'ceo - co-partner', 'co-partner'].includes(userType) || 
+                           ['ceo', 'ceo - co-partner', 'co-partner'].includes(userRole) ||
+                           userRole.includes('ceo') || userRole.includes('co-partner');
+                           
+    const isL1 = hasAdminAccess || ['engineer', 'co-partner', 'ceo'].includes(userRole) || ['engineer', 'co-partner', 'ceo'].includes(userType);
     
     setIsAdminOrCEO(hasAdminAccess);
     setIsLevel1Approver(isL1);
 
-    if (hasAdminAccess) {
+    if (hasAdminAccess || isL1) {
       const { data: partners } = await supabase
         .from('partner_profiles')
         .select(`*, profiles:user_id (*)`);
 
       const partnerList = (partners || []).filter((p) => {
-        const role = (p.profiles?.role || '').toLowerCase();
-        const userType = (p.profiles?.user_type || '').toLowerCase();
-        const userCode = (p.profiles?.user_code || '').toLowerCase();
-        return role !== 'admin' && userType !== 'admin' && userCode !== 'admin001';
+        const pRole = (p.profiles?.role || '').toLowerCase();
+        const pType = (p.profiles?.user_type || '').toLowerCase();
+        const pCode = (p.profiles?.user_code || '').toLowerCase();
+        return pRole !== 'admin' && pType !== 'admin' && pCode !== 'admin001';
       });
 
       setAllPartners(partnerList);
       if (partnerList.length > 0) {
-        setSelectedPartnerId(partnerList[0].partner_id);
-        setPartnerProfile(partnerList[0]);
-        setApprovalStatus(partnerList[0].approval_status || 'PENDING');
-        setApprovedByLevel1(partnerList[0].approved_by_level1);
-        setApprovedByAdmin(partnerList[0].approved_by_admin);
-        await loadPartnerDetails(partnerList[0].partner_id, partnerList[0].user_id);
+        const target = partnerList.find(p => p.partner_id === selectedPartnerId) || partnerList[0];
+        setSelectedPartnerId(target.partner_id);
+        setPartnerProfile(target);
+        setApprovalStatus(target.approval_status || 'PENDING');
+        setApprovedByLevel1(target.approved_by_level1);
+        setApprovedByAdmin(target.approved_by_admin);
+        await loadPartnerDetails(target.partner_id, target.user_id);
       }
     } else {
       const { data: partnerData } = await supabase
@@ -271,32 +291,59 @@ export default function PartnerDashboardPage() {
     setTotalSettled(calculatedTotalSettled);
   };
 
-  // Inside handleApprovePartner function in PartnerDashboardPage.tsx:
+  const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | 'ADMIN') => {
+    const approverName = profile?.full_name || (level === 'LEVEL1' ? 'CEO / CO-PARTNER' : 'ADMIN');
+    const updatePayload: any = {};
 
-const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | 'ADMIN') => {
-  const approverName = profile?.full_name || (level === 'LEVEL1' ? 'LEVEL_1_APPROVER' : 'ADMIN');
-  const updatePayload: any = {};
+    if (level === 'LEVEL1') {
+      updatePayload.approved_by_level1 = approverName;
+    } else if (level === 'ADMIN') {
+      updatePayload.approved_by_admin = approverName;
+      updatePayload.approval_status = 'APPROVED';
+    }
 
-  if (level === 'LEVEL1') {
-    // Madhusmita or Jayant Approval
-    updatePayload.approved_by_level1 = approverName;
-  } else if (level === 'ADMIN') {
-    // DRC Consultant Final Approval
-    updatePayload.approved_by_admin = approverName;
-    updatePayload.approval_status = 'APPROVED';
-  }
+    const { error } = await supabase
+      .from('partner_profiles')
+      .update(updatePayload)
+      .eq('partner_id', targetPartnerId);
 
-  const { error } = await supabase
-    .from('partner_profiles')
-    .update(updatePayload)
-    .eq('partner_id', targetPartnerId);
+    if (!error) {
+      const targetPartnerObj = allPartners.find(p => p.partner_id === targetPartnerId);
+      const partnerName = targetPartnerObj?.profiles?.full_name || "Valued Partner";
+      const partnerMobile = targetPartnerObj?.profiles?.mobile;
 
-  if (!error) {
-    await fetchInitialData();
-  } else {
-    alert('Approval Error: ' + error.message);
-  }
-};
+      // Professional WhatsApp notification routing
+      if (level === 'LEVEL1') {
+        const msgForAdminAndCoPartner = encodeURIComponent(
+          `Dear Management,\n\nLevel 1 approval has been completed successfully for partner account: *${partnerName}* by *${approverName}*.\n\nKindly proceed with the final administrative verification and approval.\n\nRegards,\nManagement System`
+        );
+
+        // Open WhatsApp for Admin and Co-Partner
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.admin}?text=${msgForAdminAndCoPartner}`, '_blank');
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.coPartner}?text=${msgForAdminAndCoPartner}`, '_blank');
+
+      } else if (level === 'ADMIN') {
+        const msgForCEO = encodeURIComponent(
+          `Dear CEO,\n\nFinal Admin Approval has been granted for partner account: *${partnerName}*.\n\nAll onboarding procedures are now successfully completed.\n\nRegards,\nManagement System`
+        );
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.ceo}?text=${msgForCEO}`, '_blank');
+
+        // Notify Partner via WhatsApp that account is approved
+        if (partnerMobile) {
+          const formattedMobile = partnerMobile.replace(/\D/g, '');
+          const partnerRecipientNo = formattedMobile.startsWith('91') ? formattedMobile : `91${formattedMobile}`;
+          const msgForPartner = encodeURIComponent(
+            `Dear ${partnerName},\n\nWe are pleased to inform you that your Partner Account has been successfully *APPROVED*!\n\nYou can now access your full partner dashboard, track network revenue, and view commission earnings.\n\nWelcome aboard!\n\nBest Regards,\nExecutive Management Team`
+          );
+          window.open(`https://wa.me/${partnerRecipientNo}?text=${msgForPartner}`, '_blank');
+        }
+      }
+
+      await fetchInitialData();
+    } else {
+      alert('Approval Error: ' + error.message);
+    }
+  };
 
   const filteredReferredUsers = useMemo(() => {
     return referredUsers.filter((u) => {
@@ -345,7 +392,12 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
 
   const handleAddPayoutSettlement = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdmin) {
+      alert('ACCESS DENIED: ONLY ADMIN CAN RECORD SETTLEMENTS.');
+      return;
+    }
     if (!partnerProfile) return;
+
     const { error } = await supabase.from('partner_payouts').insert([{ 
       partner_id: partnerProfile.partner_id, 
       user_id: partnerProfile.user_id, 
@@ -366,8 +418,7 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
 
   if (loading) return <div className="p-8 text-center text-slate-300 bg-slate-950 min-h-screen font-mono">LOADING LEDGER...</div>;
 
-  // 1. APPROVAL LOCK GUARD (IF NOT APPROVED & NOT ADMIN)
-  if ((!hasPartnerAccount || approvalStatus !== 'APPROVED') && !isAdminOrCEO) {
+  if ((!hasPartnerAccount || approvalStatus !== 'APPROVED') && !isAdminOrCEO && !isLevel1Approver) {
     return (
       <PartnerApprovalLockModal
         userId={session.user.id}
@@ -380,7 +431,6 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
     );
   }
 
-  // 2. SECURITY PASSWORD LOCK GUARD
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -423,7 +473,7 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          {isAdminOrCEO && (
+          {(isAdminOrCEO || isLevel1Approver) && (
             <>
               <div className="flex items-center gap-2 bg-slate-900 border border-indigo-900/50 p-2 rounded-xl">
                 <Search size={14} className="text-indigo-400 shrink-0" />
@@ -458,24 +508,28 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
                       onClick={() => handleApprovePartner(partnerProfile.partner_id, 'LEVEL1')}
                       className="bg-indigo-700 hover:bg-indigo-600 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1"
                     >
-                      <CheckCircle size={12} /> APPROVE (LEVEL 1)
+                      <CheckCircle size={12} /> APPROVE (LEVEL 1: CEO/CO-PARTNER)
                     </button>
                   )}
-                  <button 
-                    onClick={() => handleApprovePartner(partnerProfile.partner_id, 'ADMIN')}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
-                  >
-                    <CheckCircle size={12} /> FINAL ADMIN APPROVAL
-                  </button>
+                  {isAdmin && (
+                    <button 
+                      onClick={() => handleApprovePartner(partnerProfile.partner_id, 'ADMIN')}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
+                    >
+                      <CheckCircle size={12} /> FINAL ADMIN APPROVAL
+                    </button>
+                  )}
                 </div>
               )}
 
-              <button 
-                onClick={() => setShowPayoutModal(true)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md"
-              >
-                <PlusCircle size={15} /> SETTLEMENT ENTRY
-              </button>
+              {isAdmin && (
+                <button 
+                  onClick={() => setShowPayoutModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md"
+                >
+                  <PlusCircle size={15} /> SETTLEMENT ENTRY
+                </button>
+              )}
             </>
           )}
 
@@ -803,7 +857,7 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
         />
       )}
 
-      {showPayoutModal && isAdminOrCEO && (
+      {showPayoutModal && isAdmin && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl w-full max-w-lg space-y-3 shadow-2xl">
             <div className="flex justify-between items-center border-b border-slate-800 pb-2">
@@ -848,7 +902,7 @@ const handleApprovePartner = async (targetPartnerId: string, level: 'LEVEL1' | '
                 <input type="text" placeholder="Remarks..." value={payoutNotes} onChange={(e) => setPayoutNotes(e.target.value)} className="w-full p-2.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white focus:outline-none" />
               </div>
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                <button type="button" onClick={() => setShowPayoutModal(false)} className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold">CANCEL</button>
+                <button type="button" onClick={() => setShowPayoutModal(false)} className="px-3 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold">CANCEL_</button>
                 <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-md">SAVE SETTLEMENT →</button>
               </div>
             </form>

@@ -4,6 +4,9 @@ CONSTRUCTION PLAN SYSTEM — TYPES ENGINE
 
 export type PlanningMode = "AUTO" | "MANUAL" | "PRESET";
 
+/** User-facing parking requirement. Geometry is calculated from this mode, not a fixed plot preset. */
+export type ParkingMode = "TWO_WHEELER" | "CAR" | "CAR_BIKE_PEDESTRIAN" | "GENERIC";
+
 export type CadTool =
   | "SELECT"
   | "LINE"
@@ -130,6 +133,11 @@ export type RoomDefinition = {
   minArea: number;
   defaultArea: number;
   minWidth: number;
+  // --- NAYE FIELDS (Aapne roomRules mein add kiye the) ---
+  minLength: number;
+  defaultWidth: number;
+  defaultLength: number;
+  // -----------------------------------------------------
   statutoryMinArea?: number;
   percentageRule?: number;
 };
@@ -187,6 +195,9 @@ export interface FloorPlanningSettings {
   plinthHeightFeet?: number;
   plinthLevelFeet?: number;
 
+  // Ground-floor parking requirement
+  parkingMode?: ParkingMode;
+
   // Index signature to allow dynamic key access (keyof FloorPlanningSettings)
   [key: string]: any;
 }
@@ -209,6 +220,7 @@ export const DEFAULT_FLOOR_PLANNING_SETTINGS: FloorPlanningSettings = {
   ceilingHeightFeet: 9.5,
   plinthHeightFeet: 2,
   plinthLevelFeet: 2,
+  parkingMode: "CAR",
 };
 
 export type RoomCategory =
@@ -228,6 +240,8 @@ export type RoomCategory =
  */
 export interface FloorRoom {
   // Selection / Form Config Properties
+  width?: number;   // ADD THIS
+  length?: number;  // ADD THIS
   selected?: boolean;
   count?: number;
   areaMode?: "AUTO" | "MANUAL";

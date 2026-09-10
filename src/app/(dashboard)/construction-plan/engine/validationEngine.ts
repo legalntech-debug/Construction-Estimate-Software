@@ -203,7 +203,8 @@ export function validateConstructionPlan(
         if (n.includes('LIVING') || n.includes('DRAWING') || n === 'HALL') return 'LIVING ROOM';
         if (n.includes('ATTACHED') && (n.includes('TOILET') || n.includes('BATH'))) return 'ATTACHED TOILET';
         if (n.includes('COMMON') && (n.includes('TOILET') || n.includes('BATH'))) return 'COMMON TOILET';
-        if (n.includes('TOILET') || n.includes('BATH') || n === 'WC') return 'COMMON TOILET';
+        if (n.includes('BATH') && !n.includes('ATTACHED')) return 'BATHROOM';
+        if (n.includes('TOILET') || n === 'WC') return 'COMMON TOILET';
         if (n.includes('STAIR')) return 'STAIRCASE';
         if (n.includes('PARK')) return 'PARKING';
         if (n.includes('DUCT') || n.includes('OTS') || n.includes('SHAFT')) return 'DUCT';
@@ -214,7 +215,24 @@ export function validateConstructionPlan(
       for (const value of requestedProgram) wanted[canonical(value)] = (wanted[canonical(value)] || 0) + 1;
       for (const room of layout) actual[canonical(String(room.name || 'ROOM'))] = (actual[canonical(String(room.name || 'ROOM'))] || 0) + 1;
       for (const [key, count] of Object.entries(wanted)) {
-        if ((actual[key] || 0) < count) errors.push({ floor, roomKey: key, severity: 'ERROR', message: `${floor}: Requested room missing from final geometry → ${key} (${actual[key] || 0}/${count}).` });
+        const actualCount = key === 'BATHROOM'
+          ? (actual['BATHROOM'] || 0) + (actual['ATTACHED TOILET'] || 0)
+          : (actual[key] || 0);
+        if (actualCount < count) errors.push({ floor, roomKey: key, severity: 'ERROR', message: `${floor}: Requested room missing from final geometry → ${key} (${actualCount}/${count}).` });
+      }
+    }
+
+    // 0. Opening geometry audit. A door that is stored against the wrong wall is
+    // architecturally invalid even if the connectivity graph happens to pass.
+    for (const r of layout) {
+      const spans: Record<string, number> = { TOP: r.w, BOTTOM: r.w, LEFT: r.h, RIGHT: r.h };
+      for (const d of (r.doors || [])) {
+        const wallLen = spans[String(d.wall || '').toUpperCase()] || 0;
+        const start = Number(d.offsetFeet || 0);
+        const width = Number(d.widthFeet || 0);
+        if (!wallLen || start < -EPS || width <= 0 || start + width > wallLen + EPS) {
+          errors.push({ floor, roomKey: r.name, severity: 'ERROR', message: `${floor}: Door/gate geometry invalid in ${r.name} → ${d.id || 'DOOR'} on ${d.wall}; offset ${start.toFixed(2)} + width ${width.toFixed(2)} exceeds wall span ${wallLen.toFixed(2)}.` });
+        }
       }
     }
 

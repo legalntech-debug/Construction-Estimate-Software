@@ -63,8 +63,11 @@ export default function ConstructionPlanInput() {
   const [blueprintZoom, setBlueprintZoom] = useState(1.0);
   const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
   
-  // Initial dimensions set to 0
+  // Initial dimensions set to 0 with required PlotDimensions properties
   const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
+    length: 0,
+    width: 0,
+    area: 0,
     A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
   });
   
@@ -96,6 +99,9 @@ export default function ConstructionPlanInput() {
       }));
       setPlotDimensions(prev => ({
         ...prev,
+        length: totalFeetA,
+        width: totalFeetA,
+        area: totalFeetA * totalFeetA,
         A: totalFeetA,
         B: totalFeetA,
         C: totalFeetA,
@@ -295,7 +301,7 @@ export default function ConstructionPlanInput() {
     setDimensionHistory(prev => [...prev, { ...plotDimensions }]);
     
     setDimDetails(prev => {
-      const current = prev[side] || { ft: 0, in: 0 };
+      const current = prev[side as string] || { ft: 0, in: 0 };
       const updated = { ...current, [field]: val };
       
       const totalFeet = Number(updated.ft || 0) + Number(updated.in || 0) / 12;
@@ -308,13 +314,19 @@ export default function ConstructionPlanInput() {
           newDimDetails[s] = updated;
           newPlotDims[s as keyof PlotDimensions] = totalFeet;
         });
+        newPlotDims.length = totalFeet;
+        newPlotDims.width = totalFeet;
+        newPlotDims.area = totalFeet * totalFeet;
 
         setPlotDimensions(newPlotDims);
         return newDimDetails;
       } else {
         setPlotDimensions(prevDims => ({
           ...prevDims,
-          [side]: totalFeet
+          [side]: totalFeet,
+          length: side === 'C' ? totalFeet : prevDims.length,
+          width: side === 'A' ? totalFeet : prevDims.width,
+          area: (side === 'A' || side === 'C') ? frontWidthFt * depthFt : prevDims.area
         }));
 
         return {
@@ -333,7 +345,7 @@ export default function ConstructionPlanInput() {
   };
 
   const handleResetDimensions = () => {
-    setPlotDimensions({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
+    setPlotDimensions({ length: 0, width: 0, area: 0, A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
     setDimDetails({
       A: { ft: 0, in: 0 },
       B: { ft: 0, in: 0 },
@@ -429,9 +441,6 @@ export default function ConstructionPlanInput() {
         createdAt: new Date().toISOString(),
       };
 
-      // IMPORTANT: Generate the architectural model ONCE here.
-      // The preview receives these exact room x/y/w/h values, so no second/fallback
-      // planner is allowed to move the rooms after this button is clicked.
       const generated = generateCompleteConstructionPlan(inputPayload);
 
       const previewPayload = {
@@ -470,9 +479,6 @@ export default function ConstructionPlanInput() {
     };
   }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
 
-  // SINGLE SOURCE OF TRUTH FOR LIVE CAD: use the exact same master generator
-  // used by the final GENERATE PLAN action. This prevents CAD and Preview from
-  // inventing different room positions.
   const liveGeneratedPlan = useMemo(() => {
     try {
       return generateCompleteConstructionPlan({
@@ -505,7 +511,6 @@ export default function ConstructionPlanInput() {
     return result;
   }, [liveGeneratedPlan, selectedFloors, floorData, frontWidthFt, depthFt, plotArea]);
 
-  // CAD receives the exact generated x/y/w/h geometry from the master engine.
   const generatedCadFloorRooms = useMemo(() => {
     if (liveGeneratedPlan?.floorRooms) return liveGeneratedPlan.floorRooms;
     const result: Record<string, FloorRoom[]> = {};
@@ -594,7 +599,7 @@ export default function ConstructionPlanInput() {
         floorBhkConfig={floorBhkConfig || {}}
         roomEditorFloor={roomEditorFloor}
         floorRooms={floorRooms || {}}
-        planningMode={planningMode}
+        planningMode={planningMode as "AUTO" | "MANUAL"}
         setPlanningMode={setPlanningMode}
         floorSettings={floorSettings || {}}
         settingsFloor={settingsFloor}
@@ -618,15 +623,6 @@ export default function ConstructionPlanInput() {
         <button 
           type="button" 
           onClick={() => {
-            console.log("======== 🔍 INPUT PAGE PAYLOAD DEBUG START ========");
-            console.log("► Plot Dimensions:", plotDimensions);
-            console.log("► Dim Details (A,B,C,D):", dimDetails);
-            console.log("► Front Width (Ft):", frontWidthFt, "| Depth (Ft):", depthFt);
-            console.log("► Floor Data Sync State:", floorData);
-            console.log("► Floor BHK Config:", floorBhkConfig);
-            console.log("► Floor Rooms Selection:", floorRooms);
-            console.log("► Setbacks / MOS:", setbackInputs);
-            console.log("======== 🔍 INPUT PAGE PAYLOAD DEBUG END ========");
             setIsCadModalOpen(true);
           }} 
           className="bg-blue-700 hover:bg-blue-800 text-white px-6 py-3 text-xs font-black cursor-pointer uppercase transition"
@@ -701,7 +697,14 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-        floorRooms={generatedCadFloorRooms}
+        floorRooms={Object.fromEntries(
+  Object.entries(generatedCadFloorRooms).map(([floor, rooms]) => [
+    floor,
+    Array.isArray(rooms) 
+      ? Object.fromEntries(rooms.map((r: any, idx) => [r.id || r.type || idx, r]))
+      : rooms
+  ])
+)}
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}
         planningMode={planningMode}

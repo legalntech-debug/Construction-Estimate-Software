@@ -28,6 +28,7 @@ interface CadFloorElevationRendererProps {
   basementHeight?: number;
   floorBuiltUpAreas?: { [key: string]: number }; 
   floorData?: Record<string, FloorDetail>;
+  floorRooms?: Record<string, any>; // <-- Yeh line yahan add karni hai
   frontMos?: number;
   backMos?: number;
 }

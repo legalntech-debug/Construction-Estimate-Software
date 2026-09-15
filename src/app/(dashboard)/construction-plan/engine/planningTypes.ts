@@ -133,11 +133,9 @@ export type RoomDefinition = {
   minArea: number;
   defaultArea: number;
   minWidth: number;
-  // --- NAYE FIELDS (Aapne roomRules mein add kiye the) ---
   minLength: number;
   defaultWidth: number;
   defaultLength: number;
-  // -----------------------------------------------------
   statutoryMinArea?: number;
   percentageRule?: number;
 };
@@ -236,18 +234,23 @@ export type RoomCategory =
 
 /**
  * Unified FloorRoom Interface
- * Supports both selection state and 2D canvas placement properties.
+ * Supports both selection state and 2D canvas placement properties,
+ * plus extension metadata emitted by roomPlanner / validationEngine.
+ *
+ * NOTE: This is the SINGLE source of truth for FloorRoom. Do not declare
+ * another `interface FloorRoom` later in this file (TypeScript will merge
+ * them, but duplicate optional fields with different types cause errors).
  */
 export interface FloorRoom {
-  // Selection / Form Config Properties
-  width?: number;   // ADD THIS
-  length?: number;  // ADD THIS
+  // ---------- Selection / Form Config Properties ----------
+  width?: number;
+  length?: number;
   selected?: boolean;
   count?: number;
   areaMode?: "AUTO" | "MANUAL";
   areaPerRoom?: number;
 
-  // Positioned Layout Box & Canvas Properties
+  // ---------- Positioned Layout Box & Canvas Properties ----------
   id?: string;
   name?: string;
   label?: string;
@@ -260,6 +263,72 @@ export interface FloorRoom {
   isCovered?: boolean;
   doors?: PlacedDoor[] | any[];
   windows?: PlacedWindow[] | any[];
+
+  // ---------- Extension Metadata (roomPlanner / validationEngine) ----------
+  subZoneOf?: string;
+  isSubRoom?: boolean;
+  servesRooms?: string[];
+  collisionChecked?: boolean;
+  placedAtCorner?: string;
+  pinkGuideLines?: boolean;
+  corridorWidthFt?: number;
+  staircaseType?: string;
+  staircaseSpec?: any;
+  verticalCore?: boolean;
+  accessSide?: string;
+  upperFloorCore?: boolean;
+  landingRequired?: boolean;
+  stairAccessZone?: string;
+  allowGroundAlignment?: boolean;
+  entryZone?: boolean;
+  publicCore?: boolean;
+  parkingAdjacent?: boolean;
+  behindParking?: boolean;
+  parkingFirstAccess?: boolean;
+  upperFloorLiving?: boolean;
+  roadConnected?: boolean;
+  privateZone?: boolean;
+  furnitureValidated?: boolean;
+  requestedArea?: number;
+  serviceZone?: boolean;
+  ventilationRequired?: boolean;
+  dimensionsFitted?: boolean;
+  serviceCore?: boolean;
+  openToSky?: boolean;
+  verticalStack?: boolean;
+  ventilationFor?: string;
+  attachedTo?: string;
+  privacy?: string;
+  accessRole?: string;
+  circulationZone?: boolean;
+  protectedCorridor?: boolean;
+  connects?: string[];
+  orientation?: string;
+  diningAdjacent?: boolean;
+  adjacentTo?: string;
+  circulationSide?: string;
+  ventilationEdge?: string;
+  parkingShape?: string;
+  parkingZone?: string;
+  vehicleFit?: boolean;
+  vehicleClearanceRequired?: boolean;
+  candidateScore?: number;
+  parkingMode?: string;
+  bikeZone?: any;
+  pedestrianZone?: any;
+  entryRole?: string;
+  standaloneToilet?: boolean;
+  fallbackPlacement?: boolean;
+  optionalZone?: boolean;
+  bathroomIndex?: number;
+  isOpen?: boolean;
+  exteriorProjection?: boolean;
+
+  /**
+   * Fallback: allow any additional metadata that downstream code may attach.
+   * Keep this last so explicitly-typed fields above take priority.
+   */
+  [key: string]: any;
 }
 
 export interface GeneratedFloorPlanModel {
@@ -292,4 +361,50 @@ export interface GeneratedConstructionPlanModel {
   elevation: any[];
   section: any[];
   generatedAt: string;
+}
+
+// ============================================================
+// MULTI-CANDIDATE PLANNING SYSTEM — Types
+// ============================================================
+
+/** Strategy that dictates room placement priority in a candidate layout. */
+export type CandidateStrategy =
+  | 'VASTU_OPTIMIZED'
+  | 'SPACE_EFFICIENT'
+  | 'PRIVACY_FOCUSED'
+  | 'PLUMBING_CLUSTERED'
+  | 'LIGHT_VENTILATION'
+  | 'CIRCULATION_OPTIMIZED'
+  | 'FLEXIBLE_ZONING'
+  | 'BALANCED';
+
+/** Score breakdown for a single candidate. All values 0-100. */
+export interface PlanCandidateScore {
+  vastu: number;
+  circulation: number;
+  space: number;
+  lighting: number;
+  plumbing: number;
+  /** Weighted total (0-100) computed from the 5 parameters. */
+  total: number;
+}
+
+/** One complete architectural plan candidate. */
+export interface PlanCandidate {
+  id: string;
+  strategy: CandidateStrategy;
+  strategyLabel: string;
+  strategyDescription: string;
+  rooms: FloorRoom[];
+  score: PlanCandidateScore;
+  warnings: string[];
+  errors: string[];
+  isValid: boolean;
+  metrics: {
+    totalBuiltUpArea: number;
+    passageArea: number;
+    circulatingRooms: number;
+    exteriorRoomCount: number;
+    wetCoreClusterScore: number;
+  };
 }

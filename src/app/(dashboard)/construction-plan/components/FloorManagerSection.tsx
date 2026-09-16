@@ -71,6 +71,60 @@ export interface TechnicalSpecs {
 }
 
 // ============================================================================
+// HELPER: PROPORTIONAL ROOM LENGTH ADJUSTMENT
+// ------------------------------------------------------------
+// If the total required lengths of all rooms exceed the floor length,
+// shrink each room proportionally so all fit.
+// ============================================================================
+export function adjustRoomLengthsProportionally(
+  floorLength: number,
+  desiredLengths: { key: string; length: number; minLength: number }[],
+): Record<string, number> {
+  const totalDesired = desiredLengths.reduce((sum, r) => sum + r.length, 0);
+  const totalMin = desiredLengths.reduce((sum, r) => sum + r.minLength, 0);
+
+  // If everything fits, return desired lengths
+  if (totalDesired <= floorLength) {
+    const out: Record<string, number> = {};
+    desiredLengths.forEach(r => { out[r.key] = r.length; });
+    return out;
+  }
+
+  // If even minimums don't fit, use minimums (best effort)
+  if (totalMin >= floorLength) {
+    const out: Record<string, number> = {};
+    desiredLengths.forEach(r => { out[r.key] = r.minLength; });
+    return out;
+  }
+
+  // Proportional shrink within [minLength, desiredLength]
+  const scale = floorLength / totalDesired;
+  const out: Record<string, number> = {};
+  desiredLengths.forEach(r => {
+    const adjusted = Math.max(r.minLength, r.length * scale);
+    out[r.key] = Number(adjusted.toFixed(2));
+  });
+
+  // Final pass: if still overflow, trim the largest rooms slightly
+  let total = Object.values(out).reduce((a, b) => a + b, 0);
+  let attempts = 0;
+  while (total > floorLength && attempts < 50) {
+    const sorted = Object.entries(out).sort((a, b) => b[1] - a[1]);
+    const [largestKey, largestVal] = sorted[0];
+    const minVal = desiredLengths.find(d => d.key === largestKey)?.minLength ?? 0;
+    if (largestVal > minVal + 0.1) {
+      out[largestKey] = Number((largestVal - 0.1).toFixed(2));
+      total = Object.values(out).reduce((a, b) => a + b, 0);
+    } else {
+      break;
+    }
+    attempts++;
+  }
+
+  return out;
+}
+
+// ============================================================================
 // HELPER: DYNAMIC DOOR/WINDOW/VENTILATOR COUNTER
 // ============================================================================
 export function calculateFloorOpenings(floorRoomsMap: Record<string, FloorRoom>) {
@@ -142,7 +196,21 @@ export function getNearestPreset(w: number, l: number) {
 }
 
 // ============================================================================
-// UNIFIED AUTO-PLANNING LOGIC
+// UNIFIED AUTO-PLANNING LOGIC (Based on user's rules)
+// ------------------------------------------------------------
+// Ground Floor:
+//   10×30, 12×30, 15×30, 17×30: PARKING, LIVING+STAIR, KITCHEN 5×7, BEDROOM, COMMON BATHROOM
+//   20×30: PARKING, LIVING+STAIR, KITCHEN 5×7, MASTER+ATTACHED, COMMON BATHROOM
+//   10×40, 12×40, 15×40: PARKING, LIVING+STAIR, KITCHEN 7×8, MASTER+ATTACHED, COMMON BATHROOM
+//   20×40, 10×50, 12×50, 15×50: PARKING, LIVING+STAIR, KITCHEN W×8, MASTER+ATTACHED, COMMON BATHROOM
+//   20×50, 22×50, 25×50: PARKING, LIVING+STAIR, KITCHEN W×8, MASTER+ATTACHED, COMMON BATHROOM
+//   30×50, 35×50, 35×40, 40×40: PARKING, LIVING+STAIR, KITCHEN W×8,
+//     MASTER+ATTACHED, BEDROOM+ATTACHED, COMMON BATHROOM
+//   35×35, 30×30: PARKING, LIVING+STAIR, KITCHEN W×8, MASTER+ATTACHED, COMMON BATHROOM
+//
+// Upper Floor:
+//   Small/Medium (≤ 25×50): 2 MASTER BEDROOMS + 2 ATTACHED TOILETS
+//   Large (30×50, 35×50, etc.): 4 MASTER BEDROOMS + 4 ATTACHED TOILETS
 // ============================================================================
 export function getAutoRoomsForFloor(floorName: string, width: number, length: number): string[] {
   const upper = floorName.toUpperCase();
@@ -151,34 +219,49 @@ export function getAutoRoomsForFloor(floorName: string, width: number, length: n
 
   if (isTower) return ["staircase", "terrace_garden", "utility"];
 
+  const W = Number(width) || 20;
+  const L = Number(length) || 50;
+  const area = W * L;
+
   if (isGround) {
-    if (width <= 16) {
-      return [
-        "living_room_with_stair",
-        "common_bathroom",
-        "kitchen",
-        "bedroom",
-        "parking_with_stair"
-      ];
+    const rooms: string[] = [];
+    rooms.push("parking");
+    rooms.push("living_room_with_stair");
+    rooms.push("kitchen");
+
+    const isSmallPlot = W <= 17 && L <= 30;
+    if (isSmallPlot) {
+      rooms.push("bedroom");
     } else {
-      return [
-        "kitchen",
-        "living_room_with_stair",
-        "bedroom",
-        "common_bathroom",
-        "parking"
-      ];
+      rooms.push("master_bedroom");
+      rooms.push("attached_bathroom");
     }
-  } else {
-    // First Floor & Upper Floors: Master Bedrooms / Modern Bungalow Pattern
-    return [
-      "staircase",
-      "hall",
-      "master_bedroom",
-      "balcony",
-      "duct"
-    ];
+
+    const isLargePlot = area >= 1500;
+    if (isLargePlot) {
+      rooms.push("bedroom");
+      rooms.push("attached_bathroom");
+    }
+
+    rooms.push("common_bathroom");
+    return rooms;
   }
+
+  // Upper floors
+  const isLargePlot = area >= 1500;
+  const rooms: string[] = ["staircase"];
+
+  if (isLargePlot) {
+    rooms.push("master_bedroom", "attached_bathroom");
+    rooms.push("master_bedroom", "attached_bathroom");
+    rooms.push("master_bedroom", "attached_bathroom");
+    rooms.push("master_bedroom", "attached_bathroom");
+  } else {
+    rooms.push("master_bedroom", "attached_bathroom");
+    rooms.push("master_bedroom", "attached_bathroom");
+  }
+
+  return rooms;
 }
 
 interface FloorManagerSectionProps {
@@ -225,56 +308,36 @@ interface SetbackType {
 // COMPREHENSIVE UNIFIED ROOM CATALOG
 // ============================================================================
 export const ROOM_CATALOG = [
-  { key: "parking", label: "PARKING", defaultWidth: 9, defaultLength: 10, minWidth: 6, minLength: 7, defaultArea: 90, minArea: 42, category: "Ground" },
+  { key: "parking", label: "PARKING", defaultWidth: 9, defaultLength: 10, minWidth: 6, minLength: 5, defaultArea: 90, minArea: 30, category: "Ground" },
   { key: "parking_with_stair", label: "PARKING WITH STAIRCASE", defaultWidth: 6, defaultLength: 7, minWidth: 6, minLength: 7, defaultArea: 42, minArea: 42, category: "Ground" },
   { key: "staircase", label: "STAIRCASE", defaultWidth: 6.5, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 65, minArea: 48, category: "Core" },
-  { key: "living_room_with_stair", label: "LIVING ROOM + STAIR (U-SHAPE)", defaultWidth: 10, defaultLength: 16, minWidth: 10, minLength: 14, defaultArea: 160, minArea: 120, category: "Living" },
-  { key: "living_room", label: "LIVING ROOM / FAMILY LOUNGE", defaultWidth: 12, defaultLength: 15, minWidth: 10, minLength: 12, defaultArea: 180, minArea: 120, category: "Living" },
-  { key: "hall", label: "MAIN HALL / PASSAGE (6' WIDE)", defaultWidth: 10, defaultLength: 15, minWidth: 6, minLength: 10, defaultArea: 150, minArea: 60, category: "Living" },
-  { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultWidth: 6.5, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 65, minArea: 48, category: "Kitchen" },
-  { key: "kitchen_cum_dining", label: "KITCHEN CUM DINING", defaultWidth: 10, defaultLength: 13, minWidth: 8, minLength: 10, defaultArea: 130, minArea: 80, category: "Kitchen" },
-  { key: "store_room", label: "STORE ROOM", defaultWidth: 5, defaultLength: 8, minWidth: 4, minLength: 6, defaultArea: 40, minArea: 24, category: "Utility" },
-  { key: "master_bedroom", label: "MASTER BEDROOM (WITH ATTACHED TOILET)", defaultWidth: 20, defaultLength: 15, minWidth: 11, minLength: 12, defaultArea: 300, minArea: 130, category: "Bedroom" },
-  { key: "bedroom", label: "BEDROOM", defaultWidth: 10, defaultLength: 14, minWidth: 9, minLength: 10, defaultArea: 140, minArea: 90, category: "Bedroom" },
-  { key: "dressing", label: "DRESSING ROOM", defaultWidth: 5, defaultLength: 8, minWidth: 4, minLength: 5, defaultArea: 40, minArea: 20, category: "Bedroom" },
-  { key: "common_bathroom", label: "COMMON BATHROOM", defaultWidth: 5, defaultLength: 9, minWidth: 4, minLength: 6, defaultArea: 45, minArea: 24, category: "Bathroom" },
-  { key: "attached_bathroom", label: "ATTACHED BATHROOM", defaultWidth: 5, defaultLength: 10, minWidth: 4.5, minLength: 6.5, defaultArea: 50, minArea: 28, category: "Bathroom" },
-  { key: "wc", label: "WC (TOILET)", defaultWidth: 4, defaultLength: 6, minWidth: 3.5, minLength: 4.5, defaultArea: 24, minArea: 15, category: "Bathroom" },
-  { key: "pooja_room", label: "POOJA ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Common" },
-  { key: "study_room", label: "STUDY / KIDS ROOM", defaultWidth: 7, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 70, minArea: 48, category: "Common" },
-  { key: "utility", label: "UTILITY / WASH AREA", defaultWidth: 5, defaultLength: 7, minWidth: 4, minLength: 5, defaultArea: 35, minArea: 20, category: "Utility" },
-  { key: "balcony", label: "BALCONY", defaultWidth: 4.5, defaultLength: 10, minWidth: 3.5, minLength: 6, defaultArea: 45, minArea: 21, category: "Exterior" },
-  { key: "duct", label: "HUGE VENTILATION DUCT", defaultWidth: 4, defaultLength: 6, minWidth: 3, minLength: 3, defaultArea: 24, minArea: 9, mandatory: true, category: "Core" },
-  { key: "lift", label: "LIFT / ELEVATOR", defaultWidth: 5, defaultLength: 7, minWidth: 4.5, minLength: 5, defaultArea: 35, minArea: 22.5, category: "Core" },
-  { key: "terrace_garden", label: "TERRACE GARDEN", defaultWidth: 10, defaultLength: 15, minWidth: 8, minLength: 10, defaultArea: 150, minArea: 80, category: "Exterior" },
+  { key: "living_room_with_stair", label: "LIVING ROOM + STAIR (U-SHAPE)", defaultWidth: 10, defaultLength: 10, minWidth: 10, minLength: 8.5, defaultArea: 100, minArea: 85, category: "Living" },
+  { key: "living_room", label: "LIVING ROOM / FAMILY LOUNGE", defaultWidth: 12, defaultLength: 10, minWidth: 10, minLength: 9, defaultArea: 120, minArea: 90, category: "Living" },
+  { key: "hall", label: "MAIN HALL / PASSAGE (6' WIDE)", defaultWidth: 10, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 100, minArea: 48, category: "Living" },
+  { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultWidth: 6.5, defaultLength: 7, minWidth: 5, minLength: 5, defaultArea: 45, minArea: 25, category: "Kitchen" },
+  { key: "kitchen_cum_dining", label: "KITCHEN CUM DINING", defaultWidth: 10, defaultLength: 8, minWidth: 8, minLength: 7, defaultArea: 80, minArea: 56, category: "Kitchen" },
+  { key: "store_room", label: "STORE ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Utility" },
+  { key: "master_bedroom", label: "MASTER BEDROOM (WITH ATTACHED TOILET)", defaultWidth: 12, defaultLength: 10, minWidth: 10.5, minLength: 9, defaultArea: 120, minArea: 95, category: "Bedroom" },
+  { key: "bedroom", label: "BEDROOM", defaultWidth: 10, defaultLength: 10, minWidth: 9, minLength: 8.5, defaultArea: 100, minArea: 76, category: "Bedroom" },
+  { key: "dressing", label: "DRESSING ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Bedroom" },
+  { key: "common_bathroom", label: "COMMON BATHROOM", defaultWidth: 4.5, defaultLength: 7, minWidth: 4, minLength: 5, defaultArea: 31.5, minArea: 20, category: "Bathroom" },
+  { key: "attached_bathroom", label: "ATTACHED BATHROOM", defaultWidth: 5, defaultLength: 7, minWidth: 4.5, minLength: 5, defaultArea: 35, minArea: 22.5, category: "Bathroom" },
+  { key: "wc", label: "WC (TOILET)", defaultWidth: 4, defaultLength: 5, minWidth: 3.5, minLength: 4, defaultArea: 20, minArea: 14, category: "Bathroom" },
+  { key: "pooja_room", label: "POOJA ROOM", defaultWidth: 4, defaultLength: 5, minWidth: 4, minLength: 4, defaultArea: 20, minArea: 16, category: "Common" },
+  { key: "study_room", label: "STUDY / KIDS ROOM", defaultWidth: 7, defaultLength: 8, minWidth: 6, minLength: 7, defaultArea: 56, minArea: 42, category: "Common" },
+  { key: "utility", label: "UTILITY / WASH AREA", defaultWidth: 5, defaultLength: 5, minWidth: 4, minLength: 4, defaultArea: 25, minArea: 16, category: "Utility" },
+  { key: "balcony", label: "BALCONY", defaultWidth: 4.5, defaultLength: 6, minWidth: 3.5, minLength: 4, defaultArea: 27, minArea: 14, category: "Exterior" },
+  { key: "duct", label: "HUGE VENTILATION DUCT", defaultWidth: 3, defaultLength: 4, minWidth: 3, minLength: 3, defaultArea: 12, minArea: 9, mandatory: true, category: "Core" },
+  { key: "lift", label: "LIFT / ELEVATOR", defaultWidth: 5, defaultLength: 5, minWidth: 4.5, minLength: 5, defaultArea: 25, minArea: 22.5, category: "Core" },
+  { key: "terrace_garden", label: "TERRACE GARDEN", defaultWidth: 10, defaultLength: 10, minWidth: 8, minLength: 8, defaultArea: 100, minArea: 64, category: "Exterior" },
 ];
 
 const MUTUALLY_EXCLUSIVE: Array<{ primary: string; blocked: string; note: string }> = [
-  {
-    primary: "living_room_with_stair",
-    blocked: "staircase",
-    note: "STAIRCASE is already embedded inside LIVING ROOM + STAIR (U-SHAPE).",
-  },
-  {
-    primary: "living_room_with_stair",
-    blocked: "living_room",
-    note: "LIVING ROOM is already part of LIVING ROOM + STAIR (U-SHAPE).",
-  },
-  {
-    primary: "living_room_with_stair",
-    blocked: "parking_with_stair",
-    note: "Only one staircase configuration is allowed per floor.",
-  },
-  {
-    primary: "parking_with_stair",
-    blocked: "staircase",
-    note: "STAIRCASE is already embedded inside PARKING WITH STAIRCASE.",
-  },
-  {
-    primary: "parking_with_stair",
-    blocked: "living_room_with_stair",
-    note: "Only one staircase configuration is allowed per floor.",
-  },
+  { primary: "living_room_with_stair", blocked: "staircase", note: "STAIRCASE is already embedded inside LIVING ROOM + STAIR (U-SHAPE)." },
+  { primary: "living_room_with_stair", blocked: "living_room", note: "LIVING ROOM is already part of LIVING ROOM + STAIR (U-SHAPE)." },
+  { primary: "living_room_with_stair", blocked: "parking_with_stair", note: "Only one staircase configuration is allowed per floor." },
+  { primary: "parking_with_stair", blocked: "staircase", note: "STAIRCASE is already embedded inside PARKING WITH STAIRCASE." },
+  { primary: "parking_with_stair", blocked: "living_room_with_stair", note: "Only one staircase configuration is allowed per floor." },
 ];
 
 function isBlockedByExclusive(
@@ -335,6 +398,9 @@ export default function FloorManagerSection({
     return floorSpecs[floor] || { ...IS_CODE_MINIMUMS };
   };
 
+  // ============================================================================
+  // AUTO-MODE EFFECT (with proportional length adjustment)
+  // ============================================================================
   useEffect(() => {
     if (planningMode === "AUTO") {
       selectedFloors.forEach((floor) => {
@@ -343,55 +409,137 @@ export default function FloorManagerSection({
         const isTower = floor.toUpperCase().includes("TOWER");
         const currentW = Number(data.width) || (isTower ? 10 : Number(plotLength) || 20);
         const currentL = Number(data.length) || (isTower ? 10 : Number(plotWidth) || 50);
+        const isGround = floor.toUpperCase().includes("GROUND");
+        const area = currentW * currentL;
 
         const targetRooms = getAutoRoomsForFloor(floor, currentW, currentL);
         const floorRoomState = floorRooms[floor] || {};
 
+        // Count occurrences
+        const targetCounts: Record<string, number> = {};
+        targetRooms.forEach((key) => {
+          targetCounts[key] = (targetCounts[key] || 0) + 1;
+        });
+
+        // ============================================================
+        // PRE-PASS: Compute desired widths & lengths for all rooms
+        // ============================================================
+        const desiredDims: Record<string, { w: number; h: number; minW: number; minH: number; count: number }> = {};
+
         ROOM_CATALOG.forEach((room) => {
-          const shouldSelect = targetRooms.includes(room.key);
+          const shouldSelect = targetCounts[room.key] > 0;
+          if (!shouldSelect) return;
+
+          let targetWidth = room.defaultWidth;
+          let targetLength = room.defaultLength;
+          let targetCount = targetCounts[room.key] || 1;
+
+          if (room.key === "living_room_with_stair" || room.key === "living_room") {
+            targetWidth = currentW;
+            targetLength = 10;
+          } else if (room.key === "parking") {
+            targetWidth = Number((currentW * 0.6).toFixed(1));
+            targetLength = currentL <= 30 ? 5 : 8;
+          } else if (room.key === "kitchen" || room.key === "kitchen_cum_dining") {
+            if (currentL <= 30) { targetWidth = 5; targetLength = 7; }
+            else if (currentL <= 40 && currentW <= 15) { targetWidth = 7; targetLength = 8; }
+            else { targetWidth = currentW; targetLength = 8; }
+          } else if (room.key === "master_bedroom") {
+            targetWidth = currentW;
+            targetLength = 10;
+            targetCount = isGround ? 1 : (area >= 1500 ? 4 : 2);
+          } else if (room.key === "bedroom") {
+            targetWidth = currentW;
+            targetLength = 10;
+            targetCount = 1;
+          } else if (room.key === "attached_bathroom") {
+            const masterCount = targetCounts["master_bedroom"] || 0;
+            targetCount = Math.max(1, masterCount);
+            targetWidth = 5;
+            targetLength = 7;
+          } else if (room.key === "common_bathroom") {
+            targetWidth = 4.5;
+            targetLength = 7;
+            targetCount = 1;
+          }
+
+          desiredDims[room.key] = {
+            w: targetWidth,
+            h: targetLength,
+            minW: room.minWidth,
+            minH: room.minLength,
+            count: targetCount,
+          };
+        });
+
+        // ============================================================
+        // PROPORTIONAL LENGTH ADJUSTMENT
+        // ------------------------------------------------------------
+        // Only stack-rooms (those that consume vertical length) are
+        // considered. Side rooms (attached bathroom, common bathroom,
+        // duct) don't consume the main vertical stack, so exclude them.
+        // ============================================================
+        const stackOrder = [
+          "parking",
+          "living_room_with_stair",
+          "living_room",
+          "kitchen",
+          "kitchen_cum_dining",
+          "master_bedroom",
+          "bedroom",
+        ];
+
+        const stackRooms = stackOrder
+          .filter(k => desiredDims[k])
+          .map(k => ({
+            key: k,
+            length: desiredDims[k].h,
+            minLength: desiredDims[k].minH,
+          }));
+
+        const adjustedLengths = adjustRoomLengthsProportionally(currentL, stackRooms);
+
+        // Apply adjusted lengths back to desiredDims
+        Object.entries(adjustedLengths).forEach(([key, len]) => {
+          if (desiredDims[key]) {
+            desiredDims[key].h = len;
+          }
+        });
+
+        // ============================================================
+        // COMMIT: Toggle & update rooms
+        // ============================================================
+        ROOM_CATALOG.forEach((room) => {
+          const shouldSelect = targetCounts[room.key] > 0;
           const currentRoomInfo = floorRoomState[room.key] || {};
           const isCurrentlySelected = !!currentRoomInfo.selected;
 
-          // Sirf tab toggle ya update karein jab state mein actual change ki zaroorat ho
           if (shouldSelect !== isCurrentlySelected) {
             toggleRoom(floor, room.key);
           }
 
-          if (shouldSelect) {
-            let targetWidth = Number(currentRoomInfo.width || room.defaultWidth);
-            let targetLength = Number(currentRoomInfo.length || room.defaultLength);
+          if (shouldSelect && desiredDims[room.key]) {
+            const { w, h, count } = desiredDims[room.key];
+            const expectedArea = Number((w * h).toFixed(2));
 
-            if (currentW <= 22 && (room.key === "master_bedroom" || room.key === "living_room" || room.key === "living_room_with_stair")) {
-              targetWidth = currentW;
-            } else if (room.key === "living_room_with_stair" || room.key === "master_bedroom") {
-              targetWidth = currentW;
-            } else if ((room.key === "kitchen" || room.key === "kitchen_cum_dining") && currentW <= 22) {
-              const passage = currentW <= 10 ? 3.5 : 4.0;
-              targetWidth = Math.max(room.minWidth, currentW - passage);
-            }
-
-            const expectedArea = Number((targetWidth * targetLength).toFixed(2));
-
-            if (room.key === "master_bedroom" && !floor.toUpperCase().includes("GROUND")) {
-              if (currentRoomInfo.count !== 2 || currentRoomInfo.width !== targetWidth) {
-                updateRoom(floor, room.key, {
-                  count: 2,
-                  width: targetWidth,
-                  length: targetLength,
-                  areaPerRoom: expectedArea
-                });
-              }
-            } else if (currentRoomInfo.width !== targetWidth || currentRoomInfo.areaPerRoom !== expectedArea) {
+            if (
+              currentRoomInfo.width !== w ||
+              currentRoomInfo.length !== h ||
+              currentRoomInfo.count !== count ||
+              currentRoomInfo.areaPerRoom !== expectedArea
+            ) {
               updateRoom(floor, room.key, {
-                width: targetWidth,
-                areaPerRoom: expectedArea
+                count,
+                width: w,
+                length: h,
+                areaPerRoom: expectedArea,
               });
             }
           }
         });
       });
     }
-  }, [planningMode, JSON.stringify(selectedFloors), plotLength, plotWidth, JSON.stringify(floorData)]);
+  }, [planningMode, plotLength, plotWidth]);
 
   const plotFrontWidth = Number(plotLength) > 0 ? Number(plotLength) : 20;
   const plotDepth = Number(plotWidth) > 0 ? Number(plotWidth) : 50;
@@ -418,9 +566,7 @@ export default function FloorManagerSection({
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-1.5 bg-slate-800 px-3 py-1 rounded border border-amber-500/50">
             <span className="text-[10px] text-amber-400 font-bold">⚡ SMART AUTO-MATCH:</span>
-            <span className="text-[11px] text-amber-300 font-black">
-              {currentNearest.label}
-            </span>
+            <span className="text-[11px] text-amber-300 font-black">{currentNearest.label}</span>
           </div>
 
           <div className="flex items-center gap-2 bg-slate-800 px-3 py-1 rounded border border-slate-700">
@@ -500,13 +646,7 @@ export default function FloorManagerSection({
               if (isGround) {
                 let w = rawW > 0 ? rawW : plotFrontWidth;
                 let l = rawL > 0 ? rawL : plotDepth;
-
-                if (w > plotFrontWidth && l <= plotFrontWidth) {
-                  const temp = w;
-                  w = l;
-                  l = temp;
-                }
-
+                if (w > plotFrontWidth && l <= plotFrontWidth) { const t = w; w = l; l = t; }
                 currentWidth = w > plotFrontWidth ? plotFrontWidth : w;
                 currentLength = l > plotDepth ? plotDepth : l;
               } else if (isTower) {
@@ -558,10 +698,7 @@ export default function FloorManagerSection({
                           const w = Number(e.target.value) || 0;
                           const l = currentLength;
                           const newArea = Number((w * l).toFixed(2));
-
-                          if (updateFloorDimensions) {
-                            updateFloorDimensions(floor, w, l);
-                          }
+                          if (updateFloorDimensions) updateFloorDimensions(floor, w, l);
                           updateFloorAreaDirect(floor, newArea);
                         }}
                         placeholder="Width"
@@ -577,10 +714,7 @@ export default function FloorManagerSection({
                           const l = Number(e.target.value) || 0;
                           const w = currentWidth;
                           const newArea = Number((w * l).toFixed(2));
-
-                          if (updateFloorDimensions) {
-                            updateFloorDimensions(floor, w, l);
-                          }
+                          if (updateFloorDimensions) updateFloorDimensions(floor, w, l);
                           updateFloorAreaDirect(floor, newArea);
                         }}
                         placeholder="Length"
@@ -681,22 +815,12 @@ export default function FloorManagerSection({
                                   const val = rawVal === "" ? 0 : Number(rawVal);
                                   const updated: SetbackType = { ...setbacks, [side]: val };
                                   setLocalSetbacks(prev => ({ ...prev, [floor]: updated }));
-
-                                  if (updateFloorSetbacks) {
-                                    updateFloorSetbacks(floor, updated);
-                                  }
-
+                                  if (updateFloorSetbacks) updateFloorSetbacks(floor, updated);
                                   const newLength = Math.max(5, plotDepth - (updated.front + updated.rear));
                                   const newWidth = Math.max(5, plotFrontWidth - (updated.left + updated.right));
-                                  
-                                  if (updateFloorDimensions) {
-                                    updateFloorDimensions(floor, newWidth, newLength);
-                                  }
+                                  if (updateFloorDimensions) updateFloorDimensions(floor, newWidth, newLength);
                                   updateFloorAreaDirect(floor, Number((newWidth * newLength).toFixed(2)));
-
-                                  if (isTower && updateFloorPosition) {
-                                    updateFloorPosition(floor, updated.left, updated.front);
-                                  }
+                                  if (isTower && updateFloorPosition) updateFloorPosition(floor, updated.left, updated.front);
                                 }}
                                 className="border border-black p-1.5 text-center text-xs font-bold bg-white"
                               />
@@ -770,32 +894,16 @@ export default function FloorManagerSection({
                                       const isBlocked = exclusivity.blocked && !current.selected;
 
                                       return (
-                                        <tr
-                                          key={room.key}
-                                          className={
-                                            current.selected
-                                              ? "bg-amber-50"
-                                              : isBlocked
-                                                ? "bg-gray-100 opacity-60"
-                                                : ""
-                                          }
-                                          title={isBlocked ? exclusivity.note : undefined}
-                                        >
+                                        <tr key={room.key} className={current.selected ? "bg-amber-50" : isBlocked ? "bg-gray-100 opacity-60" : ""} title={isBlocked ? exclusivity.note : undefined}>
                                           <td className="border border-black p-1.5 text-center">
                                             <input
                                               type="checkbox"
                                               checked={current.selected}
                                               disabled={isBlocked}
                                               onChange={() => {
-                                                if (isBlocked) {
-                                                  alert(exclusivity.note);
-                                                  return;
-                                                }
+                                                if (isBlocked) { alert(exclusivity.note); return; }
                                                 const nextAllocated = allocatedRoomArea + (current.selected ? -itemTotalArea : itemTotalArea);
-                                                if (!current.selected && nextAllocated > totalFloorBuiltUp) {
-                                                  alert("Cannot select: Exceeds floor built-up area!");
-                                                  return;
-                                                }
+                                                if (!current.selected && nextAllocated > totalFloorBuiltUp) { alert("Cannot select: Exceeds floor built-up area!"); return; }
                                                 toggleRoom(floor, room.key);
                                               }}
                                               className={`w-4 h-4 ${isBlocked ? "cursor-not-allowed" : "cursor-pointer"}`}
@@ -803,11 +911,7 @@ export default function FloorManagerSection({
                                           </td>
                                           <td className="border border-black p-1.5 font-bold text-left pl-2">
                                             {room.label}
-                                            {isBlocked && (
-                                              <span className="block text-[9px] font-normal text-gray-500 normal-case">
-                                                Disabled — {exclusivity.byKey} is already selected
-                                              </span>
-                                            )}
+                                            {isBlocked && <span className="block text-[9px] font-normal text-gray-500 normal-case">Disabled — {exclusivity.byKey} is already selected</span>}
                                           </td>
                                           <td className="border border-black p-1.5 text-center">
                                             <input
@@ -847,9 +951,7 @@ export default function FloorManagerSection({
                                               className="w-14 border border-black p-1 text-center font-bold text-xs bg-white"
                                             />
                                           </td>
-                                          <td className="border border-black p-1.5 text-center font-bold">
-                                            {rArea.toFixed(0)}
-                                          </td>
+                                          <td className="border border-black p-1.5 text-center font-bold">{rArea.toFixed(0)}</td>
                                         </tr>
                                       );
                                     })}
@@ -875,9 +977,7 @@ export default function FloorManagerSection({
                                   <tbody>
                                     {ROOM_CATALOG.filter(room => floorRoomMap[room.key]?.selected).length === 0 ? (
                                       <tr>
-                                        <td colSpan={4} className="border border-black p-8 text-center text-gray-500 font-bold">
-                                          No items selected yet.
-                                        </td>
+                                        <td colSpan={4} className="border border-black p-8 text-center text-gray-500 font-bold">No items selected yet.</td>
                                       </tr>
                                     ) : (
                                       ROOM_CATALOG.filter(room => floorRoomMap[room.key]?.selected).map((room) => {
@@ -885,7 +985,6 @@ export default function FloorManagerSection({
                                         const rW = Number(current.width || room.defaultWidth);
                                         const rL = Number(current.length || room.defaultLength);
                                         const total = Number(current.count || 1) * Number((rW * rL).toFixed(2));
-
                                         return (
                                           <tr key={`sel-${room.key}`} className="bg-green-50">
                                             <td className="border border-black p-1.5 font-bold text-left pl-2">{room.label}</td>

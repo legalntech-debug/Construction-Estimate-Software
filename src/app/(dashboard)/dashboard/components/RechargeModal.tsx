@@ -32,6 +32,9 @@ export default function RechargeModal({
   const [adminRemark, setAdminRemark] = useState<string | null>(null);
   const [userRecharges, setUserRecharges] = useState<any[]>([]);
 
+  // Minimum recharge amount
+  const MIN_RECHARGE = 100;
+
   // Fetch user's recharge history and latest status when modal opens
   useEffect(() => {
     if (isOpen && userData) {
@@ -78,12 +81,25 @@ export default function RechargeModal({
   const transactionNote = 'Wallet Recharge';
   const rawUpiUrl = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(payeeName)}&am=${amount || '0'}&cu=INR&tn=${encodeURIComponent(transactionNote)}`;
 
-  const handleUpiPayment = (appScheme?: string) => {
+  // Helper: Validate minimum recharge amount
+  const validateMinimumAmount = (): boolean => {
     const numAmount = Number(amount);
     if (!amount || isNaN(numAmount) || numAmount <= 0) {
       alert('Please enter a valid amount greater than 0');
-      return;
+      return false;
     }
+    if (numAmount < MIN_RECHARGE) {
+      alert(`⚠️ Minimum recharge amount is ₹${MIN_RECHARGE}. Please enter ₹${MIN_RECHARGE} or more.`);
+      return false;
+    }
+    return true;
+  };
+
+  const handleUpiPayment = (appScheme?: string) => {
+    // VALIDATION: Minimum amount check
+    if (!validateMinimumAmount()) return;
+
+    const numAmount = Number(amount);
 
     let targetLink = rawUpiUrl;
 
@@ -115,11 +131,10 @@ export default function RechargeModal({
   };
 
   const handleSubmit = async () => {
+    // VALIDATION: Minimum amount check
+    if (!validateMinimumAmount()) return;
+
     const numAmount = Number(amount);
-    if (!amount || isNaN(numAmount) || numAmount <= 0) {
-      alert('Please enter a valid amount greater than 0');
-      return;
-    }
 
     const cleanUtr = utr.trim();
     if (cleanUtr.length < 12) {
@@ -292,7 +307,7 @@ export default function RechargeModal({
             {/* Recharge Amount Input */}
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                RECHARGE AMOUNT (₹)
+                RECHARGE AMOUNT (₹) <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-2.5 font-bold text-slate-500">₹</span>
@@ -310,8 +325,25 @@ export default function RechargeModal({
                     setAmount(val);
                   }}
                   placeholder="e.g. 500"
-                  className="w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 text-base outline-none"
+                  className={`w-full pl-8 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 text-base outline-none ${
+                    amount && Number(amount) > 0 && Number(amount) < MIN_RECHARGE 
+                      ? 'border-rose-400 bg-rose-50' 
+                      : 'border-slate-300'
+                  }`}
                 />
+              </div>
+
+              {/* Minimum Amount Hint / Warning */}
+              <div className="mt-1.5">
+                {amount && Number(amount) > 0 && Number(amount) < MIN_RECHARGE ? (
+                  <p className="text-[11px] font-bold text-rose-600 flex items-center gap-1">
+                    ⚠️ Minimum recharge amount is ₹{MIN_RECHARGE}. Please enter ₹{MIN_RECHARGE} or more.
+                  </p>
+                ) : (
+                  <p className="text-[10px] font-medium text-slate-500">
+                    Minimum recharge amount: <span className="font-bold text-slate-700">₹{MIN_RECHARGE}</span>
+                  </p>
+                )}
               </div>
             </div>
 
@@ -319,7 +351,12 @@ export default function RechargeModal({
             <button
               type="button"
               onClick={() => handleUpiPayment()}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow transition text-sm flex items-center justify-center gap-2"
+              disabled={amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE}
+              className={`w-full font-bold py-3 rounded-xl shadow transition text-sm flex items-center justify-center gap-2 ${
+                amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE
+                  ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
             >
               <span>⚡</span> PAY & RECHARGE (Select UPI App)
             </button>
@@ -333,7 +370,12 @@ export default function RechargeModal({
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('gpay')}
-                  className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 p-2.5 rounded-xl text-xs font-bold text-slate-700 flex flex-col items-center gap-1.5 transition shadow-sm"
+                  disabled={amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE}
+                  className={`border p-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-1.5 transition shadow-sm ${
+                    amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE
+                      ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
                 >
                   <svg className="w-7 h-7" viewBox="0 0 48 48" fill="none">
                     <path d="M43.611 20.083H42V20H24V28H35.303C33.654 32.657 29.223 36 24 36C17.373 36 12 30.627 12 24C12 17.373 17.373 12 24 12C27.059 12 29.842 13.154 31.961 15.039L37.618 9.382C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24C4 35.045 12.955 44 24 44C35.045 44 44 35.045 44 24C44 22.659 43.862 21.35 43.611 20.083Z" fill="#FFC107"/>
@@ -348,7 +390,12 @@ export default function RechargeModal({
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('phonepe')}
-                  className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 p-2.5 rounded-xl text-xs font-bold text-slate-700 flex flex-col items-center gap-1.5 transition shadow-sm"
+                  disabled={amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE}
+                  className={`border p-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-1.5 transition shadow-sm ${
+                    amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE
+                      ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
                 >
                   <svg className="w-7 h-7" viewBox="0 0 48 48" fill="none">
                     <rect width="48" height="48" rx="12" fill="#5F259F"/>
@@ -361,7 +408,12 @@ export default function RechargeModal({
                 <button
                   type="button"
                   onClick={() => handleUpiPayment('paytm')}
-                  className="border border-slate-200 hover:border-slate-300 hover:bg-slate-50 p-2.5 rounded-xl text-xs font-bold text-slate-700 flex flex-col items-center gap-1.5 transition shadow-sm"
+                  disabled={amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE}
+                  className={`border p-2.5 rounded-xl text-xs font-bold flex flex-col items-center gap-1.5 transition shadow-sm ${
+                    amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE
+                      ? 'border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed'
+                      : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+                  }`}
                 >
                   <svg className="w-7 h-7" viewBox="0 0 48 48" fill="none">
                     <rect width="48" height="48" rx="12" fill="#002E6E"/>
@@ -404,6 +456,12 @@ export default function RechargeModal({
                 disabled
                 className="w-full p-2.5 bg-slate-100 border border-slate-200 rounded-lg font-bold text-slate-700 cursor-not-allowed text-sm"
               />
+              {/* Minimum Amount Warning in Screen 2 */}
+              {amount && Number(amount) > 0 && Number(amount) < MIN_RECHARGE && (
+                <p className="text-[11px] font-bold text-rose-600 mt-1.5 flex items-center gap-1">
+                  ⚠️ Minimum recharge amount is ₹{MIN_RECHARGE}. Please go back and enter ₹{MIN_RECHARGE} or more.
+                </p>
+              )}
             </div>
 
             <div>
@@ -432,8 +490,12 @@ export default function RechargeModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={loading}
-                className="w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-xs shadow transition disabled:opacity-50 uppercase"
+                disabled={loading || (amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE)}
+                className={`w-1/2 font-bold py-2.5 rounded-lg text-xs shadow transition uppercase ${
+                  loading || (amount !== '' && Number(amount) > 0 && Number(amount) < MIN_RECHARGE)
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                }`}
               >
                 {loading ? 'Submitting...' : 'SUBMIT REQUEST'}
               </button>

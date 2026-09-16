@@ -30,6 +30,7 @@ interface Transaction {
   id: string;
   created_at: string;
   ref_no: string;
+  utr_no?: string;
   customer_name: string;
   case_type: string;
   payment_mode: string;
@@ -391,6 +392,7 @@ export default function WalletLedgerPage() {
             id: r.id,
             created_at: r.created_at || r.updated_at,
             ref_no: r.ref_no || 'RECHARGE-' + r.id.slice(0, 6),
+            utr_no: r.utr_no,
             customer_name: r.customer_name || currentTarget?.full_name || 'Self Recharge',
             case_type: 'Wallet Topup',
             payment_mode: r.payment_mode || 'Online Gateway',
@@ -607,13 +609,30 @@ export default function WalletLedgerPage() {
     setShowRefundModal(true);
   };
 
+  // ✅ UPDATED FILTER LOGIC: Null-safe & Trimmed
   const filteredTransactions = transactions.filter(tx => {
-    if (filterRef && !tx.ref_no.toLowerCase().includes(filterRef.toLowerCase())) return false;
-    if (filterCustomer && !tx.customer_name.toLowerCase().includes(filterCustomer.toLowerCase())) return false;
-    if (filterCaseType && !tx.case_type.toLowerCase().includes(filterCaseType.toLowerCase())) return false;
-    if (filterPaymentMode && !tx.payment_mode.toLowerCase().includes(filterPaymentMode.toLowerCase())) return false;
-    if (filterCredit && tx.type === 'CREDIT' && !tx.amount.toString().includes(filterCredit)) return false;
-    if (filterCredit && tx.type !== 'CREDIT') return false;
+    const qRef = filterRef.trim().toLowerCase();
+    const qCustomer = filterCustomer.trim().toLowerCase();
+    const qCaseType = filterCaseType.trim().toLowerCase();
+    const qPaymentMode = filterPaymentMode.trim().toLowerCase();
+    const qCredit = filterCredit.trim();
+
+    const txRef = (tx.ref_no || '').toLowerCase();
+    const txCustomer = (tx.customer_name || '').toLowerCase();
+    const txCaseType = (tx.case_type || '').toLowerCase();
+    const txPaymentMode = (tx.payment_mode || '').toLowerCase();
+    const txAmount = tx.amount != null ? String(tx.amount) : '';
+
+    if (qRef && !txRef.includes(qRef)) return false;
+    if (qCustomer && !txCustomer.includes(qCustomer)) return false;
+    if (qCaseType && !txCaseType.includes(qCaseType)) return false;
+    if (qPaymentMode && !txPaymentMode.includes(qPaymentMode)) return false;
+
+    if (qCredit) {
+      if (tx.type !== 'CREDIT') return false;
+      if (!txAmount.includes(qCredit)) return false;
+    }
+
     return true;
   });
 
@@ -1033,32 +1052,67 @@ export default function WalletLedgerPage() {
                     <th className="p-3 w-16">Sr.</th>
                     <th className="p-2">
                       <span className="print:hidden">
-                        <input type="text" placeholder="Filter Ref..." value={filterRef} onChange={(e) => setFilterRef(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" />
+                        <input 
+                          type="text" 
+                          placeholder="Filter Ref..." 
+                          value={filterRef} 
+                          onChange={(e) => setFilterRef(e.target.value)} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" 
+                        />
                       </span>
                       <span className="hidden print:inline">Ref No.</span>
                     </th>
                     <th className="p-3 w-28">Date</th>
                     <th className="p-2">
                       <span className="print:hidden">
-                        <input type="text" placeholder="Filter Customer..." value={filterCustomer} onChange={(e) => setFilterCustomer(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" />
+                        <input 
+                          type="text" 
+                          placeholder="Filter Customer..." 
+                          value={filterCustomer} 
+                          onChange={(e) => setFilterCustomer(e.target.value)} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" 
+                        />
                       </span>
                       <span className="hidden print:inline">Customer Name</span>
                     </th>
                     <th className="p-2">
                       <span className="print:hidden">
-                        <input type="text" placeholder="Filter Case..." value={filterCaseType} onChange={(e) => setFilterCaseType(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" />
+                        <input 
+                          type="text" 
+                          placeholder="Filter Case..." 
+                          value={filterCaseType} 
+                          onChange={(e) => setFilterCaseType(e.target.value)} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" 
+                        />
                       </span>
                       <span className="hidden print:inline">Case Type</span>
                     </th>
                     <th className="p-2">
                       <span className="print:hidden">
-                        <input type="text" placeholder="Filter Mode..." value={filterPaymentMode} onChange={(e) => setFilterPaymentMode(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" />
+                        <input 
+                          type="text" 
+                          placeholder="Filter Mode..." 
+                          value={filterPaymentMode} 
+                          onChange={(e) => setFilterPaymentMode(e.target.value)} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white" 
+                        />
                       </span>
                       <span className="hidden print:inline">Payment Mode</span>
                     </th>
                     <th className="p-2 text-right w-32">
                       <span className="print:hidden">
-                        <input type="text" placeholder="Filter Credit..." value={filterCredit} onChange={(e) => setFilterCredit(e.target.value)} className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white text-right" />
+                        <input 
+                          type="text" 
+                          placeholder="Filter Credit..." 
+                          value={filterCredit} 
+                          onChange={(e) => setFilterCredit(e.target.value)} 
+                          onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault(); }}
+                          className="w-full px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded text-white text-right" 
+                        />
                       </span>
                       <span className="hidden print:inline">Credit (+)</span>
                     </th>
@@ -1070,7 +1124,16 @@ export default function WalletLedgerPage() {
                   {filteredTransactions.map((tx, index) => (
                     <tr key={tx.id || index} className="hover:bg-slate-50 transition">
                       <td className="p-3 font-bold text-slate-500">{index + 1}</td>
-                      <td className="p-3 font-mono text-xs text-blue-600 font-bold">{tx.ref_no || 'N/A'}</td>
+                      <td className="p-3 text-xs">
+                        <div className="font-mono text-blue-600 font-bold">
+                          {tx.ref_no || 'N/A'}
+                        </div>
+                        {tx.utr_no && (
+                          <div className="text-[9px] text-slate-500 font-sans mt-0.5">
+                            UTR: {tx.utr_no}
+                          </div>
+                        )}
+                      </td>
                       <td className="p-3 text-slate-600 whitespace-nowrap">{new Date(tx.created_at).toLocaleDateString()}</td>
                       <td className="p-3 font-medium text-slate-900 uppercase">{tx.customer_name || 'N/A'}</td>
                       <td className="p-3 text-slate-700 uppercase">{tx.case_type || 'N/A'}</td>

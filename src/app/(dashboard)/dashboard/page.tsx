@@ -514,27 +514,72 @@ export default function DashboardPage() {
                 >
                   <span>⚙️ Edit Profile</span>
                 </button>
+
+                {/* --- CORRECTED DEED & ESTIMATE ROUTES --- */}
                 <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/drafting'); }}
-                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                  onClick={() => { 
+                    if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
+                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      router.push('/wallet-ledger');
+                    } else {
+                      router.push('/deed-drafting'); 
+                    }
+                    setShowMenuDrawer(false); 
+                  }}
+                  className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
+                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
-                  <span>📐 Map Drafting</span>
+                  <span>📝 Deed Drafting</span>
                 </button>
+
                 <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/plan'); }}
-                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                  onClick={() => { 
+                    if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
+                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      router.push('/wallet-ledger');
+                    } else {
+                      router.push('/construction-plan'); 
+                    }
+                    setShowMenuDrawer(false); 
+                  }}
+                  className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
+                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
-                  <span>💳 Plan & Subscription</span>
+                  <span>🏗️ Construction Plan / Map</span>
                 </button>
+
                 <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/estimate-type'); }}
-                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                  onClick={() => { 
+                    if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
+                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      router.push('/wallet-ledger');
+                    } else {
+                      router.push('/estimate'); 
+                    }
+                    setShowMenuDrawer(false); 
+                  }}
+                  className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
+                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
-                  <span>📊 Estimate Type</span>
+                  <span>📊 Estimate (New / Renovation)</span>
                 </button>
+
                 <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/document-management'); }}
-                  className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
+                  onClick={() => { 
+                    if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
+                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      router.push('/wallet-ledger');
+                    } else {
+                      router.push('/document-management'); 
+                    }
+                    setShowMenuDrawer(false); 
+                  }}
+                  className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
+                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                  }`}
                 >
                   <span>📁 Document Management</span>
                 </button>

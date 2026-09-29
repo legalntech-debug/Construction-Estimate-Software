@@ -11,6 +11,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { email, password, profileData } = body;
 
+    // ✅ 1. Validation
     if (!email || !password) {
       return NextResponse.json(
         { error: 'EMAIL AND PASSWORD ARE REQUIRED.' },
@@ -18,7 +19,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1. Create User using Supabase Service Role (Session disturb nahi hoga)
+    if (!profileData?.full_name || !profileData?.mobile) {
+      return NextResponse.json(
+        { error: 'FULL NAME AND MOBILE ARE REQUIRED.' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ 2. Create Auth User (session disturb nahi hoga)
     const { data: authUser, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: email.toLowerCase(),
       password: password,
@@ -36,21 +44,37 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Insert Profile Data into 'profiles' Table
+    // ✅ 3. Insert Profile — explicit status & approval_status set karo
     const { error: profileError } = await supabaseAdmin.from('profiles').insert([
       {
         id: authUser.user.id,
         email: email.toLowerCase(),
         ...profileData,
+        // Ye 2 line explicitly set karo taki frontend ke bheje values consistent rahen
+        status: profileData?.status || 'active',
+        approval_status: profileData?.approval_status || 'APPROVED',
       },
     ]);
 
     if (profileError) {
-      return NextResponse.json({ error: profileError.message }, { status: 400 });
+      // ✅ 4. ROLLBACK: Agar profile fail ho, to auth user delete karo
+      await supabaseAdmin.auth.admin.deleteUser(authUser.user.id);
+
+      return NextResponse.json(
+        { error: profileError.message },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ success: true, user: authUser.user });
+    // ✅ 5. Success response
+    return NextResponse.json({
+      success: true,
+      user: authUser.user,
+      message: 'User created successfully.',
+    });
+
   } catch (err: any) {
+    console.error('Create user API error:', err);
     return NextResponse.json(
       { error: err.message || 'INTERNAL SERVER ERROR' },
       { status: 500 }

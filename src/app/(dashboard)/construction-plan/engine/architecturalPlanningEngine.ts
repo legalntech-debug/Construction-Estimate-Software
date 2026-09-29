@@ -10,7 +10,11 @@ import { toFiniteNumber, cleanFloorName } from './planningInput';
 import { getRoadOrientation } from './roadOrientation';
 import { validateConstructionPlan } from './validationEngine';
 import { assessVastuForRoom } from './vastuRules';
-import { generateArchitecturalFloorPlan, roomProgramForFloor } from './roomPlanner';
+import {
+  generateArchitecturalFloorPlan,
+  roomProgramForFloor,
+  extractStairPositionFromResult,
+} from './roomPlanner';
 import { scorePlan } from './planningScore';
 
 export interface DynamicFloorRequest {
@@ -25,6 +29,9 @@ export interface DynamicFloorRequest {
   hasParking?: boolean;
   planningArea?: number;
   parkingMode?: ParkingMode;
+  groundFloorProgram?: string[];
+  groundStairPosition?: { x: number; y: number; w?: number; h?: number };
+  groundStairRelativeOffset?: { dx: number; dy: number };
 }
 
 export interface GeneratedFloorPlan {
@@ -71,11 +78,21 @@ export interface GeneratedConstructionPlan {
 }
 
 function num(v: any, fallback = 0): number { const x = Number(v); return Number.isFinite(x) ? x : fallback; }
+
+// ============================================================================
+// ✅ FIX 1: canonical() — check LIVING + STAIR combo FIRST (matches roomPlanner)
+// ============================================================================
 function canonical(raw: string): string {
   const s = String(raw || '').toUpperCase().trim();
+
+  if ((s.includes('LIVING') || s.includes('DRAWING') || s.includes('HALL')) && s.includes('STAIR')) {
+    return 'LIVING ROOM + STAIR';
+  }
+
   if (s.includes('MASTER')) return 'MASTER BEDROOM';
   if (s.includes('BEDROOM') || s === 'BED') return 'BEDROOM';
   if (s.includes('LIVING') || s.includes('DRAWING') || s.includes('HALL')) return 'LIVING ROOM';
+  if (s.includes('KITCHEN') && (s.includes('DINING') || s.includes('CUM'))) return 'KITCHEN CUM DINING';
   if (s.includes('KITCHEN')) return 'KITCHEN';
   if (s.includes('DINING')) return 'DINING';
   if (s.includes('ATTACHED') && (s.includes('TOILET') || s.includes('BATH'))) return 'ATTACHED TOILET';
@@ -91,6 +108,7 @@ function canonical(raw: string): string {
   if (s.includes('STORE')) return 'STORE';
   return s || 'ROOM';
 }
+
 function typeOf(r: any): string {
   const s = `${r.type || ''} ${r.name || ''}`.toLowerCase();
   if (s.includes('parking')) return 'parking';
@@ -106,12 +124,16 @@ function typeOf(r: any): string {
   if (s.includes('balcony')) return 'balcony';
   return 'room';
 }
+
 function touches(a: any, b: any): boolean {
   const ax=num(a.x), ay=num(a.y), aw=num(a.w), ah=num(a.h), bx=num(b.x), by=num(b.y), bw=num(b.w), bh=num(b.h);
   const xo=Math.min(ax+aw,bx+bw)-Math.max(ax,bx), yo=Math.min(ay+ah,by+bh)-Math.max(ay,by);
   return ((Math.abs(ay+ah-by)<.08 || Math.abs(by+bh-ay)<.08) && xo>.5) || ((Math.abs(ax+aw-bx)<.08 || Math.abs(bx+bw-ax)<.08) && yo>.5);
 }
 
+// ============================================================================
+// ✅ FIX 2: normalizeSelectedRooms — preserve RAW key (not canonical)
+// ============================================================================
 function normalizeSelectedRooms(selectedRooms: any): any {
   if (!selectedRooms) return undefined;
   if (Array.isArray(selectedRooms)) return selectedRooms;
@@ -120,32 +142,65 @@ function normalizeSelectedRooms(selectedRooms: any): any {
       if (v && typeof v === 'object') return v.selected !== false;
       return Boolean(v);
     }).map(([k, v]: any) => ({
-        key: canonical(k),
+        key: k,
+        canonicalKey: canonical(k),
         count: v && typeof v === 'object' ? (v.count ?? 1) : 1,
         areaPerRoom: v?.areaMode === 'MANUAL' ? Number(v?.areaPerRoom) : undefined,
-        // FIX: Width/Length ko w/h se bhi map karo, aur agar ek missing ho toh undefined pass karo (upar wala getSpecDim handle kar lega)
         width: v?.width ? Number(v.width) : (v?.w ? Number(v.w) : undefined),
-        length: v?.length ? Number(v.length) : (v?.h ? Number(v.h) : undefined)
+        length: v?.length ? Number(v.length) : (v?.h ? Number(v.h) : undefined),
+        position: v?.position,
+        inheritedX: v?.inheritedX,
+        inheritedY: v?.inheritedY,
+        inheritedFrom: v?.inheritedFrom,
     }));
   }
   return undefined;
 }
 
-function generateTowerPlan(width: number, length: number, floorName: string, floorToFloorHeight = 10) {
+// ============================================================================
+// ✅ FIX #3: generateTowerPlan
+// ============================================================================
+function generateTowerPlan(
+  width: number,
+  length: number,
+  floorName: string,
+  floorToFloorHeight = 10,
+  groundStairPosition?: { x: number; y: number; w?: number; h?: number },
+) {
   const W = Math.max(1, width), H = Math.max(1, length);
-  const targetStairW = Math.min(6, Math.max(5, W * .55));
-  const targetStairH = Math.min(Math.max(8.5, H * .75), 12);
-  const stairX = Math.max(0, W - targetStairW), stairY = 0;
+
+  let targetStairW = groundStairPosition?.w && groundStairPosition.w > 0
+    ? Number(groundStairPosition.w)
+    : Math.min(6, Math.max(5, W * .55));
+
+  let targetStairH = groundStairPosition?.h && groundStairPosition.h > 0
+    ? Number(groundStairPosition.h)
+    : Math.min(Math.max(8.5, H * .75), 12);
+
+  targetStairW = Math.min(targetStairW, W);
+  targetStairH = Math.min(targetStairH, H);
+
+  let stairX = Math.max(0, W - targetStairW);
+  let stairY = 0;
+
+  if (groundStairPosition &&
+      Number.isFinite(groundStairPosition.x) &&
+      Number.isFinite(groundStairPosition.y)) {
+    stairX = Math.max(0, Math.min(groundStairPosition.x, W - targetStairW));
+    stairY = Math.max(0, Math.min(groundStairPosition.y, H - targetStairH));
+  }
+
   const rooms: FloorRoom[] = [
     { id: 'tower_terrace', name: 'OPEN TERRACE', label: 'OPEN TERRACE', roomType: 'balcony', type: 'balcony', x: 0, y: 0, w: W, h: H, selected: true, count: 1, areaMode: 'AUTO', areaPerRoom: W * H },
     { id: 'tower_stair', name: 'STAIR TOWER / MUMTY', label: 'STAIR TOWER / MUMTY', roomType: 'stairs', type: 'stairs', x: stairX, y: stairY, w: targetStairW, h: targetStairH, selected: true, count: 1, areaMode: 'AUTO', areaPerRoom: targetStairW * targetStairH },
   ];
-  // The terrace is an open zone; remove the stair overlap logically by keeping the
-  // stair as a service/vertical-core item. CAD can emphasize the stair over the terrace.
   const stair = generateArchitecturalFloorPlan({ floorName, width: targetStairW, length: targetStairH, bhk: '1 RK', selectedRooms: ['STAIRCASE'], planningMode: 'AUTO', roadSide: '1 SIDE ROAD (SOUTH)', hasParking: false, floorToFloorHeightFeet: floorToFloorHeight }).staircase;
   return { rooms, stair };
 }
 
+// ============================================================================
+// generateDynamicFloorPlan
+// ============================================================================
 export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootprint: { width: number; length: number; originX: number; originY: number }): GeneratedFloorPlan {
   const floorName = cleanFloorName(request.floorName);
   const requestedW = Math.max(1, num(request.width, maxFootprint.width));
@@ -158,8 +213,25 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   const floorArea = outerW * outerL;
   const isGround = floorName.includes('GROUND');
   const isTower = floorName.includes('TOWER') || floorName.includes('MUMTY');
+
+  const hasParking = request.hasParking === true
+    ? true
+    : request.hasParking === false
+    ? false
+    : isGround;
+
   const orientation = getRoadOrientation(request.roadSide || '1 SIDE ROAD (SOUTH)');
-  const requestedProgram = isTower ? ['OPEN TERRACE', 'STAIRCASE'] : roomProgramForFloor(normalizeSelectedRooms(request.selectedRooms), request.bhk || 'AUTO', num(request.planningArea, clearW * clearL), isGround, String(request.planningMode || 'AUTO'), clearW, clearL);
+  const requestedProgram = isTower
+    ? ['OPEN TERRACE', 'STAIRCASE']
+    : roomProgramForFloor(
+        normalizeSelectedRooms(request.selectedRooms),
+        request.bhk || 'AUTO',
+        num(request.planningArea, clearW * clearL),
+        isGround,
+        String(request.planningMode || 'AUTO'),
+        clearW,
+        clearL
+      );
   const warnings: string[] = [];
   const errors: string[] = [];
 
@@ -168,12 +240,31 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   let furnitureChecks: any[] = [];
 
   if (isTower) {
-    const tower = generateTowerPlan(clearW, clearL, floorName, num(request.planningSettings?.floorToFloorHeightFeet, 10));
+    const tower = generateTowerPlan(
+      clearW,
+      clearL,
+      floorName,
+      num(request.planningSettings?.floorToFloorHeightFeet, 10),
+      request.groundStairPosition,
+    );
     rooms = tower.rooms;
     staircase = tower.stair;
     warnings.push('Tower/Mumty is planned as dynamic open terrace plus vertical stair headroom core; final authority/structural checks remain required.');
   } else {
-    if (typeof console !== 'undefined') console.log('[PLANNING ENGINE] GENERATE FLOOR', { floorName, width: clearW, length: clearL, planningArea: request.planningArea, mode: request.planningMode, selectedRooms: request.selectedRooms });
+    if (typeof console !== 'undefined') {
+      console.log('[PLANNING ENGINE] GENERATE FLOOR', {
+        floorName, width: clearW, length: clearL,
+        planningArea: request.planningArea,
+        mode: request.planningMode,
+        hasParking,
+        isGround,
+        selectedRooms: request.selectedRooms,
+        groundStairPosition: request.groundStairPosition,
+        groundStairRelativeOffset: request.groundStairRelativeOffset,
+        groundFloorProgram: request.groundFloorProgram,
+      });
+    }
+
     const smart = generateArchitecturalFloorPlan({
       floorName,
       width: clearW,
@@ -182,19 +273,41 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       selectedRooms: normalizeSelectedRooms(request.selectedRooms),
       planningMode: request.planningMode || 'AUTO',
       roadSide: request.roadSide,
-      hasParking: request.hasParking !== false,
+      hasParking,
       floorToFloorHeightFeet: num(request.planningSettings?.floorToFloorHeightFeet, 10),
       planningArea: num((request as any).planningArea, clearW * clearL),
       parkingMode: String(request.planningSettings?.parkingMode || request.parkingMode || 'CAR').toUpperCase() as ParkingMode,
+      groundFloorProgram: isGround ? undefined : request.groundFloorProgram,
+      groundStairPosition: isGround ? undefined : request.groundStairPosition,
+      groundStairRelativeOffset: isGround ? undefined : request.groundStairRelativeOffset,
     });
     rooms = smart.rooms;
     warnings.push(...smart.warnings);
     errors.push(...smart.errors);
     staircase = smart.staircase;
     furnitureChecks = smart.furnitureChecks;
-    if (typeof console !== 'undefined') console.log('[PLANNING ENGINE] FLOOR RESULT', { floorName, rooms: smart.rooms.map((r: any) => ({ name: r.name, x: r.x, y: r.y, w: r.w, h: r.h })), errors: smart.errors, warnings: smart.warnings, stair: smart.staircase });
+
+    // ✅ CHANGE #1: DEBUG LOG — roomPlanner output doors check
+    if (typeof console !== 'undefined') {
+      console.log('[ENGINE] 🔍 roomPlanner output doors:', smart.rooms.map((r: any) => ({
+        name: r.name,
+        doors: (r.doors || []).map((d: any) => ({ id: d.id, wall: d.wall, offset: d.offsetFeet, renderSymbol: d.renderSymbol }))
+      })));
+    }
+
+    if (typeof console !== 'undefined') {
+      console.log('[PLANNING ENGINE] FLOOR RESULT', {
+        floorName,
+        roomCount: smart.rooms.length,
+        rooms: smart.rooms.map((r: any) => ({ name: r.name, x: r.x, y: r.y, w: r.w, h: r.h, subZoneOf: r.subZoneOf })),
+        errors: smart.errors,
+        warnings: smart.warnings,
+        stair: smart.staircase,
+      });
+    }
   }
 
+  // ✅ CHANGE #2: doors aur windows explicitly preserve karo
   rooms = rooms.map((r, i) => ({
     ...r,
     id: r.id || `room_${i}`,
@@ -203,12 +316,23 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     w: Number(Math.max(.1, Math.min(num(r.w), clearW - num(r.x))).toFixed(3)),
     h: Number(Math.max(.1, Math.min(num(r.h), clearL - num(r.y))).toFixed(3)),
     areaPerRoom: Number((Math.max(.1, num(r.w)) * Math.max(.1, num(r.h))).toFixed(2)),
+    // ✅ Explicit preserve — spread ke baad bhi
+    doors: Array.isArray(r.doors) ? [...r.doors] : [],
+    windows: Array.isArray(r.windows) ? [...r.windows] : [],
   }));
 
-  // Remove duplicate terrace room if a separate tower core exists in its footprint. This is a visual overlay.
   if (isTower) rooms = rooms.filter((r, i) => i === 0 || typeOf(r) === 'stairs');
 
   const opened = generateFloorOpenings(rooms as any, orientation.mainRoad, clearW, clearL) as any[];
+
+  // ✅ CHANGE #3: DEBUG LOG — openingPlanner output check
+  if (typeof console !== 'undefined') {
+    console.log('[ENGINE] 🔍 after openingPlanner doors:', opened.map((r: any) => ({
+      name: r.name,
+      doors: (r.doors || []).map((d: any) => ({ id: d.id, wall: d.wall, offset: d.offsetFeet, renderSymbol: d.renderSymbol }))
+    })));
+  }
+
   const openingWarnings: string[] = [];
   const uniqueOpenings = new Set<string>();
   for (const r of opened) {
@@ -237,25 +361,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
 
   const walls = generateWallsFromRooms(blueprintRooms, clearW, clearL);
   const columns = generateStructuralColumns(blueprintRooms);
-  if (typeof console !== 'undefined') {
-    const gateAudit = (opened as any[]).flatMap((r: any) => (r.doors || []).filter((d: any) => d.doorType === 'MAIN').map((d: any) => ({
-      room: r.name, id: d.id, wall: d.wall, offsetFeet: d.offsetFeet, widthFeet: d.widthFeet,
-      external: ['TOP','BOTTOM','LEFT','RIGHT'].some(w => {
-        if (w === 'TOP') return Math.abs(r.y) < 0.2 && d.wall === w;
-        if (w === 'BOTTOM') return Math.abs(r.y + r.h - clearL) < 0.2 && d.wall === w;
-        if (w === 'LEFT') return Math.abs(r.x) < 0.2 && d.wall === w;
-        return Math.abs(r.x + r.w - clearW) < 0.2 && d.wall === w;
-      }),
-      cutsExternalWall: Boolean(d.cutsExternalWall),
-    })));
-    console.groupCollapsed(`[PLAN PIPELINE DIAGNOSTIC] ${floorName}`);
-    console.log('01 ROOM PROGRAM → roomPlanner.ts', requestedProgram);
-    console.log('02 FINAL ROOMS → roomPlanner.ts', opened.map((r: any) => ({ name:r.name, x:r.x, y:r.y, w:r.w, h:r.h, subZoneOf:r.subZoneOf || null })));
-    console.log('03 OPENINGS → openingPlanner.ts', gateAudit);
-    console.log('04 WALLS → cadGeometry.ts', { total:walls.length, internal:walls.filter((w:any)=>!w.isOuter).length, external:walls.filter((w:any)=>w.isOuter).length });
-    console.log('05 RENDER SOURCE → components/CadFloorPlansView.tsx', 'floorInfo.rooms is authoritative; input floorRooms is fallback only');
-    console.groupEnd();
-  }
+
   const planScore = scorePlan(opened as FloorRoom[]);
 
   const provisionalFloorData: Record<string, any> = {
@@ -334,6 +440,9 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   };
 }
 
+// ============================================================================
+// generateCompleteConstructionPlan
+// ============================================================================
 export function generateCompleteConstructionPlan(payload: any): GeneratedConstructionPlan {
   const raw = payload?.plotDimensions || payload?.dimensions || {};
   const A = Math.max(1, num(raw.A ?? raw.width ?? raw.a, 30));
@@ -353,13 +462,74 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const settings = payload?.floorSettings || payload?.floor_settings || {};
   const orientation = getRoadOrientation(payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)');
 
+  let groundStairPos: { x: number; y: number; w?: number; h?: number } | null = payload?.groundStairPosition || null;
+  let groundStairOffset: { dx: number; dy: number } | null = payload?.groundStairRelativeOffset || null;
+  let groundFloorProgram: string[] = payload?.groundFloorProgram || [];
+
+  const groundKey = selectedFloors.find(f => f.includes('GROUND'));
+
+  if (groundKey && (!groundStairPos || !groundStairOffset || groundFloorProgram.length === 0)) {
+    const gInput = floorDataInput[groundKey] || floorDataInput[groundKey.toUpperCase()] || {};
+    const gW = Math.max(1, num(gInput.width, maxFootprint.width));
+    const gL = Math.max(1, num(gInput.length, maxFootprint.length));
+
+    const wall = 9 / 12;
+    const gClearW = Math.max(1, Math.min(gW, maxFootprint.width) - 2 * wall);
+    const gClearL = Math.max(1, Math.min(gL, maxFootprint.length) - 2 * wall);
+
+    try {
+      const gfResult = generateArchitecturalFloorPlan({
+        floorName: groundKey,
+        width: gClearW,
+        length: gClearL,
+        bhk: floorBhk[groundKey] || 'AUTO',
+        selectedRooms: normalizeSelectedRooms(
+          floorRoomsInput[groundKey] ?? floorRoomsInput[groundKey.toUpperCase()]
+        ),
+        planningMode: payload?.planningMode || 'AUTO',
+        roadSide: payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)',
+        hasParking: true,
+        planningArea: Math.max(1, num(gInput.area, gClearW * gClearL)),
+        parkingMode: String(settings[groundKey]?.parkingMode || 'CAR').toUpperCase() as ParkingMode,
+      });
+
+      const stairInfo = extractStairPositionFromResult(gfResult);
+
+      if (stairInfo) {
+        groundStairPos = { x: stairInfo.x, y: stairInfo.y, w: stairInfo.w, h: stairInfo.h };
+        groundStairOffset = stairInfo.relativeOffset;
+      }
+      groundFloorProgram = gfResult.rooms.map((r: any) =>
+        String(r.name || '').toLowerCase().replace(/\s+/g, '_')
+      );
+
+      if (typeof console !== 'undefined') {
+        console.log('[PLANNING ENGINE] Ground floor stair extracted:', {
+          stairInfo,
+          groundFloorProgram,
+        });
+      }
+    } catch (err) {
+      console.error('[PLANNING ENGINE] Ground floor stair extraction failed:', err);
+    }
+  } else if (typeof console !== 'undefined') {
+    console.log('[PLANNING ENGINE] Using stair info from parent:', {
+      groundStairPos,
+      groundStairOffset,
+      groundFloorProgram,
+    });
+  }
+
   const floors: Record<string, GeneratedFloorPlan> = {};
   const generatedFloorData: Record<string, any> = {};
   const generatedFloorRooms: Record<string, FloorRoom[]> = {};
+
   for (const floorName of selectedFloors) {
     const input = floorDataInput[floorName] || floorDataInput[floorName.toUpperCase()] || {};
     const width = Math.max(1, num(input.width, maxFootprint.width));
     const length = Math.max(1, num(input.length, maxFootprint.length));
+    const isGround = floorName.includes('GROUND');
+
     const plan = generateDynamicFloorPlan({
       floorName, width, length,
       bhk: floorBhk[floorName] || 'AUTO',
@@ -367,11 +537,36 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       planningMode: payload?.planningMode || 'AUTO',
       planningSettings: settings[floorName] || {},
       roadSide: payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)',
-      hasParking: floorName.includes('GROUND'),
+      hasParking: isGround,
       planningArea: Math.max(1, num(input.area, width * length)),
+      groundFloorProgram: isGround ? undefined : groundFloorProgram,
+      groundStairPosition: isGround ? undefined : (groundStairPos ? { x: groundStairPos.x, y: groundStairPos.y, w: groundStairPos.w, h: groundStairPos.h } : undefined),
+      groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
     }, maxFootprint);
+
     floors[floorName] = plan;
-    if (typeof console !== 'undefined') console.log('[PLANNING ENGINE] FLOOR FINAL', { floor: floorName, roomCount: plan.rooms.length, errors: plan.errors, warnings: plan.warnings, connectivity: plan.connectivity });
+
+    if (typeof console !== 'undefined') {
+      console.log('[PLANNING ENGINE] FLOOR FINAL', {
+        floor: floorName,
+        roomCount: plan.rooms.length,
+        errors: plan.errors,
+        warnings: plan.warnings,
+        connectivity: plan.connectivity,
+      });
+      if (!isGround) {
+        const stair = plan.rooms.find((r: any) => String(r.name || '').toUpperCase().includes('STAIR'));
+        if (stair) {
+          console.log(`[PLANNING ENGINE] ${floorName} stair:`, {
+            x: stair.x, y: stair.y, w: stair.w, h: stair.h,
+            placementRule: (stair as any).placementRule,
+            inheritedFrom: (stair as any).inheritedFrom,
+            subZoneOf: (stair as any).subZoneOf,
+          });
+        }
+      }
+    }
+
     generatedFloorRooms[floorName] = plan.rooms;
     generatedFloorData[floorName] = {
       width: plan.width, length: plan.length, clearWidth: plan.clearWidth, clearLength: plan.clearLength,
@@ -384,40 +579,6 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       validation: { errors: plan.errors, warnings: plan.warnings, isValid: plan.errors.length === 0 },
       requestedProgram: (plan as any).requestedProgram || plan.rooms.map((r: any) => r.name),
     };
-  }
-  // Vertical stair-core coordination: when floor footprints permit it, every upper
-  // floor reuses the ground-floor stair footprint so the section/elevation has one
-  // continuous vertical circulation line instead of independently drifting stairs.
-  const groundKey = selectedFloors.find(f => f.includes('GROUND'));
-  const groundStair = groundKey ? floors[groundKey]?.rooms.find((r: any) => String(r.name || '').toUpperCase() === 'STAIRCASE') : null;
-  if (groundStair) {
-    for (const floorName of selectedFloors) {
-      if (floorName === groundKey || floorName.includes('TOWER') || floorName.includes('MUMTY')) continue;
-      const plan = floors[floorName];
-      const stair = plan?.rooms.find((r: any) => String(r.name || '').toUpperCase() === 'STAIRCASE') as any;
-      if (!stair) continue;
-      const fits = groundStair.x! + groundStair.w! <= plan.clearWidth + 0.01 && groundStair.y! + groundStair.h! <= plan.clearLength + 0.01;
-      const host = plan.rooms.find((r: any) => r.id === (stair as any).subZoneOf);
-      const fitsHost = !host || (groundStair.x! >= host.x! - 0.01 && groundStair.y! >= host.y! - 0.01 && groundStair.x! + groundStair.w! <= host.x! + host.w! + 0.01 && groundStair.y! + groundStair.h! <= host.y! + host.h! + 0.01);
-      const allowGroundAlignment = (stair as any).allowGroundAlignment !== false;
-      if (allowGroundAlignment && fits && fitsHost) {
-        stair.x = groundStair.x; stair.y = groundStair.y;
-        stair.w = groundStair.w; stair.h = groundStair.h;
-        stair.staircaseType = (groundStair as any).staircaseType;
-        stair.staircaseSpec = (groundStair as any).staircaseSpec;
-        plan.staircase = floors[groundKey]?.staircase || plan.staircase;
-        plan.warnings.push(`${floorName}: stair core aligned to GROUND FLOOR vertical stair position and remains inside its host/public core.`);
-        generatedFloorRooms[floorName] = plan.rooms;
-        generatedFloorData[floorName].rooms = plan.rooms;
-        generatedFloorData[floorName].staircase = plan.staircase;
-        generatedFloorData[floorName].staircaseConfig = plan.staircase;
-      } else {
-        // Never blindly move a stair into a kitchen/service room just to match the
-        // ground-floor coordinates. A displaced stair is allowed only when the
-        // upper-floor host remains valid; the CAD/validation trace records the reason.
-        plan.warnings.push(`${floorName}: ground-floor stair position was NOT blindly copied because it would leave the upper-floor host/public core or footprint. Upper stair kept at its validated transition position.`);
-      }
-    }
   }
 
   if (typeof console !== 'undefined') {
@@ -433,16 +594,55 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     console.groupCollapsed('[PLANNING ENGINE] BUILDING SUMMARY');
     for (const floorName of selectedFloors) {
       const p = floors[floorName];
-      console.log(floorName, { rooms: p?.rooms?.map((r: any) => `${r.name} ${Number(r.w || 0).toFixed(2)}x${Number(r.h || 0).toFixed(2)} @ ${Number(r.x || 0).toFixed(2)},${Number(r.y || 0).toFixed(2)}`), errors: p?.errors, warnings: p?.warnings, stair: p?.staircase });
+      console.log(floorName, {
+        rooms: p?.rooms?.map((r: any) => `${r.name} ${Number(r.w || 0).toFixed(2)}x${Number(r.h || 0).toFixed(2)} @ ${Number(r.x || 0).toFixed(2)},${Number(r.y || 0).toFixed(2)}`),
+        errors: p?.errors, warnings: p?.warnings, stair: p?.staircase,
+      });
     }
     console.groupEnd();
   }
 
   const elevation = calculateElevationProfile(selectedFloors, num(payload?.floorToFloorHeightFeet, 10));
   const section = calculateSectionProfile(selectedFloors, num(payload?.floorToFloorHeightFeet, 10));
-  return { plotGeometry, setbackRules: setbacks, buildableGeometry, plotArea: plotGeometry.area, selectedFloors, floors, floorData: generatedFloorData, floorRooms: generatedFloorRooms, elevation, section, orientation, generatedAt: new Date().toISOString() };
+
+  return {
+    plotGeometry,
+    setbackRules: setbacks,
+    buildableGeometry,
+    plotArea: plotGeometry.area,
+    selectedFloors,
+    floors,
+    floorData: generatedFloorData,
+    floorRooms: generatedFloorRooms,
+    elevation,
+    section,
+    orientation,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
-export function generateAutoRoomsForFloor(buildW: number, buildL: number, facing = '1 SIDE ROAD (SOUTH)', bhkConfig = 'AUTO', userRooms: any = [], setbacks: any = { front:0, rear:0,left:0,right:0 }) {
-  return generateDynamicFloorPlan({ floorName: 'GROUND FLOOR', width: buildW, length: buildL, bhk: bhkConfig, selectedRooms: userRooms, planningMode: 'AUTO', roadSide: facing, hasParking: true, planningArea: buildW * buildL }, { width: Math.max(.1,num(buildW)), length: Math.max(.1,num(buildL)), originX:num(setbacks.left), originY:num(setbacks.front) }).rooms;
+export function generateAutoRoomsForFloor(
+  buildW: number,
+  buildL: number,
+  facing = '1 SIDE ROAD (SOUTH)',
+  bhkConfig = 'AUTO',
+  userRooms: any = [],
+  setbacks: any = { front:0, rear:0,left:0,right:0 }
+) {
+  return generateDynamicFloorPlan({
+    floorName: 'GROUND FLOOR',
+    width: buildW,
+    length: buildL,
+    bhk: bhkConfig,
+    selectedRooms: userRooms,
+    planningMode: 'AUTO',
+    roadSide: facing,
+    hasParking: true,
+    planningArea: buildW * buildL,
+  }, {
+    width: Math.max(.1, num(buildW)),
+    length: Math.max(.1, num(buildL)),
+    originX: num(setbacks.left),
+    originY: num(setbacks.front),
+  }).rooms;
 }

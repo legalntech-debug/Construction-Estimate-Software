@@ -10,6 +10,7 @@ import Section5Actions from "./sections/Section5Actions";
 import { DeedFormData } from "../types/deed";
 import { generateDeedHtmlContent } from "../utils/deedTemplates";
 import { supabase } from "@/lib/supabase";
+import { getItemRate } from "@/lib/pricing";
 
 interface DeedFormLayoutProps {
   initialData?: any;
@@ -121,6 +122,9 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   const [generatedDocHtml, setGeneratedDocHtml] = useState<string | null>(null);
   const [currentRefNo, setCurrentRefNo] = useState<string>("");
 
+  /* ============================================================
+     ✅ EFFECT 1: Restore saved draft data (from dashboard reopen)
+     ============================================================ */
   useEffect(() => {
     const savedDraft = localStorage.getItem("deedDraftData");
     if (savedDraft) {
@@ -155,6 +159,32 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       }
     }
   }, [userRole]);
+
+  /* ============================================================
+     ✅ EFFECT 2: Restore form data after payment cancel/fail
+     Ye backup `handleGenerateDraft` me Razorpay khulne se pehle set hota hai
+     ============================================================ */
+  useEffect(() => {
+    const formBackup = localStorage.getItem("deedDraftFormBackup");
+    if (formBackup) {
+      try {
+        const parsed = JSON.parse(formBackup);
+        
+        // 10 minute se purana backup ignore karo (safety)
+        const backupAge = Date.now() - (parsed.__backupTime || 0);
+        if (backupAge < 10 * 60 * 1000) {
+          const { __backupTime, ...cleanData } = parsed;
+          setFormData((prev) => ({ ...prev, ...cleanData }));
+          console.log("✅ Form data restored from backup after payment cancel");
+        }
+        
+        // Backup consume karo — ek baar use hone ke baad delete
+        localStorage.removeItem("deedDraftFormBackup");
+      } catch (e) {
+        console.error("Error restoring form backup:", e);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -198,6 +228,9 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
   const handleClearForm = () => {
     if (window.confirm("Are you sure you want to clear all form fields?")) {
+      // ✅ Backup bhi clear karo
+      localStorage.removeItem("deedDraftFormBackup");
+      
       setFormData({
         caseType: "Deed Draft",
         feeMode: "Auto",
@@ -351,26 +384,26 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   };
 
   const fetchDynamicFee = async (clientName: string, repName: string) => {
-  if (!clientName) return 0;
+    if (!clientName) return 0;
 
-  const targetColumn = "drafting_fee";   // ✅ correct column for deed fee
-  const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
-  const cleanRName = repName?.split(/[.\s]+/)[0].trim();
-  
-  const { data, error } = await supabase
-    .from("clients")
-    .select(targetColumn)
-    .ilike("client_name", `${cleanCName}%`) 
-    .ilike("representative_name", `${cleanRName}%`)
-    .maybeSingle();
+    const targetColumn = "drafting_fee";
+    const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
+    const cleanRName = repName?.split(/[.\s]+/)[0].trim();
+    
+    const { data, error } = await supabase
+      .from("clients")
+      .select(targetColumn)
+      .ilike("client_name", `${cleanCName}%`) 
+      .ilike("representative_name", `${cleanRName}%`)
+      .maybeSingle();
 
-  if (error) {
-    console.error("Error fetching dynamic fee:", error);
-    return 0;
-  }
+    if (error) {
+      console.error("Error fetching dynamic fee:", error);
+      return 0;
+    }
 
-  return data ? Number(data[targetColumn] || 0) : 0; 
-};
+    return data ? Number(data[targetColumn] || 0) : 0; 
+  };
 
   const handleGenerateDraft = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -386,10 +419,14 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         userServiceFeeAmount = Number((formData as any).feeAmount) || 0;
       }
 
-      const gatewayFeeAmount = 50; 
+      /* ✅ STATE-WISE DRAFTING FEE */
+      const gatewayFeeAmount = getItemRate(targetState, "drafting");
+
+      console.log(`🎯 State: ${targetState} | Gateway Fee: ₹${gatewayFeeAmount}`);
 
       const { data: { user } } = await supabase.auth.getUser();
 
+      /* ============ STEP 1: CHECK EXISTING PAID RECORD (REOPEN) ============ */
       if (user) {
         const currentSellerName = formData.sellers?.[0]?.name?.trim() || "";
         const currentBuyerName = formData.buyers?.[0]?.name?.trim() || "";
@@ -433,13 +470,12 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           });
 
           if (matchedRecord) {
-            // ✅ UPDATE ALL FIELDS (not just fee) for reopened case
+            /* ✅ REOPEN: Update existing record, ref no. same */
             try {
               const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
                 ? parseFloat(formData.plotArea) 
                 : null;
 
-              // 1. Update service_records
               await supabase
                 .from('service_records')
                 .update({
@@ -455,6 +491,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                   fee_standard: userServiceFeeAmount,
                   user_service_fee: userServiceFeeAmount,
                   user_payment: userServiceFeeAmount,
+                  gateway_fee: gatewayFeeAmount,
                   fee_mode: formData.feeMode,
                   boundary_east: formData.boundaryEast,
                   boundary_west: formData.boundaryWest,
@@ -465,7 +502,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                 })
                 .eq('ref_no', matchedRecord.ref_no);
 
-              // 2. Update mis_records
               await supabase
                 .from('mis_records')
                 .update({
@@ -476,7 +512,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                   property_address: formData.propertyAddress,
                   plot_area: parsedPlotArea,
                   property_type: formData.propertyType || 'HOUSE',
-                  // Optionally update status if needed (default PENDING)
                 })
                 .eq('ref_no', matchedRecord.ref_no);
 
@@ -485,7 +520,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
               console.error("❌ Failed to update existing record:", err);
             }
 
-            // Show draft with updated data
             setCurrentRefNo(matchedRecord.ref_no);
             const printableHtml = buildPrintableHtml(matchedRecord.ref_no, formData);
             setGeneratedDocHtml(printableHtml);
@@ -495,21 +529,20 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         }
       }
 
-      // ----------------------------------------------
-      // NEW DRAFT (no existing match)
-      // ----------------------------------------------
-      const nextSeq = await fetchNextSequenceNumber();
-      const userFirstName = userFullName ? userFullName.trim().split(" ")[0].replace(/[^a-zA-Z]/g, "") : "Client";
-      const uniqueRefNo = generateReferenceNumber(userFirstName, nextSeq);
-      setCurrentRefNo(uniqueRefNo);
-
-      const formDataWithRef = { ...formData, refNo: uniqueRefNo };
-      const printableHtml = buildPrintableHtml(uniqueRefNo, formData);
-      setGeneratedDocHtml(printableHtml);
-
-      // ADMIN BYPASS FLOW
+      /* ============ STEP 2: ADMIN BYPASS FLOW ============ */
       if (userRole === 'admin') {
         try {
+          const nextSeq = await fetchNextSequenceNumber();
+          const userFirstName = userFullName 
+            ? userFullName.trim().split(" ")[0].replace(/[^a-zA-Z]/g, "") 
+            : "Client";
+          const adminRefNo = generateReferenceNumber(userFirstName, nextSeq);
+          setCurrentRefNo(adminRefNo);
+
+          const adminFormDataWithRef = { ...formData, refNo: adminRefNo };
+          const adminPrintableHtml = buildPrintableHtml(adminRefNo, formData);
+          setGeneratedDocHtml(adminPrintableHtml);
+
           if (user) {
             const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
               ? parseFloat(formData.plotArea) 
@@ -517,7 +550,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
             await supabase.from('service_records').insert([
               {
-                ref_no: uniqueRefNo,
+                ref_no: adminRefNo,
                 user_id: user.id,
                 case_type: 'DEED_DRAFT',
                 payment_status: 'paid',
@@ -542,13 +575,13 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                 boundary_west: formData.boundaryWest,
                 boundary_north: formData.boundaryNorth,
                 boundary_south: formData.boundarySouth,
-                form_snapshot: formDataWithRef,
+                form_snapshot: adminFormDataWithRef,
               }
             ]);
 
             await supabase.from('mis_records').insert([
               {
-                ref_no: uniqueRefNo,
+                ref_no: adminRefNo,
                 user_id: user.id,
                 customer_name: formData.buyers?.[0]?.name || "Customer",
                 client_name: formData.clientName || "Valued Client",
@@ -570,7 +603,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         return;
       }
 
-      // RAZORPAY PAYMENT FLOW
+      /* ============ STEP 3: RAZORPAY PAYMENT FLOW (NON-ADMIN) ============ */
       const res = await loadRazorpayScript();
       if (!res) {
         alert("Razorpay SDK failed to load. Please check your internet connection.");
@@ -578,25 +611,56 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         return;
       }
 
+      /* ✅ Razorpay khulne se pehle form data local me save karo
+         taaki cancel/fail hone pe form wapas restore ho sake */
+      try {
+        localStorage.setItem(
+          "deedDraftFormBackup",
+          JSON.stringify({ ...formData, __backupTime: Date.now() })
+        );
+        console.log("💾 Form backup saved before Razorpay");
+      } catch (e) {
+        console.error("Failed to backup form data:", e);
+      }
+
       const options: any = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_YourKeyHelp",
-        amount: gatewayFeeAmount * 100, 
+        amount: gatewayFeeAmount * 100,
         currency: "INR",
         name: "Legal Drafting Portal",
-        description: `Drafting Fee for ${targetState}`,
-        handler: async function (response: any) {
-          alert(`Payment Successful! Payment ID: ${response.razorpay_payment_id}`);
+        description: `Drafting Fee for ${targetState} — ₹${gatewayFeeAmount}`,
 
+        /* ✅ PAYMENT SUCCESS — Ref No. abhi generate hoga */
+        handler: async function (response: any) {
           try {
-            if (user) {
+            /* ✅ Success pe backup clear karo — ab zarurat nahi */
+            localStorage.removeItem("deedDraftFormBackup");
+
+            const nextSeq = await fetchNextSequenceNumber();
+            const userFirstName = userFullName 
+              ? userFullName.trim().split(" ")[0].replace(/[^a-zA-Z]/g, "") 
+              : "Client";
+            const newUniqueRefNo = generateReferenceNumber(userFirstName, nextSeq);
+            const newFormDataWithRef = { ...formData, refNo: newUniqueRefNo };
+
+            setCurrentRefNo(newUniqueRefNo);
+
+            const newPrintableHtml = buildPrintableHtml(newUniqueRefNo, formData);
+            setGeneratedDocHtml(newPrintableHtml);
+
+            alert(`✅ Payment Successful!\nPayment ID: ${response.razorpay_payment_id}\nRef No: ${newUniqueRefNo}`);
+
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
+            
+            if (currentUser) {
               const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
                 ? parseFloat(formData.plotArea) 
                 : null;
 
               await supabase.from('service_records').insert([
                 {
-                  ref_no: uniqueRefNo,
-                  user_id: user.id,
+                  ref_no: newUniqueRefNo,
+                  user_id: currentUser.id,
                   case_type: 'DEED_DRAFT',
                   payment_status: 'paid',
                   platform_payment_status: 'paid',
@@ -620,14 +684,14 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                   boundary_west: formData.boundaryWest,
                   boundary_north: formData.boundaryNorth,
                   boundary_south: formData.boundarySouth,
-                  form_snapshot: formDataWithRef,
+                  form_snapshot: newFormDataWithRef,
                 }
               ]);
 
               await supabase.from('mis_records').insert([
                 {
-                  ref_no: uniqueRefNo,
-                  user_id: user.id,
+                  ref_no: newUniqueRefNo,
+                  user_id: currentUser.id,
                   customer_name: formData.buyers?.[0]?.name || "Customer",
                   client_name: formData.clientName || "Valued Client",
                   representative: formData.representativeName || "Self",
@@ -639,13 +703,27 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
                   property_type: formData.propertyType || 'HOUSE',
                 }
               ]);
+
+              console.log(`✅ Payment success! Ref: ${newUniqueRefNo}`);
             }
           } catch (dbErr) {
             console.error("Database error during draft save:", dbErr);
+            alert("Payment ho gayi lekin record save nahi hua. Please contact support.");
           }
           
           setIsGenerating(false);
         },
+
+        /* ✅ PAYMENT CANCEL / POPUP CLOSE — User SAME PAGE pe rahega */
+        modal: {
+          ondismiss: function () {
+            console.log("❌ Payment cancelled by user");
+            setIsGenerating(false);
+            // ✅ Dashboard redirect NAHI — form backup se data restore ho jayega
+            alert("❌ Payment cancel kar diya gaya.\n✅ Aapka form data safe hai — aap dobara try kar sakte hain.");
+          }
+        },
+
         prefill: {
           name: formData.clientName || "Valued Client",
           email: "",
@@ -659,9 +737,12 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       const paymentObject = new (window as any).Razorpay(options);
       paymentObject.open();
       
+      /* ✅ PAYMENT FAILED — User SAME PAGE pe rahega */
       paymentObject.on('payment.failed', function (response: any) {
-        alert(`Payment failed: ${response.error.description}`);
+        console.error("❌ Payment failed:", response.error);
         setIsGenerating(false);
+        alert(`❌ Payment failed: ${response.error.description || 'Unknown error'}\n✅ Aapka form data safe hai — aap dobara try kar sakte hain.`);
+        // ✅ Dashboard redirect NAHI
       });
 
     } catch (err) {

@@ -38,6 +38,9 @@ const TOLERANCE = 0.08;
 const EXT_TOLERANCE = 0.5;
 const EDGE_OFFSET = 0.5;
 
+// ✅ Bathroom door width (auto 2' wide)
+const BATHROOM_DOOR_WIDTH = 2.0;
+
 export function calculateDoorsAndWindows(totalBuiltUpArea: number, floorCount: number, hasTower: boolean): DoorWindowSpec {
   const base = totalBuiltUpArea > 2000 ? 8 : totalBuiltUpArea > 1500 ? 7 : totalBuiltUpArea > 1000 ? 6 : totalBuiltUpArea > 600 ? 5 : 4;
   const mainDoors = Math.max(1, floorCount);
@@ -64,10 +67,6 @@ function normalizeType(room: RoomLayout): string {
   return "room";
 }
 
-/**
- * Detect attached toilet specifically (master-bedroom's sub-toilet).
- * These are sub-rooms and need their own door symbol rendering.
- */
 function isAttachedToilet(room: RoomLayout): boolean {
   const name = String(room.name || "").toLowerCase();
   const type = String(room.type || "").toLowerCase();
@@ -105,48 +104,123 @@ export function findSharedBoundary(r1: RoomLayout, idx1: number, r2: RoomLayout,
 }
 
 /**
- * Strict Corner Alignment Logic
- * - Parking / Hall: CORNER-align (left or right edge)
- * - Bedroom/Bathroom: corner align
- * - Passage: center-align
- * - Others: center-align
+ * ✅ SMART DOOR PLACEMENT
+ * Priority:
+ *   1. Passage side — door passage wali wall pe
+ *   2. Stair avoidance — stair wali wall pe door nahi
+ *   3. Parking / Hall — corner align
+ *   4. Bedroom / Bathroom — center align
+ *   5. Default — center align
  */
-function localOffset(boundary: SharedBoundary, width: number, room: RoomLayout, roomType: string): number {
+function localOffset(
+  boundary: SharedBoundary,
+  width: number,
+  room: RoomLayout,
+  roomType: string,
+  allRooms: RoomLayout[] = []
+): number {
   const vertical = boundary.wallForA === "LEFT" || boundary.wallForA === "RIGHT";
   const start = boundary.overlapStart;
   const end = boundary.overlapEnd;
   const roomStart = vertical ? room.y : room.x;
+  const roomCenter = vertical ? (room.y + room.h / 2) : (room.x + room.w / 2);
+  const wallCenter = (start + end) / 2;
 
-  // Parking or Hall → CORNER ALIGN
-  if (roomType === "parking" || roomType === "hall") {
-    const roomCenter = vertical ? (room.y + room.h / 2) : (room.x + room.w / 2);
-    const wallCenter = (start + end) / 2;
-    const preferLeft = roomCenter <= wallCenter;
+  // ✅ Passage priority
+  const passage = allRooms.find((r) => {
+    const n = String(r.name || "").toUpperCase();
+    return n.includes("PASSAGE") || n.includes("CORRIDOR");
+  });
 
-    if (preferLeft) {
-      return Math.max(EDGE_OFFSET, (start - roomStart) + 0.5);
-    } else {
-      const rightStart = (end - width) - roomStart;
-      return Math.max(EDGE_OFFSET, rightStart - 0.5);
+  if (passage) {
+    const passageCenterX = passage.x + passage.w / 2;
+    const passageCenterY = passage.y + passage.h / 2;
+    const roomCenterX = room.x + room.w / 2;
+    const roomCenterY = room.y + room.h / 2;
+
+    const passageOnRight = passageCenterX > roomCenterX;
+    const passageOnLeft = passageCenterX < roomCenterX;
+    const passageOnTop = passageCenterY < roomCenterY;
+    const passageOnBottom = passageCenterY > roomCenterY;
+
+    if ((boundary.wallForA === "RIGHT" || boundary.wallForB === "RIGHT") && passageOnRight) {
+      return Math.max(EDGE_OFFSET, wallCenter - roomStart - width / 2);
+    }
+    if ((boundary.wallForA === "LEFT" || boundary.wallForB === "LEFT") && passageOnLeft) {
+      return Math.max(EDGE_OFFSET, wallCenter - roomStart - width / 2);
+    }
+    if ((boundary.wallForA === "TOP" || boundary.wallForB === "TOP") && passageOnTop) {
+      return Math.max(EDGE_OFFSET, wallCenter - roomStart - width / 2);
+    }
+    if ((boundary.wallForA === "BOTTOM" || boundary.wallForB === "BOTTOM") && passageOnBottom) {
+      return Math.max(EDGE_OFFSET, wallCenter - roomStart - width / 2);
     }
   }
 
-  // Bedrooms, bathrooms
-  if (roomType === "bathroom" || roomType === "bedroom" || roomType === "master-bedroom") {
-    return Math.max(EDGE_OFFSET, (start - roomStart) + 0.3);
+  // ✅ Stair avoidance
+  const stair = allRooms.find((r) => {
+    const n = String(r.name || "").toUpperCase();
+    return n.includes("STAIR");
+  });
+
+  if (stair) {
+    const stairCenterX = stair.x + stair.w / 2;
+    const stairCenterY = stair.y + stair.h / 2;
+
+    if (vertical) {
+      if (stairCenterX > roomCenter) {
+        return Math.max(EDGE_OFFSET, (start - roomStart) + 0.3);
+      } else {
+        return Math.max(EDGE_OFFSET, (end - width - roomStart) - 0.3);
+      }
+    } else {
+      if (stairCenterY > roomCenter) {
+        return Math.max(EDGE_OFFSET, (start - roomStart) + 0.3);
+      } else {
+        return Math.max(EDGE_OFFSET, (end - width - roomStart) - 0.3);
+      }
+    }
   }
 
-  // Passage — center align
-  if (roomType === "passage") {
-    const center = (start + end) / 2;
-    const centerStart = center - width / 2;
+  // ✅ Parking / Hall → CORNER ALIGN
+  if (roomType === "parking" || roomType === "hall") {
+    const preferLeft = roomCenter <= wallCenter;
+    if (preferLeft) {
+      return Math.max(EDGE_OFFSET, (start - roomStart) + 0.5);
+    } else {
+      return Math.max(EDGE_OFFSET, (end - width - roomStart) - 0.5);
+    }
+  }
+
+  // ✅ Bedroom / Bathroom → CENTER ALIGN
+  if (roomType === "bathroom" || roomType === "bedroom" || roomType === "master-bedroom") {
+    const centerStart = wallCenter - width / 2;
     return Math.max(EDGE_OFFSET, centerStart - roomStart);
   }
 
-  // Default — center align
-  const center = (start + end) / 2;
-  const centerStart = center - width / 2;
+  // ✅ Passage → CENTER ALIGN
+  if (roomType === "passage") {
+    const centerStart = wallCenter - width / 2;
+    return Math.max(EDGE_OFFSET, centerStart - roomStart);
+  }
+
+  // ✅ Default → CENTER ALIGN
+  const centerStart = wallCenter - width / 2;
   return Math.max(EDGE_OFFSET, centerStart - roomStart);
+}
+
+// ✅ NEW: Kya is room ki diye gaye wall par, shared boundary ke overlap me pehle se koi door hai?
+// (roomPlanner ne jo door set kiya uske ID alag hote hain, isliye ID se duplicate detect nahi hota)
+function hasDoorOnBoundary(room: RoomLayout, wall: PlacedDoor["wall"], boundary: SharedBoundary): boolean {
+  const vertical = wall === "LEFT" || wall === "RIGHT";
+  const roomStart = vertical ? room.y : room.x;
+  return (room.doors || []).some((d: any) => {
+    if (d.wall !== wall) return false;
+    const dStart = roomStart + Number(d.offsetFeet || 0);
+    const dEnd = dStart + Number(d.widthFeet || 0);
+    const overlap = Math.min(dEnd, boundary.overlapEnd) - Math.max(dStart, boundary.overlapStart);
+    return overlap > 0.3;
+  });
 }
 
 function addDoor(
@@ -163,28 +237,38 @@ function addDoor(
   const max = wall === "LEFT" || wall === "RIGHT" ? room.h : room.w;
   const width = Math.min(widthFeet, Math.max(2, max - EDGE_OFFSET * 2));
   const offset = Math.max(EDGE_OFFSET, Math.min(offsetFeet, Math.max(EDGE_OFFSET, max - width - EDGE_OFFSET)));
-  const exists = room.doors.some((d) => d.wall === wall && Math.abs(d.offsetFeet - offset) < 0.75);
 
-  // Only double-leaf if explicitly requested via `leaves` param.
-  // Do NOT auto-double based on door type — MAIN door can be single-leaf
-  // for narrow plots.
+  // ✅ FIX #1: Agar same door ID already exists — SKIP karo (replace mat karo)
+  const existsById = room.doors.some((d: any) => String(d.id) === String(id));
+  if (existsById) {
+    console.log(`[OPENING PLANNER] ⏭️ Door ${id} already exists in ${room.name} — SKIPPING`);
+    return;
+  }
+
+  // ✅ FIX #2: Same wall + same offset pe koi door hai to bhi skip karo
+  const exists = room.doors.some((d) => d.wall === wall && Math.abs(d.offsetFeet - offset) < 0.75);
+  if (exists) {
+    console.log(`[OPENING PLANNER] ⏭️ Door on ${room.name} at ${wall}:${offset.toFixed(2)} already exists — SKIPPING`);
+    return;
+  }
+
   const leafCount = leaves > 1 ? 2 : 1;
 
-  if (!exists) {
-    room.doors.push({
-      id,
-      wall,
-      offsetFeet: offset,
-      widthFeet: width,
-      doorType,
-      leafCount,
-      isDoubleLeaf: leafCount === 2,
-      doubleLeaf: leafCount === 2,
-      swingDirection: "INWARDS",
-      ...(renderSymbol ? {} : { renderSymbol: false }),
-      ...(id.startsWith('shared-') ? { sharedOpeningId: id } : {})
-    } as any);
-  }
+  room.doors.push({
+    id,
+    wall,
+    offsetFeet: offset,
+    widthFeet: width,
+    doorType,
+    leafCount,
+    isDoubleLeaf: leafCount === 2,
+    doubleLeaf: leafCount === 2,
+    swingDirection: "INWARDS",
+    ...(renderSymbol ? {} : { renderSymbol: false }),
+    ...(id.startsWith('shared-') ? { sharedOpeningId: id } : {})
+  } as any);
+
+  console.log(`[OPENING PLANNER] ✅ Added door ${id} to ${room.name} at ${wall}:${offset.toFixed(2)}`);
 }
 
 function addWindow(room: RoomLayout, wall: PlacedWindow["wall"], offsetFeet: number, lengthFeet: number, windowType: PlacedWindow["windowType"], id: string) {
@@ -218,10 +302,28 @@ export function generateFloorOpenings(
   floorH?: number,
   setbacks?: SetbackMosSpec
 ): RoomLayout[] {
-  const updated = rooms.map((r) => ({ ...r, doors: [...(r.doors || [])], windows: [...(r.windows || [])] }));
+  // ============================================================
+  // ✅ FIX #3: Existing doors ko PRESERVE karo (roomPlanner ne jo set kiye)
+  // Sirf missing doors add karo, replace mat karo
+  // ============================================================
+  const updated = rooms.map((r) => ({
+    ...r,
+    doors: [...(r.doors || [])],
+    windows: [...(r.windows || [])],
+  }));
+
+  // ✅ Track karo kaunse manually-set doors already hain
+  const existingDoorIds = new Set<string>();
+  updated.forEach((room) => {
+    (room.doors || []).forEach((d: any) => {
+      if (d.id) existingDoorIds.add(String(d.id));
+    });
+  });
+
+  console.log(`[OPENING PLANNER] 📋 Existing doors:`, Array.from(existingDoorIds));
+
   const W = Number(floorW || Math.max(...updated.map((r) => r.x + r.w), 0));
   const H = Number(floorH || Math.max(...updated.map((r) => r.y + r.h), 0));
-
   const is = (room: RoomLayout, type: string) => normalizeType(room) === type;
   const isService = (room: RoomLayout) => ["kitchen", "dining", "bathroom", "stairs", "study", "utility", "store"].includes(normalizeType(room));
 
@@ -258,14 +360,19 @@ export function generateFloorOpenings(
       if ((ta === "hall" && ["kitchen", "dining"].includes(tb)) || (tb === "hall" && ["kitchen", "dining"].includes(ta))) score += 850;
       if ((ta === "hall" && ["master-bedroom", "bedroom"].includes(tb)) || (tb === "hall" && ["master-bedroom", "bedroom"].includes(ta))) score += 700;
 
+      // ✅ Passage priority
       if (ta === "passage" || tb === "passage") {
         const otherType = ta === "passage" ? tb : ta;
-        if (otherType === "hall" || otherType === "living-room" || otherType === "master-bedroom" || otherType === "bedroom") {
-          score += 900;
-        } else if (otherType === "kitchen" || otherType === "dining") {
-          score += 800;
+        if (otherType === "hall" || otherType === "living-room") {
+          score += 2000;
+        } else if (otherType === "master-bedroom" || otherType === "bedroom") {
+          score += 1900;
         } else if (otherType === "bathroom") {
-          score += 700;
+          score += 1800;
+        } else if (otherType === "kitchen" || otherType === "dining") {
+          score += 1700;
+        } else if (otherType === "stairs") {
+          score += 1600;
         } else {
           score += 500;
         }
@@ -288,9 +395,17 @@ export function generateFloorOpenings(
   const usedEdges = new Set<string>();
 
   // ============================================================
-  // PARKING ↔ HALL (Living Room) — MAIN ENTRY DOOR
+  // ✅ FIX #4: PARKING ↔ HALL (Living Room) — MAIN ENTRY DOOR
+  // Agar roomPlanner ne already set kiya hai, to SKIP karo
   // ============================================================
-  if (rootParking >= 0 && rootHall >= 0) {
+  const hasRoomPlannerSharedDoor =
+    existingDoorIds.has('shared-parking-living') ||
+    existingDoorIds.has('shared-shared-parking-hall-0-2') ||
+    existingDoorIds.has('shared-shared-parking-hall');
+
+  if (hasRoomPlannerSharedDoor) {
+    console.log('[OPENING PLANNER] ⏭️ SKIPPING parking↔living door — roomPlanner already set it');
+  } else if (rootParking >= 0 && rootHall >= 0) {
     const idxEdge = adjacency.findIndex((e) => (e.a === rootParking && e.b === rootHall) || (e.a === rootHall && e.b === rootParking));
     if (idxEdge >= 0) {
       const edge = adjacency[idxEdge];
@@ -318,10 +433,6 @@ export function generateFloorOpenings(
         : Math.min(parkingRoom.x + parkingRoom.w, hallRoom.x + hallRoom.w);
       const wallLength = Math.max(0.1, wallEnd - wallStart);
 
-      // ============================================================
-      // Collision check — does the door range conflict with any other
-      // room's access on this shared wall?
-      // ============================================================
       const checkRange = (gateStart: number, gateEnd: number): boolean => {
         for (const other of updated) {
           if (other === parkingRoom || other === hallRoom) continue;
@@ -355,10 +466,6 @@ export function generateFloorOpenings(
         return false;
       };
 
-      // ============================================================
-      // Choose corner (LEFT/RIGHT) based on Hall position, or CENTER
-      // if plot is wide
-      // ============================================================
       const cornerLeftOffset = 0.5;
       const cornerRightOffset = Math.max(0.5, wallLength - doorWidth - 0.5);
       const centerOffset = Math.max(0.5, (wallLength - doorWidth) / 2);
@@ -370,10 +477,6 @@ export function generateFloorOpenings(
       let finalWallOffset = preferLeftCorner ? cornerLeftOffset : cornerRightOffset;
       let finalSide: "LEFT" | "RIGHT" | "CENTER" = preferLeftCorner ? "LEFT" : "RIGHT";
 
-      // ============================================================
-      // WIDE PLOT: try center first, fall back to corner
-      // NARROW PLOT: only corner allowed
-      // ============================================================
       if (!isNarrowPlot) {
         const centerGateStart = wallStart + centerOffset;
         const centerGateEnd = centerGateStart + doorWidth;
@@ -407,9 +510,6 @@ export function generateFloorOpenings(
         }
       }
 
-      // ============================================================
-      // Convert wall-relative offset → room-relative offset for each room
-      // ============================================================
       const parkingRoomLocalStart = sharedWallIsVertical ? parkingRoom.y : parkingRoom.x;
       const hallRoomLocalStart = sharedWallIsVertical ? hallRoom.y : hallRoom.x;
 
@@ -418,11 +518,6 @@ export function generateFloorOpenings(
 
       const sharedId = `shared-parking-hall-${edge.a}-${edge.b}`;
 
-      // ============================================================
-      // Add door ONLY ONCE:
-      //   - Parking side: renderSymbol = false (no symbol on parking)
-      //   - Hall side:    renderSymbol = true  (single symbol on living room)
-      // ============================================================
       addDoor(
         parkingRoom,
         parkingWall,
@@ -445,7 +540,6 @@ export function generateFloorOpenings(
         isDoubleLeaf ? 2 : 1
       );
 
-      // Tag metadata on both doors (single shared entry)
       for (const rr of [parkingRoom, hallRoom]) {
         const dd = (rr.doors || []).find((d: any) => d.id === `shared-${sharedId}`);
         if (dd) {
@@ -486,7 +580,13 @@ export function generateFloorOpenings(
     const isKitchenHall = (ta === "kitchen" && tb === "hall") || (ta === "hall" && tb === "kitchen");
     const isPassageConnect = ta === "passage" || tb === "passage";
 
-    const width = isBathroom ? 2.5 : isPooja ? 2.5 : isKitchenHall ? 3.5 : 3.0;
+    const width = isBathroom
+      ? BATHROOM_DOOR_WIDTH
+      : isPooja
+        ? 2.5
+        : isKitchenHall
+          ? 3.5
+          : 3.0;
 
     if (isPooja && (edge.boundary.wallForA === "BOTTOM" || edge.boundary.wallForB === "BOTTOM")) {
       usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
@@ -495,6 +595,32 @@ export function generateFloorOpenings(
 
     const sharedId = `shared-${edge.a}-${edge.b}`;
     const openingDoorType = isBathroom ? "BATHROOM" : "INTERNAL";
+
+    // ✅ FIX #5: Agar is edge ka door already exists (roomPlanner ne set kiya) — SKIP
+    const edgeSharedId = `shared-${sharedId}`;
+    const alreadyExists =
+      existingDoorIds.has(edgeSharedId) ||
+      existingDoorIds.has(`shared-${edge.b}-${edge.a}`);
+
+    if (alreadyExists) {
+      console.log(`[OPENING PLANNER] ⏭️ Edge ${edge.a}-${edge.b} already has door — SKIPPING`);
+      connected.add(edge.a);
+      connected.add(edge.b);
+      usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
+      continue;
+    }
+
+    // ✅ FIX: roomPlanner ka door isi boundary par pehle se hai → dusra door mat banao
+    if (
+      hasDoorOnBoundary(roomA, edge.boundary.wallForA, edge.boundary) ||
+      hasDoorOnBoundary(roomB, edge.boundary.wallForB, edge.boundary)
+    ) {
+      console.log(`[OPENING PLANNER] ⏭️ Edge ${edge.a}-${edge.b} boundary par door pehle se hai — SKIPPING`);
+      connected.add(edge.a);
+      connected.add(edge.b);
+      usedEdges.add(`${Math.min(edge.a, edge.b)}-${Math.max(edge.a, edge.b)}`);
+      continue;
+    }
 
     const passageRoomType = ta === "passage" ? tb : (tb === "passage" ? ta : null);
 
@@ -541,9 +667,6 @@ export function generateFloorOpenings(
         openingKind = "PASSAGE_OPENING";
       }
     } else if (isBathroom) {
-      // ============================================================
-      // FIX: Attached Toilet door — MUST renderSymbol = true
-      // ============================================================
       const isAttachedA = isAttachedToilet(roomA);
       const isAttachedB = isAttachedToilet(roomB);
 
@@ -571,8 +694,18 @@ export function generateFloorOpenings(
       openingKind = "ATTACHED_TOILET_DOOR";
     }
 
-    addDoor(roomA, edge.boundary.wallForA, localOffset(edge.boundary, width, roomA, ta), width, openingDoorType, `shared-${sharedId}`, renderSymbolOnA);
-    addDoor(roomB, edge.boundary.wallForB, localOffset(edge.boundary, width, roomB, tb), width, openingDoorType, `shared-${sharedId}`, renderSymbolOnB);
+    // ✅ Simple placement
+    const placementA = {
+      wall: edge.boundary.wallForA,
+      offset: localOffset(edge.boundary, width, roomA, normalizeType(roomA), updated),
+    };
+    const placementB = {
+      wall: edge.boundary.wallForB,
+      offset: localOffset(edge.boundary, width, roomB, normalizeType(roomB), updated),
+    };
+
+    addDoor(roomA, placementA.wall, placementA.offset, width, openingDoorType, `shared-${sharedId}`, renderSymbolOnA);
+    addDoor(roomB, placementB.wall, placementB.offset, width, openingDoorType, `shared-${sharedId}`, renderSymbolOnB);
 
     for (const rr of [roomA, roomB]) {
       const dd = (rr.doors || []).find((d: any) => d.id === `shared-${sharedId}`);
@@ -596,18 +729,21 @@ export function generateFloorOpenings(
 
   // ============================================================
   // MAIN ENTRY GATE (bottom parking gate) — CORNER AWARE
+  // ✅ FIX #6: Agar roomPlanner ne already set kiya hai, to SKIP
   // ============================================================
   const bottomParking = updated
     .filter((r) => is(r, "parking"))
     .sort((a, b) => (b.y + b.h) - (a.y + a.h))[0];
 
-  if (bottomParking) {
+  const hasParkingGate = existingDoorIds.has("d-parking-main-gate") ||
+    existingDoorIds.has("shared-parking-main-gate");
+
+  if (bottomParking && !hasParkingGate) {
     const isNarrowPlot = W <= 20.5;
     const gateWidth = isNarrowPlot
       ? Math.min(6.5, Math.max(5.0, bottomParking.w * 0.55))
       : Math.min(8.0, Math.max(6.5, bottomParking.w * 0.65));
 
-    // Narrow plot → corner (right); Wide plot → center
     const offset = isNarrowPlot
       ? Math.max(0.5, bottomParking.w - gateWidth - 0.5)
       : Math.max(0.5, (bottomParking.w - gateWidth) / 2);
@@ -621,6 +757,8 @@ export function generateFloorOpenings(
       gate.entryStrategy = "ROAD → PARKING → LIVING";
       gate.swingDirection = "INWARDS";
     }
+  } else if (hasParkingGate) {
+    console.log('[OPENING PLANNER] ⏭️ SKIPPING parking main gate — already exists');
   }
 
   // ============================================================

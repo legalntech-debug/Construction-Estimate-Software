@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import ClientDetailsSection from "../components/ClientDetailsSection";
 import PlotConfigSection from "../components/PlotConfigSection";
@@ -12,6 +12,13 @@ import { calculateSetbacks } from "../engine/setbackRules";
 import { generateCompleteConstructionPlan } from "../engine/planGenerator";
 import { generateCadVectorBlueprint } from "../engine/cad/cadRenderer";
 import { supabase } from "@/lib/supabase";
+
+
+// ✅ NEW: Import for stair inheritance
+import {
+  generateArchitecturalFloorPlan,
+  extractStairPositionFromResult,
+} from "../engine/roomPlanner";
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
@@ -79,6 +86,14 @@ export default function ConstructionPlanInput() {
   });
 
   const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
+
+  // ✅ NEW: Stair position inheritance state
+  const [groundStairPos, setGroundStairPos] = useState<{ x: number; y: number; w?: number; h?: number } | null>(null);
+  const [groundStairOffset, setGroundStairOffset] = useState<{ dx: number; dy: number } | null>(null);
+  const [groundFloorProgram, setGroundFloorProgram] = useState<string[]>([]);
+
+  // ✅ NEW: Guard to avoid infinite re-render
+  const lastExtractedSignature = useRef<string>("");
 
   useEffect(() => {
     if (coverageType === "100_PERCENT") {
@@ -260,6 +275,101 @@ export default function ConstructionPlanInput() {
     });
   }, [selectedFloors, planningMode]);
 
+  // ============================================================================
+  // ✅ NEW: GROUND FLOOR STAIR POSITION — runs actual layout engine
+  // Priority order:
+  //   1. Parent's own extraction (this effect)
+  //   2. onPlanningContextReady from FloorManagerSection (if it fires)
+  // ============================================================================
+  useEffect(() => {
+    const groundFloor = selectedFloors.find(f => f.toUpperCase().includes('GROUND'));
+    if (!groundFloor) {
+      setGroundStairPos(null);
+      setGroundStairOffset(null);
+      setGroundFloorProgram([]);
+      return;
+    }
+
+    // ✅ FIX: cast to Partial<FloorData>
+    const gData = (floorData[groundFloor] || {}) as Partial<FloorData>;
+    const gfW = Number(gData.width) || frontWidthFt || 20;
+    const gfL = Number(gData.length) || depthFt || 50;
+
+    if (gfW <= 0 || gfL <= 0) return;
+
+    // ✅ NEW: Avoid running on identical inputs
+    const signature = JSON.stringify({
+      floor: groundFloor,
+      w: gfW,
+      l: gfL,
+      rooms: floorRooms[groundFloor] ? Object.keys(floorRooms[groundFloor]).sort() : [],
+      mode: planningMode,
+      road: roadFacingOption,
+    });
+    if (signature === lastExtractedSignature.current) return;
+    lastExtractedSignature.current = signature;
+
+    try {
+      // ✅ FIX: always pass hasParking: true for GROUND floor
+      const gfResult = generateArchitecturalFloorPlan({
+        floorName: groundFloor,
+        width: gfW,
+        length: gfL,
+        selectedRooms: floorRooms[groundFloor] || {},
+        planningMode: planningMode,
+        roadSide: roadFacingOption || '1 SIDE ROAD (SOUTH)',
+        planningArea: gfW * gfL,
+        hasParking: true,                     // ✅ CRITICAL FIX
+      });
+
+      const stairInfo = extractStairPositionFromResult(gfResult);
+
+      if (stairInfo) {
+        setGroundStairPos({
+          x: stairInfo.x,
+          y: stairInfo.y,
+          w: stairInfo.w,
+          h: stairInfo.h,
+        });
+        setGroundStairOffset(stairInfo.relativeOffset);
+      } else {
+        setGroundStairPos(null);
+        setGroundStairOffset(null);
+      }
+
+      // Extract program for upper floors to know which stair type was used
+      const program = gfResult.rooms.map(r =>
+        String(r.name || '').toLowerCase().replace(/\s+/g, '_')
+      );
+      setGroundFloorProgram(program);
+
+      if (typeof console !== 'undefined') {
+        const stairRoom = gfResult.rooms.find(r => String(r.name || '').toUpperCase().includes('STAIR'));
+        const livingRoom = gfResult.rooms.find(r => String(r.name || '').toUpperCase().includes('LIVING'));
+        console.log('[PARENT] Ground floor stair extracted:', {
+          stairInfo,
+          stairRoom: stairRoom ? { x: stairRoom.x, y: stairRoom.y, w: stairRoom.w, h: stairRoom.h, name: stairRoom.name } : null,
+          livingRoom: livingRoom ? { x: livingRoom.x, y: livingRoom.y, w: livingRoom.w, h: livingRoom.h, name: livingRoom.name } : null,
+          program,
+          totalRooms: gfResult.rooms.length,
+        });
+      }
+    } catch (err) {
+      console.error('[PARENT] Ground floor stair extraction failed:', err);
+      setGroundStairPos(null);
+      setGroundStairOffset(null);
+      setGroundFloorProgram([]);
+    }
+  }, [
+    selectedFloors,
+    floorData,
+    floorRooms,
+    planningMode,
+    frontWidthFt,
+    depthFt,
+    roadFacingOption,
+  ]);
+
   const ROAD_FACING_OPTIONS = [
     "1 SIDE ROAD (NORTH)", "1 SIDE ROAD (SOUTH)", "1 SIDE ROAD (EAST)", "1 SIDE ROAD (WEST)",
     "CORNER: MAIN RD NORTH & EAST", "CORNER: MAIN RD NORTH & WEST", "CORNER: MAIN RD SOUTH & EAST", "CORNER: MAIN RD SOUTH & WEST",
@@ -376,35 +486,73 @@ export default function ConstructionPlanInput() {
   };
 
   const ensureFloorRooms = (floor: string) => {
-    if (!floorRooms[floor]) {
-      setFloorRooms(prev => ({ ...prev, [floor]: {} }));
-    }
+    setFloorRooms(prev => {
+      if (prev[floor]) return prev;
+      return { ...prev, [floor]: {} };
+    });
   };
 
   const toggleRoom = (floor: string, roomKey: string) => {
     setFloorRooms(prev => {
       const floorMap = prev[floor] || {};
-      const currentRoom = floorMap[roomKey] || { selected: false, count: 1, areaMode: "AUTO", areaPerRoom: 100 };
+      const currentRoom = floorMap[roomKey];
+      const nextSelected = !(currentRoom?.selected ?? false);
+
+      console.log("[PARENT] toggleRoom:", {
+        floor,
+        roomKey,
+        wasSelected: currentRoom?.selected,
+        nowSelected: nextSelected,
+      });
+
       return {
         ...prev,
         [floor]: {
           ...floorMap,
-          [roomKey]: { ...currentRoom, selected: !currentRoom.selected }
-        }
+          [roomKey]: {
+            ...(currentRoom || { count: 1, areaMode: "AUTO", areaPerRoom: 100 }),
+            selected: nextSelected,
+          },
+        },
       };
     });
   };
 
+  // ✅ FIX: UPSERT — agar room exist nahi karta to naya banao + selected force true
   const updateRoom = (floor: string, roomKey: string, patch: Partial<FloorRoom>) => {
     setFloorRooms(prev => {
       const floorMap = prev[floor] || {};
-      const currentRoom = floorMap[roomKey] || { selected: true, count: 1, areaMode: "AUTO", areaPerRoom: 100 };
+      const currentRoom = floorMap[roomKey];
+
+      // ✅ UPSERT: naya room create karo agar exist nahi karta
+      const nextRoom: any = currentRoom
+        ? { ...currentRoom, ...patch }
+        : {
+            selected: true,
+            count: 1,
+            areaMode: "AUTO",
+            areaPerRoom: 100,
+            ...patch,
+          };
+
+      // ✅ selected force true (agar patch me explicitly nahi diya)
+      if (nextRoom.selected === undefined || nextRoom.selected === null) {
+        nextRoom.selected = true;
+      }
+
+      console.log("[PARENT] updateRoom UPSERT:", {
+        floor,
+        roomKey,
+        wasExisting: !!currentRoom,
+        nextRoom,
+      });
+
       return {
         ...prev,
         [floor]: {
           ...floorMap,
-          [roomKey]: { ...currentRoom, ...patch }
-        }
+          [roomKey]: nextRoom,
+        },
       };
     });
   };
@@ -427,6 +575,11 @@ export default function ConstructionPlanInput() {
     setBoundarySouth("");
     setBoundaryEast("");
     setBoundaryWest("");
+    // ✅ NEW: Reset stair cache
+    lastExtractedSignature.current = "";
+    setGroundStairPos(null);
+    setGroundStairOffset(null);
+    setGroundFloorProgram([]);
     alert("Form cleared successfully!");
   };
 
@@ -438,6 +591,10 @@ export default function ConstructionPlanInput() {
         plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
         boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
         selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
+        // ✅ NEW: Pass stair inheritance to plan generator
+        groundStairPosition: groundStairPos,
+        groundStairRelativeOffset: groundStairOffset,
+        groundFloorProgram,
         createdAt: new Date().toISOString(),
       };
 
@@ -489,6 +646,10 @@ export default function ConstructionPlanInput() {
         plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
         boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
         selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
+        // ✅ NEW: Pass stair inheritance
+        groundStairPosition: groundStairPos,
+        groundStairRelativeOffset: groundStairOffset,
+        groundFloorProgram,
       });
     } catch (error) {
       console.warn("Live construction-plan generation preview fallback:", error);
@@ -499,7 +660,8 @@ export default function ConstructionPlanInput() {
     selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
     plotArea, coverageType, plotDimensions, dimDetails, setbackInputs, boundaryNorth,
     boundarySouth, boundaryEast, boundaryWest, selectedFloors, floorData, floorBhkConfig,
-    floorRooms, planningMode, floorSettings
+    floorRooms, planningMode, floorSettings,
+    groundStairPos, groundStairOffset, groundFloorProgram,  // ✅ NEW deps
   ]);
 
   const enrichedFloorData = useMemo(() => {
@@ -617,6 +779,24 @@ export default function ConstructionPlanInput() {
         plotLength={frontWidthFt}
         plotWidth={depthFt}
         groundCoverage={coverageType}
+        // ✅ NEW: Pass actual stair position + relative offset from layout engine
+        groundStairPositionExternal={groundStairPos}
+        groundStairRelativeOffsetExternal={groundStairOffset}
+        onPlanningContextReady={(ctx) => {
+          // ✅ FIX: Only use child's context if parent hasn't extracted its own
+          if (typeof console !== 'undefined') {
+            console.log('[PARENT] Planning context ready from child:', ctx);
+          }
+          if (!groundStairPos && ctx.groundStairPosition) {
+            setGroundStairPos(ctx.groundStairPosition);
+          }
+          if (!groundStairOffset && ctx.groundStairRelativeOffset) {
+            setGroundStairOffset(ctx.groundStairRelativeOffset);
+          }
+          if ((!groundFloorProgram || groundFloorProgram.length === 0) && ctx.groundFloorProgram?.length) {
+            setGroundFloorProgram(ctx.groundFloorProgram);
+          }
+        }}
       />
 
       <div className="flex flex-wrap gap-2 border-t-2 border-black pt-3">
@@ -697,14 +877,48 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-        floorRooms={Object.fromEntries(
-  Object.entries(generatedCadFloorRooms).map(([floor, rooms]) => [
-    floor,
-    Array.isArray(rooms) 
-      ? Object.fromEntries(rooms.map((r: any, idx) => [r.id || r.type || idx, r]))
-      : rooms
-  ])
-)}
+               floorRooms={(() => {
+          // ✅ FIX: Merge floorRooms state (parent) with generated CAD rooms
+          // Parent state (from FloorManagerSection) is source of truth.
+          const merged: Record<string, Record<string, FloorRoom>> = {};
+
+          // Step 1: Add all generated CAD rooms (from engine)
+          Object.entries(generatedCadFloorRooms || {}).forEach(([floor, rooms]) => {
+            if (Array.isArray(rooms)) {
+              merged[floor] = Object.fromEntries(
+                rooms.map((r: any, idx) => [r.id || r.type || idx, r])
+              );
+            } else if (rooms && typeof rooms === "object") {
+              merged[floor] = { ...(rooms as any) };
+            }
+          });
+
+          // Step 2: Override with floorRooms state (user-facing + FloorManagerSection)
+          Object.entries(floorRooms || {}).forEach(([floor, roomsMap]) => {
+            const existing = merged[floor] || {};
+            const mergedFloor: Record<string, FloorRoom> = { ...existing };
+
+            Object.entries(roomsMap || {}).forEach(([roomKey, room]) => {
+              if (room && (room as any).selected) {
+                // ✅ Include only selected rooms
+                mergedFloor[roomKey] = { ...(existing[roomKey] || {}), ...room };
+              } else if (mergedFloor[roomKey]) {
+                // ✅ Selected nahi to hata do
+                delete mergedFloor[roomKey];
+              }
+            });
+
+            merged[floor] = mergedFloor;
+          });
+
+          console.log("[PARENT] CadModalView floorRooms merged:", {
+            floorKeys: Object.keys(merged),
+            firstFloorCount: Object.keys(merged["FIRST FLOOR"] || {}).length,
+            groundFloorCount: Object.keys(merged["GROUND FLOOR"] || {}).length,
+          });
+
+          return merged;
+        })()}
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}
         planningMode={planningMode}

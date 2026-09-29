@@ -81,15 +81,17 @@ export function generateAllCandidates(request: MultiCandidateRequest): MultiCand
   );
 
   const stairType: StaircaseType =
-    W >= 28 && H >= 45 ? 'DOG_LEGGED' :
-    W >= 18 && H >= 38 ? 'L_SHAPED' : 'STRAIGHT';
+    W >= 28 && H >= 45 ? 'DOG_LEGGED' : 'L_SHAPED';
 
   const staircase = calculateStaircase(
-    Number(request.floorToFloorHeightFeet) || 10,
-    6.8,
-    stairType,
-  );
-
+  Number(request.floorToFloorHeightFeet) || 10,   // 1. floorToFloorHeightFt
+  W,                                              // 2. availableWidthFt (plot width)
+  H,                                              // 3. availableLengthFt (plot length)
+  stairType,                                      // 4. staircaseType
+  7,                                              // 5. preferredRiserIn
+  11,                                             // 6. preferredTreadIn
+  3.0,                                            // 7. flightWidthFt
+);
   const parkingMode = String(request.parkingMode || 'CAR').toUpperCase();
 
   const candidates: PlanCandidate[] = [];

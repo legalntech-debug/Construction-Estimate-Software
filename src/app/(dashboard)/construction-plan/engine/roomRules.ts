@@ -73,27 +73,89 @@ export const BHK_PRESETS = {
   ],
 } as const;
 
-export function getRoomDefinition(roomKey: string): RoomDefinition {
+// ============================================================
+// ✅ FIX: Safe fallback room definition
+// Used when key is undefined/null/invalid — prevents crash
+// ============================================================
+const FALLBACK_ROOM_DEFINITION: RoomDefinition = {
+  key: "ROOM",
+  label: "ROOM",
+  minArea: 9,
+  defaultArea: 100,
+  minWidth: 3,
+  minLength: 3,
+  defaultWidth: 10,
+  defaultLength: 10,
+  statutoryMinArea: 9,
+} as RoomDefinition;
+
+/**
+ * ✅ FIXED: Safe room definition lookup
+ * - Handles undefined/null/non-string keys
+ * - Handles empty strings
+ * - Returns fallback instead of crashing
+ */
+export function getRoomDefinition(roomKey: string | undefined | null): RoomDefinition {
+  // ✅ Guard: null/undefined
+  if (roomKey === undefined || roomKey === null) {
+    if (typeof console !== 'undefined') {
+      console.warn('[ROOM RULES] getRoomDefinition called with null/undefined key, using fallback.');
+    }
+    return FALLBACK_ROOM_DEFINITION;
+  }
+
+  // ✅ Guard: non-string types
+  if (typeof roomKey !== 'string') {
+    if (typeof console !== 'undefined') {
+      console.warn('[ROOM RULES] getRoomDefinition called with non-string key:', roomKey, ', using fallback.');
+    }
+    return FALLBACK_ROOM_DEFINITION;
+  }
+
+  // ✅ Guard: empty after trim
   const normalizedKey = roomKey.trim().toUpperCase();
-  return (
-    ROOM_CATALOG.find((room) => room.key === normalizedKey || room.label === normalizedKey) ||
-    ROOM_CATALOG[0]
+  if (!normalizedKey) {
+    if (typeof console !== 'undefined') {
+      console.warn('[ROOM RULES] getRoomDefinition called with empty key, using fallback.');
+    }
+    return FALLBACK_ROOM_DEFINITION;
+  }
+
+  // ✅ Lookup in catalog
+  const found = ROOM_CATALOG.find(
+    (room) => room.key === normalizedKey || room.label === normalizedKey
   );
+
+  if (!found) {
+    if (typeof console !== 'undefined') {
+      console.warn(`[ROOM RULES] No definition found for key "${normalizedKey}", using fallback.`);
+    }
+    return FALLBACK_ROOM_DEFINITION;
+  }
+
+  return found;
 }
 
 export function calculateRoomAutoArea(
-  room: RoomDefinition,
+  room: RoomDefinition | undefined | null,
   floorArea: number,
   isGroundFloor: boolean
 ): number {
+  // ✅ FIX: Guard against undefined room
+  if (!room || typeof room !== 'object') {
+    return Math.max(1, floorArea * 0.1);
+  }
+
+  const safeFloorArea = Number.isFinite(floorArea) && floorArea > 0 ? floorArea : 100;
+
   // Kitchen area floor area ke 10% par calculate hota hai
   if (room.key === "KITCHEN") {
-    const calculated = floorArea * (room.percentageRule || 0.10);
-    return Math.max(Math.round(calculated), room.minArea);
+    const calculated = safeFloorArea * (room.percentageRule || 0.10);
+    return Math.max(Math.round(calculated), room.minArea || 48);
   }
 
   // Living Room Ground Floor par hamesha minimum 180 rakhna better hai
-  let area = room.defaultArea;
+  let area = room.defaultArea || 100;
 
   if (room.key === "LIVING ROOM" && isGroundFloor) {
     area = Math.max(area, 180);
@@ -102,22 +164,66 @@ export function calculateRoomAutoArea(
   return area;
 }
 
+/**
+ * ✅ FIXED: Validate & fix room dimensions
+ * - Handles invalid inputs
+ * - Enforces statutory minimums
+ * - Never returns NaN
+ */
 export function validateAndFixRoomDimensions(
-  roomKey: string,
+  roomKey: string | undefined | null,
   w: number,
   h: number
 ): { w: number; h: number } {
   const def = getRoomDefinition(roomKey);
-  const minW = def.minWidth;
-  const minL = def.minLength;
-  const area = w * h;
 
-  let fixedW = Math.max(w, minW);
-  let fixedH = Math.max(h, minL);
+  // ✅ Guard: invalid numbers
+  const safeW = Number.isFinite(w) && w > 0 ? w : def.minWidth;
+  const safeH = Number.isFinite(h) && h > 0 ? h : def.minLength;
+  const area = safeW * safeH;
 
+  const minW = def.minWidth || 3;
+  const minL = def.minLength || 3;
+
+  let fixedW = Math.max(safeW, minW);
+  let fixedH = Math.max(safeH, minL);
+
+  // ✅ Enforce statutory minimum area
   if (def.statutoryMinArea && area < def.statutoryMinArea) {
-    fixedH = Math.max(fixedH, def.statutoryMinArea / fixedW);
+    const targetH = def.statutoryMinArea / Math.max(0.1, fixedW);
+    fixedH = Math.max(fixedH, targetH);
   }
 
+  // ✅ Cap at reasonable max (2x default) to prevent runaway
+  const maxW = (def.defaultWidth || 12) * 2;
+  const maxH = (def.defaultLength || 15) * 2;
+  fixedW = Math.min(fixedW, maxW);
+  fixedH = Math.min(fixedH, maxH);
+
   return { w: fixedW, h: fixedH };
+}
+
+/**
+ * ✅ NEW: Safe area lookup for a room key
+ * Returns a positive area even if key is invalid.
+ */
+export function getRoomArea(roomKey: string | undefined | null): number {
+  const def = getRoomDefinition(roomKey);
+  return Math.max(1, def.defaultArea || 100);
+}
+
+/**
+ * ✅ NEW: Safe minimum width for a room key
+ */
+export function getRoomMinWidth(roomKey: string | undefined | null): number {
+  const def = getRoomDefinition(roomKey);
+  return Math.max(1, def.minWidth || 3);
+}
+
+/**
+ * ✅ NEW: Safe minimum length for a room key
+ */
+export function getRoomMinLength(roomKey: string | undefined | null): number {
+  const def = getRoomDefinition(roomKey);
+  return Math.max(1, def.minLength || 3);
 }

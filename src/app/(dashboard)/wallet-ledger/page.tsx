@@ -109,33 +109,84 @@ export default function WalletLedgerPage() {
     fetchInitialData();
   }, []);
 
-  // Real-time subscription setup for live updates
+  // Real-time subscription setup for live updates (Global for Admin, Filtered for Users)
   useEffect(() => {
-    if (!selectedUserId || !isAuthenticated) return;
+    if (!isAuthenticated) return;
+
+    const userType = profile?.user_type?.trim().toLowerCase();
+    const userRole = profile?.role?.trim().toLowerCase();
+    const isAdminUser = userType === 'admin' || userType === 'administrator' || userType === 'founder' || userRole === 'admin';
+
+    if (!isAdminUser && !selectedUserId) return;
 
     const channel = supabaseClient
       .channel('ledger-realtime-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_transactions', filter: `user_id=eq.${selectedUserId}` }, () => {
-        fetchLedgerData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_recharges', filter: `user_id=eq.${selectedUserId}` }, () => {
-        fetchLedgerData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'estimates', filter: `user_id=eq.${selectedUserId}` }, () => {
-        fetchLedgerData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'service_records', filter: `user_id=eq.${selectedUserId}` }, () => {
-        fetchLedgerData();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'partner_settlements', filter: `user_id=eq.${selectedUserId}` }, () => {
-        fetchLedgerData();
-      })
+      .on(
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'wallet_transactions', 
+          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
+        }, 
+        () => { 
+          fetchLedgerData(); 
+        }
+      )
+      .on(
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'wallet_recharges', 
+          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
+        }, 
+        () => { 
+          fetchLedgerData(); 
+        }
+      )
+      .on(
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'estimates', 
+          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
+        }, 
+        () => { 
+          fetchLedgerData(); 
+        }
+      )
+      .on(
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'service_records', 
+          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
+        }, 
+        () => { 
+          fetchLedgerData(); 
+        }
+      )
+      .on(
+        'postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'partner_settlements', 
+          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
+        }, 
+        () => { 
+          fetchLedgerData(); 
+        }
+      )
       .subscribe();
 
     return () => {
       supabaseClient.removeChannel(channel);
     };
-  }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate]);
+  }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate, profile]);
 
   useEffect(() => {
     if (!isAuthenticated) return;

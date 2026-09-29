@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import RechargeModal from './components/RechargeModal';
 import AdminRechargeApproval from './components/AdminRechargeApproval';
+import AdminPartnerApproval from './components/AdminPartnerApproval';
+import ApprovalNotificationBell from './components/ApprovalNotificationBell';
+import PartnerNetworkPromoModal from './components/PartnerNetworkPromoModal';
 
 /* CARD COMPONENT */
 function Card({ title, value, color }: any) {
@@ -26,18 +29,21 @@ export default function DashboardPage() {
     wallet: 0,
     planType: 'BASIC ENGINE PLAN',
     isAdmin: false,
+    isApprover: false,
+    role: 'user',
+    secondRole: null,
     approvalStatus: 'APPROVED',
     createdAt: null
   });
   const [estimateList, setEstimateList] = useState<any[]>([]);
-  
+
   // States for Profile Dropdown, Hamburger Menu Drawer & Notifications
   const [showProfile, setShowProfile] = useState(false);
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
 
   const [filterType, setFilterType] = useState<'All' | 'Paid' | 'Pending'>('All');
-  const [refWidth, setRefWidth] = useState(240); 
+  const [refWidth, setRefWidth] = useState(240);
   const [clientWidth, setClientWidth] = useState(240);
 
   // Modal State for Transaction History
@@ -45,13 +51,18 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Search Filters States
-  const [refSearch, setRefSearch] = useState(''); 
+  const [refSearch, setRefSearch] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [representativeSearch, setRepresentativeSearch] = useState('');
 
   // Wallet Recharge State
   const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
+
+  // Partner Network Promo Popup State
+  const [showPartnerPromo, setShowPartnerPromo] = useState(false);
+  const [isPartnerUser, setIsPartnerUser] = useState(false);
+  const [promoChecked, setPromoChecked] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -65,31 +76,155 @@ export default function DashboardPage() {
         .maybeSingle();
 
       const userEmail = user.email || '';
-      const isAdmin = profile?.role === 'admin' || userEmail === 'admin@lnt.com' || profile?.user_type === 'Admin'; 
+      const roleStr = (profile?.role || '').toLowerCase();
+      const secondRoleStr = (profile?.second_role || '').toLowerCase();
+
+      const isAdmin =
+        profile?.role === 'admin' ||
+        userEmail === 'admin@lnt.com' ||
+        profile?.user_type === 'Admin';
+
+      const approverRoles = ['admin', 'ceo', 'co-partner', 'co_partner', 'co partner'];
+      const isApprover =
+        isAdmin ||
+        userEmail === 'legalntech@gmail.com' ||
+        approverRoles.some((r) => roleStr.includes(r) || secondRoleStr.includes(r));
 
       setUserData({
         email: userEmail,
         id: profile?.user_code || user.id.slice(0, 8),
         uuid: user.id,
-        name: profile?.full_name || "Guest User",
+        name: profile?.full_name || 'Guest User',
         wallet: Number(profile?.wallet_balance || 0),
         planType: profile?.plan_type || 'BASIC ENGINE PLAN',
         isAdmin: isAdmin,
+        isApprover: isApprover,
+        role: profile?.role || 'user',
+        secondRole: profile?.second_role || null,
         approvalStatus: profile?.approval_status || 'PENDING',
         createdAt: profile?.created_at || profile?.created_date || user.created_at
       });
 
-      let query = supabase
+      // ========== PARTNER PROMO CHECK ==========
+      try {
+        // 1. Check if user already has partner account
+        const { data: partnerCheck } = await supabase
+          .from('partner_profiles')
+          .select('partner_id, approval_status')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        const userIsPartner = !!partnerCheck;
+        setIsPartnerUser(userIsPartner);
+
+        // 2. Check localStorage for seen status
+        const promoSeen = localStorage.getItem(`partner_promo_seen_${user.id}`);
+        const promoClicked = localStorage.getItem(`partner_promo_clicked_${user.id}`);
+
+        // 3. Determine if promo should show
+        const isUserApproved = isAdmin || profile?.approval_status === 'APPROVED';
+        const shouldShowPromo =
+          !userIsPartner &&
+          !isAdmin &&
+          !promoSeen &&
+          !promoClicked &&
+          isUserApproved;
+
+        if (shouldShowPromo) {
+          // Delay for smoother UX - dashboard loads first
+          setTimeout(() => {
+            setShowPartnerPromo(true);
+          }, 1500);
+        }
+      } catch (err) {
+        console.error('Partner promo check failed:', err);
+      }
+      setPromoChecked(true);
+      // ========== END PARTNER PROMO CHECK ==========
+
+      /* ---------- FETCH ESTIMATE RECORDS (mis_records) ---------- */
+      let misQuery = supabase
         .from('mis_records')
         .select('*')
         .order('created_date', { ascending: true });
 
       if (!isAdmin) {
-        query = query.eq('user_id', user.id);
+        misQuery = misQuery.eq('user_id', user.id);
       }
 
-      const { data } = await query;
-      if (data) setEstimateList(data);
+      const { data: misData, error: misError } = await misQuery;
+      if (misError) console.error('MIS fetch error:', misError);
+
+      const formattedEstimates = (misData || []).map((item: any) => ({
+        ...item,
+        source_table: 'mis_records' as const,
+        record_category: 'ESTIMATE' as const,
+        customer_name: item.customer_name || 'N/A',
+        client_name: item.client_name || item.client || '',
+        case_type: item.case_type || 'NEW CONSTRUCTION',
+        fee_standard: Number(item.fee_standard || item.total_value || 0),
+        status: (item.status || 'PENDING').toUpperCase(),
+        created_date: item.created_date || item.created_at || new Date().toISOString(),
+      }));
+
+      /* ---------- FETCH SERVICE RECORDS (service_records) ---------- */
+      let serviceQuery = supabase
+        .from('service_records')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!isAdmin) {
+        serviceQuery = serviceQuery.eq('user_id', user.id);
+      }
+
+      const { data: serviceData, error: serviceError } = await serviceQuery;
+      if (serviceError) console.error('Service fetch error:', serviceError);
+
+      const formattedServices = (serviceData || []).map((item: any) => {
+        // Extract buyer name from form_snapshot if customer_name missing
+        let extractedName = item.customer_name;
+        if (!extractedName && item.form_snapshot) {
+          try {
+            const snapshot =
+              typeof item.form_snapshot === 'string'
+                ? JSON.parse(item.form_snapshot)
+                : item.form_snapshot;
+            if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
+              extractedName = snapshot.buyers[0]?.name;
+            }
+          } catch (e) {
+            // ignore JSON parse errors
+          }
+        }
+
+        return {
+          ...item,
+          id: item.id || item.ref_no, // unified id (service_records PK = ref_no)
+          source_table: 'service_records' as const,
+          record_category: 'SERVICE' as const,
+          customer_name: extractedName || item.client_name || 'N/A',
+          client_name: item.client_name || '',
+          representative: item.representative || '',
+          case_type:
+            item.case_type ||
+            (item.deed_type ? `DEED - ${item.deed_type}` : 'DEED_DRAFT'),
+          fee_standard: Number(
+            item.user_service_fee || item.fee_standard || item.fee || 0
+          ),
+          // Normalize status so UI dropdown matches uppercase values
+          status: (item.status || 'PENDING').toUpperCase(),
+          created_date: item.created_date || item.created_at || new Date().toISOString(),
+        };
+      });
+
+      /* ---------- MERGE BOTH DATA SOURCES ---------- */
+      const combined = [...formattedEstimates, ...formattedServices];
+      combined.sort(
+        (a, b) =>
+          new Date(b.created_date).getTime() - new Date(a.created_date).getTime()
+      );
+
+      setEstimateList(combined);
 
       fetchRecharges(user.id, isAdmin);
     };
@@ -98,7 +233,10 @@ export default function DashboardPage() {
   }, []);
 
   const fetchRecharges = async (userId: string, isAdmin: boolean) => {
-    let q = supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false });
+    let q = supabase
+      .from('wallet_recharges')
+      .select('*')
+      .order('created_at', { ascending: false });
     if (!isAdmin) {
       q = q.eq('user_id', userId);
     }
@@ -109,18 +247,25 @@ export default function DashboardPage() {
   const currentDate = new Date();
   const targetLockDate = new Date('2026-08-20T00:00:00');
   const isAfterLockDate = currentDate > targetLockDate;
-  
+
   const accountCreationDate = new Date(userData.createdAt || Date.now());
-  const daysSinceCreation = (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
+  const daysSinceCreation =
+    (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
   const isWithinGracePeriod = daysSinceCreation <= 21;
 
   const isWalletLow = userData.wallet < 100;
   const isPremiumUser = (userData.planType || '').toUpperCase().includes('PREMIUM');
   const isFirstDateOfMonth = currentDate.getDate() === 1;
 
-  const isAccountLocked = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isAfterLockDate && isWalletLow;
-  
-  const showLowWalletWarning = !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isWalletLow;
+  const isAccountLocked =
+    !userData.isAdmin &&
+    !isPremiumUser &&
+    !isWithinGracePeriod &&
+    isAfterLockDate &&
+    isWalletLow;
+
+  const showLowWalletWarning =
+    !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isWalletLow;
   const showPremiumBillClearAlert = isPremiumUser && isFirstDateOfMonth;
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -130,7 +275,7 @@ export default function DashboardPage() {
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const currentWidth = startWidth + (moveEvent.clientX - startX);
-      if (currentWidth > 120) { 
+      if (currentWidth > 120) {
         setRefWidth(currentWidth);
       }
     };
@@ -151,7 +296,7 @@ export default function DashboardPage() {
 
     const handleMouseMove = (moveEvent: MouseEvent) => {
       const currentWidth = startWidth + (moveEvent.clientX - startX);
-      if (currentWidth > 120) { 
+      if (currentWidth > 120) {
         setClientWidth(currentWidth);
       }
     };
@@ -171,12 +316,12 @@ export default function DashboardPage() {
   );
 
   const receivedAmount = estimateList
-    .filter(i => (i.status || '').toUpperCase() === 'RECEIVED')
+    .filter((i) => (i.status || '').toUpperCase() === 'RECEIVED')
     .reduce((sum, i) => sum + Number(i.fee_standard || i.total_value || 0), 0);
 
   const pendingAmount = totalValue - receivedAmount;
 
-  const filteredList = estimateList.filter(item => {
+  const filteredList = estimateList.filter((item) => {
     const currentStatus = (item.status || 'PENDING').toUpperCase();
     if (filterType === 'Paid' && currentStatus !== 'RECEIVED') return false;
     if (filterType === 'Pending' && currentStatus === 'RECEIVED') return false;
@@ -188,15 +333,78 @@ export default function DashboardPage() {
     if (clientSearch && !itemClient.includes(clientSearch.toLowerCase())) return false;
 
     const itemRep = (item.representative || item.rep_name || '').toLowerCase();
-    if (representativeSearch && !itemRep.includes(representativeSearch.toLowerCase())) return false;
+    if (representativeSearch && !itemRep.includes(representativeSearch.toLowerCase()))
+      return false;
 
     return true;
   });
 
+  const isPendingApproval = !userData.isAdmin && userData.approvalStatus === 'PENDING';
+  const isRejected = !userData.isAdmin && userData.approvalStatus === 'REJECTED';
   const isApproved = userData.isAdmin || userData.approvalStatus === 'APPROVED';
 
   return (
     <div className="p-2 sm:p-6 space-y-3 sm:space-y-6 relative pb-32 max-w-7xl mx-auto">
+      {/* ⏳ PENDING APPROVAL BANNER */}
+      {isPendingApproval && (
+        <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-4 sm:p-5 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-3xl">⏳</span>
+            <div>
+              <h4 className="font-black text-sm sm:text-base uppercase tracking-wide">
+                Account Pending Approval
+              </h4>
+              <p className="text-[11px] sm:text-xs opacity-95 mt-1 leading-relaxed">
+                Aapka account <b>Admin / CEO / Co-Partner</b> ke verification me hai.
+                <br />
+                Login chalu hai, lekin <b>Estimate, Deed Drafting, Construction Plan, Recharge</b>{' '}
+                approval ke baad unlock honge.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const message = `Hello Admin,\n\nMera L&T Consultant account approval pending hai. Kripya jaldi approve karein.\n\nName: ${userData.name}\nEmail: ${userData.email}\nSystem ID: ${userData.id}\nWallet: ₹${userData.wallet}`;
+              window.open(
+                `https://wa.me/917987561396?text=${encodeURIComponent(message)}`,
+                '_blank'
+              );
+            }}
+            className="bg-white text-amber-700 font-black px-4 py-2 rounded-lg text-[11px] uppercase shadow-md hover:bg-amber-50 transition whitespace-nowrap cursor-pointer w-full sm:w-auto"
+          >
+            💬 WhatsApp Admin
+          </button>
+        </div>
+      )}
+
+      {/* ❌ REJECTED BANNER */}
+      {isRejected && (
+        <div className="bg-gradient-to-r from-rose-600 to-red-600 text-white p-4 sm:p-5 rounded-xl shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="text-3xl">❌</span>
+            <div>
+              <h4 className="font-black text-sm sm:text-base uppercase tracking-wide">
+                Account Rejected
+              </h4>
+              <p className="text-[11px] sm:text-xs opacity-95 mt-1">
+                Aapka account approval nahi mila. Kripya support team se contact karein.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const message = `Hello Admin,\n\nMera L&T account reject ho gaya hai. Please help.\n\nName: ${userData.name}\nEmail: ${userData.email}`;
+              window.open(
+                `https://wa.me/917987561396?text=${encodeURIComponent(message)}`,
+                '_blank'
+              );
+            }}
+            className="bg-white text-rose-700 font-black px-4 py-2 rounded-lg text-[11px] uppercase shadow-md hover:bg-rose-50 transition whitespace-nowrap cursor-pointer"
+          >
+            💬 Contact Support
+          </button>
+        </div>
+      )}
 
       {/* PREMIUM USER 1ST OF THE MONTH BILL CLEARANCE ALERT */}
       {showPremiumBillClearAlert && (
@@ -204,9 +412,12 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2.5">
             <span className="text-xl">📋</span>
             <div>
-              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Monthly Bill Clearance Alert</h4>
+              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">
+                Monthly Bill Clearance Alert
+              </h4>
               <p className="text-[10px] sm:text-xs opacity-95 mt-0.5">
-                Dear Premium Subscriber, please review and clear your monthly subscription billing statement.
+                Dear Premium Subscriber, please review and clear your monthly subscription
+                billing statement.
               </p>
             </div>
           </div>
@@ -225,9 +436,13 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2.5">
             <span className="text-xl">⚠️</span>
             <div>
-              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Low Wallet Balance Alert!</h4>
+              <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">
+                Low Wallet Balance Alert!
+              </h4>
               <p className="text-[10px] sm:text-xs opacity-95 mt-0.5">
-                Your wallet balance is <strong className="underline">₹{userData.wallet.toFixed(2)}</strong> (less than ₹100). Please recharge.
+                Your wallet balance is{' '}
+                <strong className="underline">₹{userData.wallet.toFixed(2)}</strong> (less than
+                ₹100). Please recharge.
               </p>
             </div>
           </div>
@@ -243,7 +458,6 @@ export default function DashboardPage() {
       {/* HEADER WITH HAMBURGER MENU, TITLE, NOTIFICATION BELL & PROFILE */}
       <div className="flex justify-between items-center bg-white px-3 py-2.5 sm:p-4 rounded-xl shadow-sm border border-slate-200">
         <div className="flex items-center gap-2.5">
-          {/* HAMBURGER MENU ICON */}
           <button
             onClick={() => {
               setShowMenuDrawer(true);
@@ -253,19 +467,31 @@ export default function DashboardPage() {
             className="text-slate-800 hover:text-blue-600 focus:outline-none cursor-pointer p-1"
             title="Menu"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+              stroke="currentColor"
+              className="w-5 h-5 sm:w-6 sm:h-6"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"
+              />
             </svg>
           </button>
-          
+
           <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight">
             {userData.isAdmin ? 'LNT ADMIN DASHBOARD' : 'LNT DASHBOARD'}
           </h1>
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          
-          {/* NOTIFICATION BELL BUTTON */}
+          {userData.isApprover && <ApprovalNotificationBell />}
+
+          {/* NOTIFICATION BELL */}
           <div className="relative">
             <button
               onClick={async () => {
@@ -275,27 +501,37 @@ export default function DashboardPage() {
                 if (!('Notification' in window)) return;
                 const permission = await Notification.requestPermission();
                 if (permission === 'granted') {
-                  new Notification("L&T Consultant Services", {
-                    body: "Notifications are enabled! You will receive daily 24/7 sale estimate & map drafting alerts.",
-                    icon: "/favicon.ico"
+                  new Notification('L&T Consultant Services', {
+                    body: 'Notifications are enabled! You will receive daily 24/7 sale estimate & map drafting alerts.',
+                    icon: '/favicon.ico'
                   });
                 }
               }}
               className="relative p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition shadow-sm border border-slate-200 cursor-pointer"
               title="Notifications"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+                className="w-4 h-4 sm:w-5 sm:h-5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"
+                />
               </svg>
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-600 rounded-full ring-2 ring-white"></span>
             </button>
 
-            {/* NOTIFICATION DROPDOWN */}
             {showNotifications && (
               <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
                 <div className="bg-slate-900 p-3 text-white flex justify-between items-center">
                   <span className="font-bold text-xs uppercase tracking-wider">Notifications</span>
-                  <button 
+                  <button
                     onClick={() => setShowNotifications(false)}
                     className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer"
                   >
@@ -307,10 +543,12 @@ export default function DashboardPage() {
                     <div className="bg-red-50 p-3 rounded-xl border border-red-200 shadow-sm space-y-2">
                       <p className="font-bold text-xs text-red-600">⚠️ Low Wallet Balance Alert!</p>
                       <p className="text-xs text-slate-600 leading-relaxed">
-                        Your current wallet balance is <b className="text-red-600">₹{userData.wallet.toFixed(2)}</b> (less than ₹100). Please recharge your wallet immediately.
+                        Your current wallet balance is{' '}
+                        <b className="text-red-600">₹{userData.wallet.toFixed(2)}</b> (less than
+                        ₹100). Please recharge your wallet immediately.
                       </p>
                       {isApproved && (
-                        <button 
+                        <button
                           onClick={() => {
                             setShowNotifications(false);
                             setIsRechargeModalOpen(true);
@@ -327,24 +565,31 @@ export default function DashboardPage() {
                     <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 shadow-sm space-y-2">
                       <p className="font-bold text-xs text-blue-900">📋 Monthly Bill Clearance</p>
                       <p className="text-xs text-slate-700 leading-relaxed">
-                        Today is the 1st of the month. Please clear your subscription bill statement.
+                        Today is the 1st of the month. Please clear your subscription bill
+                        statement.
                       </p>
                     </div>
                   )}
 
-                  {!isApproved && !userData.isAdmin && (
+                  {isPendingApproval && (
                     <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 shadow-sm space-y-1">
-                      <p className="font-bold text-xs text-amber-800">⏳ Account Pending Approval</p>
+                      <p className="font-bold text-xs text-amber-800">
+                        ⏳ Account Pending Approval
+                      </p>
                       <p className="text-xs text-amber-700 leading-relaxed">
-                        Your account registration is under review by Admin. Once approved, you will be able to access Ledger and Wallet Recharges.
+                        Your account registration is under review by Admin. Once approved, you
+                        will be able to access Ledger and Wallet Recharges.
                       </p>
                     </div>
                   )}
 
                   <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm space-y-1">
-                    <p className="font-bold text-xs text-blue-600">☀️ Good Morning! L&T Consultant</p>
+                    <p className="font-bold text-xs text-blue-600">
+                      ☀️ Good Morning! L&T Consultant
+                    </p>
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      Get your sale estimate & map drafting done 24/7 anytime via L&T Consultant Software.
+                      Get your sale estimate & map drafting done 24/7 anytime via L&T Consultant
+                      Software.
                     </p>
                     <p className="text-[10px] text-slate-400 pt-1">Just now</p>
                   </div>
@@ -370,8 +615,19 @@ export default function DashboardPage() {
               <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden text-slate-700 font-sans">
                 <div className="bg-blue-600 p-4 text-white flex items-center gap-3">
                   <div className="bg-blue-500/30 p-2 rounded-lg">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={2}
+                      stroke="currentColor"
+                      className="w-5 h-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"
+                      />
                     </svg>
                   </div>
                   <span className="font-bold text-xs sm:text-sm tracking-wider uppercase">
@@ -383,12 +639,16 @@ export default function DashboardPage() {
                   <div className="space-y-3 pb-4 border-b border-slate-100 text-xs">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold uppercase text-slate-500">USER NAME</span>
-                      <span className="font-extrabold text-slate-900 uppercase">{userData.name}</span>
+                      <span className="font-extrabold text-slate-900 uppercase">
+                        {userData.name}
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between">
                       <span className="font-semibold uppercase text-slate-500">USER EMAIL</span>
-                      <span className="font-bold text-slate-900 truncate max-w-[150px]">{userData?.email}</span>
+                      <span className="font-bold text-slate-900 truncate max-w-[150px]">
+                        {userData?.email}
+                      </span>
                     </div>
 
                     <div className="flex items-center justify-between">
@@ -397,8 +657,18 @@ export default function DashboardPage() {
                     </div>
 
                     <div className="flex items-center justify-between">
-                      <span className="font-semibold uppercase text-slate-500">APPROVAL STATUS</span>
-                      <span className={`font-extrabold uppercase ${isApproved ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      <span className="font-semibold uppercase text-slate-500">
+                        APPROVAL STATUS
+                      </span>
+                      <span
+                        className={`font-extrabold uppercase ${
+                          isApproved
+                            ? 'text-emerald-600'
+                            : isRejected
+                            ? 'text-rose-600'
+                            : 'text-amber-600'
+                        }`}
+                      >
                         {userData.isAdmin ? 'ADMIN' : userData.approvalStatus}
                       </span>
                     </div>
@@ -413,14 +683,22 @@ export default function DashboardPage() {
 
                   <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                     <div>
-                      <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wide">WALLET AMOUNT</p>
-                      <p className={`text-base sm:text-lg font-black ${userData.wallet < 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                        {userData.wallet < 0 ? `- ₹ ${Math.abs(userData.wallet).toFixed(2)}` : `₹ ${userData?.wallet?.toFixed(2) || '0.00'}`}
+                      <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wide">
+                        WALLET AMOUNT
+                      </p>
+                      <p
+                        className={`text-base sm:text-lg font-black ${
+                          userData.wallet < 0 ? 'text-red-600' : 'text-emerald-600'
+                        }`}
+                      >
+                        {userData.wallet < 0
+                          ? `- ₹ ${Math.abs(userData.wallet).toFixed(2)}`
+                          : `₹ ${userData?.wallet?.toFixed(2) || '0.00'}`}
                       </p>
                     </div>
-                    
+
                     <div className="flex items-center gap-1.5">
-                      <button 
+                      <button
                         onClick={() => {
                           setShowProfile(false);
                           router.push('/wallet-ledger');
@@ -429,7 +707,7 @@ export default function DashboardPage() {
                       >
                         Ledger
                       </button>
-                      <button 
+                      <button
                         onClick={() => {
                           setShowProfile(false);
                           setIsRechargeModalOpen(true);
@@ -442,17 +720,20 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="space-y-1 text-xs font-bold">
-                    <button 
-                      onClick={() => router.push('/edit-profile')} 
+                    <button
+                      onClick={() => router.push('/edit-profile')}
                       className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-50 transition group uppercase cursor-pointer"
                     >
                       <span>EDIT PROFILE (PRE-FILLED)</span>
                     </button>
 
-                    <button 
+                    <button
                       onClick={async () => {
                         try {
-                          await supabase.from('profiles').update({ is_online: false }).eq('id', userData.uuid);
+                          await supabase
+                            .from('profiles')
+                            .update({ is_online: false })
+                            .eq('id', userData.uuid);
                           await supabase.auth.signOut();
                           router.push('/verify-estimate');
                         } catch (err: any) {
@@ -479,9 +760,11 @@ export default function DashboardPage() {
               <div className="bg-slate-900 p-4 text-white flex justify-between items-center">
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl">☰</span>
-                  <span className="font-black text-sm uppercase tracking-wider">LNT NAVIGATION MENU</span>
+                  <span className="font-black text-sm uppercase tracking-wider">
+                    LNT NAVIGATION MENU
+                  </span>
                 </div>
-                <button 
+                <button
                   onClick={() => setShowMenuDrawer(false)}
                   className="text-slate-400 hover:text-white font-bold text-xl cursor-pointer p-1"
                 >
@@ -490,95 +773,146 @@ export default function DashboardPage() {
               </div>
 
               <div className="p-4 space-y-2 text-xs font-bold text-slate-700 overflow-y-auto max-h-[calc(100vh-140px)]">
-                <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/dashboard'); }}
+                <button
+                  onClick={() => {
+                    setShowMenuDrawer(false);
+                    router.push('/dashboard');
+                  }}
                   className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer text-blue-600 bg-blue-50"
                 >
                   <span>🏠 Dashboard Home</span>
                 </button>
-                <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/wallet-ledger'); }}
+                <button
+                  onClick={() => {
+                    setShowMenuDrawer(false);
+                    router.push('/wallet-ledger');
+                  }}
                   className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
                 >
                   <span>Passbook & Wallet Ledger</span>
                 </button>
-                <button 
-                  onClick={() => { setShowMenuDrawer(false); setIsRechargeModalOpen(true); }}
+                <button
+                  onClick={() => {
+                    setShowMenuDrawer(false);
+                    setIsRechargeModalOpen(true);
+                  }}
                   className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer text-emerald-600"
                 >
                   <span>💳 Recharge Wallet</span>
                 </button>
-                <button 
-                  onClick={() => { setShowMenuDrawer(false); router.push('/edit-profile'); }}
+                <button
+                  onClick={() => {
+                    setShowMenuDrawer(false);
+                    router.push('/edit-profile');
+                  }}
                   className="w-full text-left p-3 rounded-xl hover:bg-slate-100 transition flex items-center gap-3 uppercase cursor-pointer"
                 >
                   <span>⚙️ Edit Profile</span>
                 </button>
 
-                {/* --- CORRECTED DEED & ESTIMATE ROUTES --- */}
-                <button 
-                  onClick={() => { 
+                <button
+                  onClick={() => {
+                    if (isPendingApproval) {
+                      alert(
+                        'Aapka account abhi approval me hai. Approval ke baad hi ye service use kar sakte ho.'
+                      );
+                      return;
+                    }
                     if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
-                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      alert(
+                        'Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.'
+                      );
                       router.push('/wallet-ledger');
                     } else {
-                      router.push('/deed-drafting'); 
+                      router.push('/deed-drafting');
                     }
-                    setShowMenuDrawer(false); 
+                    setShowMenuDrawer(false);
                   }}
                   className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
-                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                    isPendingApproval || (!userData.isAdmin && !isPremiumUser && isWalletLow)
+                      ? 'opacity-40 text-slate-400'
+                      : 'hover:bg-slate-100 text-slate-700'
                   }`}
                 >
                   <span>📝 Deed Drafting</span>
                 </button>
 
-                <button 
-                  onClick={() => { 
+                <button
+                  onClick={() => {
+                    if (isPendingApproval) {
+                      alert(
+                        'Aapka account abhi approval me hai. Approval ke baad hi ye service use kar sakte ho.'
+                      );
+                      return;
+                    }
                     if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
-                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      alert(
+                        'Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.'
+                      );
                       router.push('/wallet-ledger');
                     } else {
-                      router.push('/construction-plan'); 
+                      router.push('/construction-plan');
                     }
-                    setShowMenuDrawer(false); 
+                    setShowMenuDrawer(false);
                   }}
                   className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
-                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                    isPendingApproval || (!userData.isAdmin && !isPremiumUser && isWalletLow)
+                      ? 'opacity-40 text-slate-400'
+                      : 'hover:bg-slate-100 text-slate-700'
                   }`}
                 >
                   <span>🏗️ Construction Plan / Map</span>
                 </button>
 
-                <button 
-                  onClick={() => { 
+                <button
+                  onClick={() => {
+                    if (isPendingApproval) {
+                      alert(
+                        'Aapka account abhi approval me hai. Approval ke baad hi ye service use kar sakte ho.'
+                      );
+                      return;
+                    }
                     if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
-                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      alert(
+                        'Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.'
+                      );
                       router.push('/wallet-ledger');
                     } else {
-                      router.push('/estimate'); 
+                      router.push('/estimate');
                     }
-                    setShowMenuDrawer(false); 
+                    setShowMenuDrawer(false);
                   }}
                   className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
-                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                    isPendingApproval || (!userData.isAdmin && !isPremiumUser && isWalletLow)
+                      ? 'opacity-40 text-slate-400'
+                      : 'hover:bg-slate-100 text-slate-700'
                   }`}
                 >
                   <span>📊 Estimate (New / Renovation)</span>
                 </button>
 
-                <button 
-                  onClick={() => { 
+                <button
+                  onClick={() => {
+                    if (isPendingApproval) {
+                      alert(
+                        'Aapka account abhi approval me hai. Approval ke baad hi ye service use kar sakte ho.'
+                      );
+                      return;
+                    }
                     if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
-                      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+                      alert(
+                        'Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.'
+                      );
                       router.push('/wallet-ledger');
                     } else {
-                      router.push('/document-management'); 
+                      router.push('/document-management');
                     }
-                    setShowMenuDrawer(false); 
+                    setShowMenuDrawer(false);
                   }}
                   className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${
-                    (!userData.isAdmin && !isPremiumUser && isWalletLow) ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'
+                    isPendingApproval || (!userData.isAdmin && !isPremiumUser && isWalletLow)
+                      ? 'opacity-40 text-slate-400'
+                      : 'hover:bg-slate-100 text-slate-700'
                   }`}
                 >
                   <span>📁 Document Management</span>
@@ -587,7 +921,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="p-4 border-t border-slate-100 bg-slate-50">
-              <button 
+              <button
                 onClick={async () => {
                   try {
                     await supabase.auth.signOut();
@@ -607,32 +941,46 @@ export default function DashboardPage() {
       )}
 
       {/* DASHBOARD CONTENT WRAPPER */}
-      <div className={`relative space-y-3 sm:space-y-6 ${isAccountLocked ? 'pointer-events-none opacity-40 select-none' : ''}`}>
-
+      <div
+        className={`relative space-y-3 sm:space-y-6 ${
+          isAccountLocked || isPendingApproval
+            ? 'pointer-events-none opacity-40 select-none'
+            : ''
+        }`}
+      >
         {/* KPI CARDS */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
           <Card title="TOTAL" value={totalValue} color="text-slate-800" />
           <Card title="RECEIVED" value={receivedAmount} color="text-green-600" />
           <Card title="PENDING" value={pendingAmount} color="text-red-600" />
-          <Card title="ESTIMATES" value={estimateList.length} color="text-blue-600" />
+          <Card title="ENTRIES" value={estimateList.length} color="text-blue-600" />
         </div>
 
+        {/* ✅ ADMIN PARTNER APPROVAL SECTION */}
+        <AdminPartnerApproval
+          isAdmin={userData.isAdmin}
+          isApprover={userData.isApprover}
+          userData={userData}
+        />
+
         {/* ADMIN RECHARGE APPROVAL SECTION */}
-        <AdminRechargeApproval 
-          isAdmin={userData.isAdmin} 
-          rechargeRequests={rechargeRequests} 
-          onRefresh={() => fetchRecharges(userData.uuid, userData.isAdmin)} 
+        <AdminRechargeApproval
+          isAdmin={userData.isAdmin}
+          rechargeRequests={rechargeRequests}
+          onRefresh={() => fetchRecharges(userData.uuid, userData.isAdmin)}
         />
 
         {/* FILTER BAR */}
         <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            {['All', 'Paid', 'Pending'].map(type => (
+            {['All', 'Paid', 'Pending'].map((type) => (
               <button
                 key={type}
                 onClick={() => setFilterType(type as any)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 cursor-pointer ${
-                  filterType === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  filterType === type
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                 }`}
               >
                 {type}
@@ -658,7 +1006,10 @@ export default function DashboardPage() {
           <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
             <thead>
               <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
-                <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
+                <th
+                  style={{ width: `${refWidth}px` }}
+                  className="p-2 text-center relative group"
+                >
                   <div className="flex flex-col gap-1 items-center">
                     <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
                     <input
@@ -669,13 +1020,19 @@ export default function DashboardPage() {
                       className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500"
                     />
                   </div>
-                  <div onMouseDown={handleMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                  <div
+                    onMouseDown={handleMouseDown}
+                    className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10"
+                  />
                 </th>
 
                 <th className="p-3 font-semibold w-24 text-center">DATE</th>
                 <th className="p-3 font-semibold w-52 text-center">CUSTOMER NAME</th>
-                
-                <th style={{ width: `${clientWidth}px` }} className="p-2 text-center relative group">
+
+                <th
+                  style={{ width: `${clientWidth}px` }}
+                  className="p-2 text-center relative group"
+                >
                   <div className="flex flex-col gap-1 items-center">
                     <span className="px-1 text-[10px] font-bold text-slate-300">CLIENT</span>
                     <input
@@ -686,12 +1043,17 @@ export default function DashboardPage() {
                       className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500"
                     />
                   </div>
-                  <div onMouseDown={handleClientMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                  <div
+                    onMouseDown={handleClientMouseDown}
+                    className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10"
+                  />
                 </th>
 
                 <th className="p-2 w-48 text-center">
                   <div className="flex flex-col gap-1 items-center">
-                    <span className="px-1 text-[10px] font-bold text-slate-300">REPRESENTATIVE</span>
+                    <span className="px-1 text-[10px] font-bold text-slate-300">
+                      REPRESENTATIVE
+                    </span>
                     <input
                       type="text"
                       placeholder="Filter Rep..."
@@ -708,29 +1070,42 @@ export default function DashboardPage() {
                 <th className="p-3 font-semibold w-36 text-center">TRANSACTION</th>
               </tr>
             </thead>
-            
+
             <tbody>
-              {filteredList.map(est => {
+              {filteredList.map((est) => {
                 const dateSource = est.created_date || est.created_at;
                 const dateObj = dateSource ? new Date(dateSource) : null;
-                const formattedDate = dateObj 
-                  ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`
+                const formattedDate = dateObj
+                  ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(
+                      dateObj.getMonth() + 1
+                    ).padStart(2, '0')}/${dateObj.getFullYear()}`
                   : '-';
 
                 let cleanCustomerName = est.customer_name || '-';
-                const match = cleanCustomerName.match(/^(.*?)\s+(s\/o|d\/o|w\/o|c\/o|S\/O|D\/O|W\/O|C\/O)\b/i);
+                const match = cleanCustomerName.match(
+                  /^(.*?)\s+(s\/o|d\/o|w\/o|c\/o|S\/O|D\/O|W\/O|C\/O)\b/i
+                );
                 if (match && match[1]) {
                   cleanCustomerName = match[1].trim();
                 }
 
+                const statusUpper = (est.status || 'PENDING').toUpperCase();
+
                 return (
-                  <tr key={est.id} className="border-t hover:bg-slate-50 text-xs font-sans tracking-wide">
+                  <tr
+                    key={`${est.source_table}-${est.id || est.ref_no}`}
+                    className="border-t hover:bg-slate-50 text-xs font-sans tracking-wide"
+                  >
                     <td className="p-3 font-bold text-blue-600 uppercase text-center">
                       {est.ref_no}
                     </td>
-                    <td className="p-3 text-slate-600 text-center whitespace-nowrap">{formattedDate}</td>
+                    <td className="p-3 text-slate-600 text-center whitespace-nowrap">
+                      {formattedDate}
+                    </td>
                     <td className="p-3 uppercase text-center">
-                      <div className="font-extrabold text-slate-800">{cleanCustomerName.replace(/[,.]\s*$/, '')}</div>
+                      <div className="font-extrabold text-slate-800">
+                        {cleanCustomerName.replace(/[,.]\s*$/, '')}
+                      </div>
                     </td>
                     <td className="p-3 font-bold text-slate-700 uppercase text-center truncate">
                       {est.client_name || '-'}
@@ -745,12 +1120,16 @@ export default function DashboardPage() {
                       ₹{est.fee_standard || '0'}
                     </td>
                     <td className="p-3 text-center">
-                      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-wider ${
-                        (est.status || 'PENDING').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600' :
-                        (est.status || 'PENDING').toUpperCase() === 'WAIVED' ? 'bg-slate-100 text-slate-600' :
-                        'bg-red-100 text-red-600'
-                      }`}>
-                        {(est.status || 'PENDING').toUpperCase()}
+                      <span
+                        className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-wider ${
+                          statusUpper === 'RECEIVED'
+                            ? 'bg-emerald-100 text-emerald-600'
+                            : statusUpper === 'WAIVED'
+                            ? 'bg-slate-100 text-slate-600'
+                            : 'bg-red-100 text-red-600'
+                        }`}
+                      >
+                        {statusUpper}
                       </span>
                     </td>
                     <td className="p-3 text-center">
@@ -770,16 +1149,62 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
-
       </div>
 
-      {/* LOCK MESSAGE BANNER OVERLAY */}
-      {isAccountLocked && (
+      {/* ⏳ PENDING APPROVAL LOCK OVERLAY */}
+      {isPendingApproval && (
+        <div className="absolute inset-x-3 sm:inset-x-6 top-40 z-40 bg-slate-900/95 text-white p-6 sm:p-8 rounded-3xl shadow-2xl border-2 border-amber-500 text-center space-y-4 backdrop-blur-md">
+          <span className="text-4xl">⏳</span>
+          <h3 className="text-lg sm:text-xl font-black uppercase text-amber-400 tracking-wider">
+            Dashboard Locked — Approval Pending
+          </h3>
+          <p className="text-xs text-slate-300 max-w-lg mx-auto leading-relaxed">
+            Aapka account verification me hai. Approval ke baad hi aap
+            <b> Estimate, Deed Drafting, Construction Plan, MIS </b>
+            aur <b> Wallet Recharge </b> use kar payenge.
+            <br />
+            <br />
+            <span className="text-amber-300 font-bold">
+              Aapka login khula rahega, lekin services locked rahengi jab tak approval na mile.
+            </span>
+          </p>
+          <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
+            <button
+              onClick={() => {
+                const message = `Hello Admin,\n\nMera L&T Consultant account approval pending hai. Kripya jaldi approve karein.\n\nName: ${userData.name}\nEmail: ${userData.email}\nSystem ID: ${userData.id}`;
+                window.open(
+                  `https://wa.me/917987561396?text=${encodeURIComponent(message)}`,
+                  '_blank'
+                );
+              }}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-black px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
+            >
+              💬 WhatsApp Admin for Fast Approval
+            </button>
+            <button
+              onClick={async () => {
+                await supabase.auth.signOut();
+                router.push('/login');
+              }}
+              className="bg-slate-700 hover:bg-slate-600 text-white font-black px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer"
+            >
+              🚪 Logout
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* LOCK MESSAGE BANNER OVERLAY (Wallet Low) */}
+      {isAccountLocked && !isPendingApproval && (
         <div className="absolute inset-x-3 sm:inset-x-6 top-32 z-40 bg-slate-900/95 text-white p-6 sm:p-8 rounded-3xl shadow-2xl border-2 border-rose-500 text-center space-y-4 backdrop-blur-md">
           <span className="text-4xl">🔒</span>
-          <h3 className="text-lg sm:text-xl font-black uppercase text-rose-500 tracking-wider">Dashboard Locked (Recharge Required)</h3>
+          <h3 className="text-lg sm:text-xl font-black uppercase text-rose-500 tracking-wider">
+            Dashboard Locked (Recharge Required)
+          </h3>
           <p className="text-xs text-slate-300 max-w-lg mx-auto leading-relaxed">
-            Your 21-day trial period has ended. As per platform policy effective after August 20, 2026, accounts with a wallet balance below ₹100 are restricted. Your current balance is <strong className="text-rose-400">₹{userData.wallet.toFixed(2)}</strong>.
+            Your 21-day trial period has ended. As per platform policy effective after August 20,
+            2026, accounts with a wallet balance below ₹100 are restricted. Your current balance
+            is <strong className="text-rose-400">₹{userData.wallet.toFixed(2)}</strong>.
           </p>
           <div className="pt-2">
             <button
@@ -793,11 +1218,11 @@ export default function DashboardPage() {
       )}
 
       {/* WALLET RECHARGE MODAL COMPONENT */}
-      <RechargeModal 
-        isOpen={isRechargeModalOpen} 
-        onClose={() => setIsRechargeModalOpen(false)} 
-        userData={userData} 
-        onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)} 
+      <RechargeModal
+        isOpen={isRechargeModalOpen}
+        onClose={() => setIsRechargeModalOpen(false)}
+        userData={userData}
+        onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)}
       />
 
       {/* TRANSACTION HISTORY MODAL POPUP */}
@@ -805,8 +1230,10 @@ export default function DashboardPage() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-4 sm:p-6 w-full max-w-md border border-slate-100 space-y-4">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-slate-800 text-sm sm:text-base">Transaction History</h3>
-              <button 
+              <h3 className="font-bold text-slate-800 text-sm sm:text-base">
+                Transaction History
+              </h3>
+              <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-slate-400 hover:text-slate-600 font-bold text-lg cursor-pointer"
               >
@@ -819,29 +1246,45 @@ export default function DashboardPage() {
                 <span className="text-slate-500 font-medium">Reference No:</span>
                 <span className="font-bold text-blue-600">{selectedTxn.ref_no}</span>
               </div>
-              
+
               <div className="flex justify-between py-1.5 border-b border-slate-100">
                 <span className="text-slate-500 font-medium">Customer Name:</span>
-                <span className="font-bold text-slate-800 uppercase">{selectedTxn.customer_name}</span>
+                <span className="font-bold text-slate-800 uppercase">
+                  {selectedTxn.customer_name}
+                </span>
               </div>
 
               <div className="flex justify-between py-1.5 border-b border-slate-100">
                 <span className="text-slate-500 font-medium">Case Type:</span>
-                <span className="font-bold text-slate-900 uppercase">{selectedTxn.case_type || selectedTxn.estimate_type || 'NEW CONSTRUCTION'}</span>
+                <span className="font-bold text-slate-900 uppercase">
+                  {selectedTxn.case_type || selectedTxn.estimate_type || 'NEW CONSTRUCTION'}
+                </span>
               </div>
 
               <div className="flex justify-between py-1.5 border-b border-slate-100">
                 <span className="text-slate-500 font-medium">Amount Paid:</span>
-                <span className="font-extrabold text-emerald-600 text-sm">₹ {Number(selectedTxn.user_payment || selectedTxn.fee_standard || 0).toLocaleString()}</span>
+                <span className="font-extrabold text-emerald-600 text-sm">
+                  ₹{' '}
+                  {Number(
+                    selectedTxn.gateway_fee ||
+                      selectedTxn.user_service_fee ||
+                      selectedTxn.fee_standard ||
+                      0
+                  ).toLocaleString()}
+                </span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-100">
                 <span className="text-slate-500 font-medium">Payment ID / Mode:</span>
-                <span className="font-mono font-semibold text-slate-800">{selectedTxn.razorpay_payment_id || 'WALLET DEDUCTION'}</span>
+                <span className="font-mono font-semibold text-slate-800">
+                  {selectedTxn.razorpay_payment_id || 'WALLET DEDUCTION'}
+                </span>
               </div>
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-500 font-medium">Date & Time:</span>
                 <span className="font-semibold text-slate-700">
-                  {new Date(selectedTxn.created_at || selectedTxn.created_date || Date.now()).toLocaleString('en-IN')}
+                  {new Date(
+                    selectedTxn.created_at || selectedTxn.created_date || Date.now()
+                  ).toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
@@ -857,11 +1300,21 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ========== PARTNER NETWORK PROMO MODAL ========== */}
+      {showPartnerPromo && !isPartnerUser && promoChecked && (
+        <PartnerNetworkPromoModal
+          isOpen={showPartnerPromo}
+          onClose={() => setShowPartnerPromo(false)}
+          userId={userData.uuid}
+          userName={userData.name !== 'Loading...' ? userData.name : undefined}
+        />
+      )}
+
       {/* FOOTER */}
       <div className="text-[10px] sm:text-xs text-gray-400 text-center pt-2 pb-4">
         © 2026 LNT WITH AI 2.0 RIGHTS RESERVED
       </div>
-
     </div>
   );
 }

@@ -20,6 +20,37 @@ import BusinessProfitSharingWidget from './components/BusinessProfitSharingWidge
 import AdminRazorpayLiveWidget from '@/app/(dashboard)/admin-dashboard/components/AdminRazorpayLiveWidget';
 import UserManagementRBAC from './components/UserManagementRBAC';
 
+/* ============================================================
+   ✅ Centralized amount resolver
+   - service_records (Drafting/Map) => gateway_fee priority
+   - estimates                     => user_payment priority (unchanged)
+   ============================================================ */
+function resolveAmount(tx: any): number {
+  const isService =
+    tx?.source_table === 'service_records' ||
+    tx?.record_category === 'SERVICE' ||
+    tx?.__is_service_record === true;
+
+  const raw = isService
+    ? (tx.gateway_fee ??
+       tx.user_payment ??
+       tx.user_service_fee ??
+       tx.fee_standard ??
+       tx.amount ??
+       tx.gross_amount ??
+       tx.paid_amount ??
+       0)
+    : (tx.user_payment ??
+       tx.amount ??
+       tx.total_amount ??
+       tx.gross_amount ??
+       tx.paid_amount ??
+       0);
+
+  const n = Number(raw);
+  return isNaN(n) ? 0 : n;
+}
+
 export default function AdminDashboardPage(props: { 
   searchParams: Promise<{ filter?: string; inactiveDays?: string }> 
 }) {
@@ -228,7 +259,14 @@ export default function AdminDashboardPage(props: {
       setEstimatesList(estimatesData);
       setServiceRecordsList(serviceData);
 
+      /* ============================================================
+         ✅ COMBINED GATEWAY TRANSACTIONS
+         - Estimates  → user_payment priority (unchanged)
+         - Services   → gateway_fee priority (FIXED)
+         - source_table tag for later resolution
+         ============================================================ */
       const combinedGatewayTransactions = [
+        /* ---------- ESTIMATES (untouched) ---------- */
         ...estimatesData.map((item: any) => {
           const refNo = item.reference_no || item.estimate_no || item.id || '';
           let inferredType = 'Estimate';
@@ -240,23 +278,56 @@ export default function AdminDashboardPage(props: {
 
           return {
             ...item,
+            source_table: 'estimates',                        // ✅ tag
             case_type: item.estimate_type || item.case_type || inferredType, 
             reference_no: refNo,
             customer_name: item.client_name || item.customer_name || 'N/A',
-            amount: Number(item.amount || item.total_amount || 0),
+            amount: Number(item.user_payment ?? item.amount ?? item.total_amount ?? 0),
             created_at: item.created_at,
             payment_status: item.payment_status || 'paid'
           };
         }),
-        ...serviceData.map((item: any) => ({
-          ...item,
-          case_type: item.service_type || item.case_type || 'Drafting & Map',
-          reference_no: item.reference_no || item.razorpay_payment_id || item.id,
-          customer_name: item.client_name || item.customer_name || 'N/A',
-          amount: Number(item.user_payment || item.amount || 0),
-          created_at: item.created_at,
-          payment_status: item.payment_status || 'paid'
-        }))
+
+        /* ---------- SERVICE RECORDS (Drafting / Map) — FIXED ---------- */
+        ...serviceData.map((item: any) => {
+          // ✅ Amount priority for service_records: gateway_fee first
+          const resolvedAmount = Number(
+            item.gateway_fee ??
+            item.user_payment ??
+            item.user_service_fee ??
+            item.fee_standard ??
+            item.amount ??
+            0
+          );
+
+          // ✅ Extract buyer name from form_snapshot if customer_name missing
+          let extractedName = item.customer_name;
+          if (!extractedName && item.form_snapshot) {
+            try {
+              const snapshot = typeof item.form_snapshot === 'string'
+                ? JSON.parse(item.form_snapshot)
+                : item.form_snapshot;
+              if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
+                extractedName = snapshot.buyers[0]?.name;
+              }
+            } catch (e) {}
+          }
+
+          return {
+            ...item,
+            source_table: 'service_records',                  // ✅ tag
+            case_type: item.service_type || item.case_type || (item.deed_type ? `DEED - ${item.deed_type}` : 'Drafting & Map'),
+            reference_no: item.reference_no || item.ref_no || item.razorpay_payment_id || item.id,
+            customer_name: extractedName || item.client_name || 'N/A',
+            amount: resolvedAmount,                           // ✅ fixed
+            user_payment: Number(item.user_payment || 0),
+            user_service_fee: Number(item.user_service_fee || 0),
+            gateway_fee: Number(item.gateway_fee || 0),
+            fee_standard: Number(item.fee_standard || 0),
+            created_at: item.created_at,
+            payment_status: item.payment_status || 'paid'
+          };
+        })
       ].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
 
       setGatewayTxns(combinedGatewayTransactions);
@@ -307,15 +378,16 @@ export default function AdminDashboardPage(props: {
     return true;
   });
 
-  const activeGatewayRevenue = filteredGatewayTxns.reduce((sum: number, tx: any) => {
-    const amt = Number(tx.amount || tx.user_payment || tx.gross_amount || tx.paid_amount || 0);
-    return sum + (isNaN(amt) ? 0 : amt);
-  }, 0);
+  /* ✅ Use centralized resolver — handles service vs estimate automatically */
+  const activeGatewayRevenue = filteredGatewayTxns.reduce(
+    (sum: number, tx: any) => sum + resolveAmount(tx),
+    0
+  );
 
-  const totalGatewayRevenueAllTime = gatewayTxns.reduce((sum: number, tx: any) => {
-    const amt = Number(tx.amount || tx.user_payment || tx.gross_amount || tx.paid_amount || 0);
-    return sum + (isNaN(amt) ? 0 : amt);
-  }, 0);
+  const totalGatewayRevenueAllTime = gatewayTxns.reduce(
+    (sum: number, tx: any) => sum + resolveAmount(tx),
+    0
+  );
 
   const handleExportGatewayExcel = () => {
     if (filteredGatewayTxns.length === 0) {
@@ -333,7 +405,7 @@ export default function AdminDashboardPage(props: {
         `"${tx.customer_name || 'N/A'}"`,
         `"${tx.case_type || 'N/A'}"`,
         tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A',
-        Number(tx.amount || tx.user_payment || 0),
+        resolveAmount(tx),                                    // ✅ fixed
         tx.payment_status || 'paid'
       ].join(",");
       csvContent += row + "\r\n";
@@ -566,7 +638,11 @@ export default function AdminDashboardPage(props: {
     return true;
   });
 
-  const totalFilteredModalAmount = filteredModalEstimates.reduce((sum, curr) => sum + Number(curr.user_payment || curr.amount || 21), 0);
+  /* ✅ Modal total — service-aware resolver use karo */
+  const totalFilteredModalAmount = filteredModalEstimates.reduce(
+    (sum, curr) => sum + resolveAmount(curr),
+    0
+  );
 
   return (
     <>
@@ -1304,7 +1380,7 @@ export default function AdminDashboardPage(props: {
                         const caseType = `"${(est.case_type || est.estimate_type || 'N/A').replace(/"/g, '""')}"`;
                         const paymentModeVal = est.razorpay_payment_id || est.payment_id || est.payment_mode || 'WALLET DEDUCTION';
                         const paymentMode = `"${paymentModeVal.replace(/"/g, '""')}"`;
-                        const amount = Number(est.user_payment || est.amount || 21);
+                        const amount = resolveAmount(est);   // ✅ service-aware
 
                         const row = [refNo, dateTime, customerName, caseType, paymentMode, amount].join(",");
                         csvContent += row + "\r\n";
@@ -1377,7 +1453,7 @@ export default function AdminDashboardPage(props: {
                               )}
                             </td>
                             <td className="p-3 text-right font-black text-emerald-600">
-                              ₹ {Number(est.user_payment || est.amount || 21).toLocaleString('en-IN')}
+                              ₹ {resolveAmount(est).toLocaleString('en-IN')}   {/* ✅ service-aware */}
                             </td>
                           </tr>
                         ))}
@@ -1600,12 +1676,12 @@ export default function AdminDashboardPage(props: {
 
         {/* --- GATEWAY OPERATIONS WIDGET --- */}
         {isSectionVisible('GATEWAY_OPERATIONS') && (
-          <AdminRazorpayLiveWidget 
-            transactions={dashboardData.razorpayTransactions || []} 
-            estimates={estimatesList}
-            serviceRecords={serviceRecordsList}
-          />
-        )}
+  <AdminRazorpayLiveWidget 
+    transactions={gatewayTxns}                                // ✅ MERGED data (estimates + service_records)
+    estimates={estimatesList}
+    serviceRecords={serviceRecordsList}
+  />
+)}
 
       </div>
     </>

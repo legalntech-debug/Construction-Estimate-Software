@@ -1,6 +1,5 @@
 'use client';
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
 
 const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
@@ -56,53 +55,46 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
 
     setLoading(true);
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: newUser.email,
-        password: newUser.password,
-      });
-
-      if (authError) {
-        alert(authError.message);
-        setLoading(false);
-        return;
-      }
-
-      const user = authData.user;
-      if (!user) {
-        alert('Failed to create authentication user.');
-        setLoading(false);
-        return;
-      }
-
       const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
 
-      const { error: profileError } = await supabase.from('profiles').insert([
-        {
-          id: user.id,
-          full_name: newUser.fullName,
-          mobile: newUser.mobile,
+      // ✅ API ROUTE — session disturb nahi hoga, direct active user banega
+      const response = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email: newUser.email.toLowerCase(),
-          user_type: newUser.userType,
-          role: 'premium',
-          plan_type: newUser.planType,
-          firm_name: newUser.userType !== 'INDIVIDUAL' ? newUser.firmName : null,
-          city: newUser.city,
-          state: newUser.state,
-          user_code: generatedUserId,
-          status: 'active',
-          wallet_balance: Number(newUser.walletBonus || 0),
-          terms_accepted: true,
-          terms_accepted_at: new Date().toISOString(),
-        },
-      ]);
+          password: newUser.password,
+          profileData: {
+            full_name: newUser.fullName,
+            mobile: newUser.mobile,
+            email: newUser.email.toLowerCase(),
+            user_type: newUser.userType,
+            role: 'premium',
+            plan_type: newUser.planType,
+            firm_name: newUser.userType !== 'INDIVIDUAL' ? newUser.firmName : null,
+            city: newUser.city,
+            state: newUser.state,
+            user_code: generatedUserId,
+            wallet_balance: Number(newUser.walletBonus || 0),
+            // ✅ Admin ne banaya = direct active, koi approval nahi
+            status: 'active',
+            approval_status: 'APPROVED',
+            terms_accepted: true,
+            terms_accepted_at: new Date().toISOString(),
+          },
+        }),
+      });
 
-      if (profileError) {
-        alert(profileError.message);
+      const result = await response.json();
+
+      if (!response.ok || result.error) {
+        alert('❌ ' + (result.error || 'Failed to create user'));
         setLoading(false);
         return;
       }
 
-      alert(`Successfully created Premium Account for ${newUser.email}! System ID: ${generatedUserId}`);
+      alert(`✅ Successfully created Premium Account for ${newUser.email}! System ID: ${generatedUserId}`);
+      
       setNewUser({
         fullName: '',
         mobile: '',
@@ -115,6 +107,7 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
         state: '',
         walletBonus: '500'
       });
+      
       onUserCreated();
     } catch (err: any) {
       alert('Error creating premium user: ' + (err.message || err));
@@ -292,7 +285,7 @@ export default function AdminCreateUserWidget({ onUserCreated }: { onUserCreated
           <button 
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition shadow-sm uppercase tracking-wider"
+            className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white rounded-xl text-xs font-bold transition shadow-sm uppercase tracking-wider"
           >
             {loading ? 'Creating Account...' : '👑 Create Manual User / Premium Account Now'}
           </button>

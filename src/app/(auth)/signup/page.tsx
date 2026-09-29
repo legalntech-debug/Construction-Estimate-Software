@@ -22,7 +22,7 @@ const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "HARYANA": ["Ambala", "Bhiwani", "Charkhi Dadri", "Faridabad", "Fatehabad", "Gurugram", "Hisar", "Jhajjar", "Jind", "Kaithal", "Karnal", "Kurukshetra", "Mahendragarh", "Nuh", "Palwal", "Panchkula", "Panipat", "Rewari", "Rohtak", "Sirsa", "Sonipat", "Yamunanagar"],
   "HIMACHAL PRADESH": ["Bilaspur", "Chamba", "Hamirpur", "Kangra", "Kinnaur", "Kullu", "Lahaul and Spiti", "Mandi", "Shimla", "Sirmaur", "Solan", "Una"],
   "JAMMU AND KASHMIR": ["Anantnag", "Bandipora", "Baramulla", "Budgam", "Doda", "Ganderbal", "Jammu", "Kathua", "Kishtwar", "Kulgam", "Kupwara", "Poonch", "Pulwama", "Rajouri", "Ramban", "Reasi", "Samba", "Shopian", "Srinagar", "Udhampur"],
-  "JHARKHAND": ["Bokaro", "Chatra", "Deoghar", "Dhanbad", "Dumka", "East Singhbhum", "Garhwa", "Giridih", "Godda", "Gumla", "Hazaribagh", "Jamtara", "Khunti", "Koderma", "Latehar", "Lohardaga", "Pakur", "Palamu", "Ramgarh", "Ranchi", "Sahibगंज", "Seraikela Kharsawan", "Simdega", "West Singhbhum"],
+  "JHARKHAND": ["Bokaro", "Chatra", "Deoghar", "Dhanbad", "Dumka", "East Singhbhum", "Garhwa", "Giridih", "Godda", "Gumla", "Hazaribagh", "Jamtara", "Khunti", "Koderma", "Latehar", "Lohardaga", "Pakur", "Palamu", "Ramgarh", "Ranchi", "Sahibganj", "Seraikela Kharsawan", "Simdega", "West Singhbhum"],
   "KARNATAKA": ["Bagalkot", "Ballari", "Belagavi", "Bengaluru Rural", "Bengaluru Urban", "Bidar", "Chamarajanagar", "Chikkaballapura", "Chikkamagaluru", "Chitradurga", "Dakshina Kannada", "Davanagere", "Dharwad", "Gadag", "Hassan", "Haveri", "Kalaburagi", "Kodagu", "Kolar", "Koppal", "Mandya", "Mysuru", "Raichur", "Ramanagara", "Shivamogga", "Tumakuru", "Udupi", "Uttara Kannada", "Vijayanagara", "Vijayapura", "Yadgir"],
   "KERALA": ["Alappuzha", "Ernakulam", "Idukki", "Kannur", "Kasaragod", "Kollam", "Kottayam", "Kozhikode", "Malappuram", "Palakkad", "Pathanamthitta", "Thiruvananthapuram", "Thrissur", "Wayanad"],
   "LADAKH": ["Kargil", "Leh"],
@@ -54,6 +54,7 @@ function SignupContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
+  const [showPassword, setShowPassword] = useState(false); // ✅ Password key/toggle state
   const [agreeTermsPolicy, setAgreeTermsPolicy] = useState(false); 
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [hasViewedTerms, setHasViewedTerms] = useState(false);
@@ -63,6 +64,7 @@ function SignupContent() {
     mobile: '',
     email: '',
     password: '',
+    aadhaarNo: '', // ✅ Aadhaar No field — stored with spaces as "1111 1111 1111"
     userType: 'INDIVIDUAL',
     planType: 'BASIC PLAN',
     firmName: '',
@@ -87,14 +89,24 @@ function SignupContent() {
 
   const handleChange = (e: any) => {
     const { name, value } = e.target;
-    
+
     if (name === 'mobile') {
       const numericValue = value.replace(/\D/g, '').slice(0, 10);
       setForm({ ...form, mobile: numericValue });
+    } else if (name === 'aadhaarNo') {
+      // ✅ Keep only digits, max 12, then auto-insert a space every 4 digits -> "1111 1111 1111"
+      const digitsOnly = value.replace(/\D/g, '').slice(0, 12);
+      const formatted = digitsOnly.replace(/(\d{4})(?=\d)/g, '$1 ');
+      setForm({ ...form, aadhaarNo: formatted });
     } else if (name === 'userType') {
       setForm({ ...form, userType: value, planType: 'BASIC PLAN' });
     } else if (name === 'password' || name === 'email') {
       setForm({ ...form, [name]: value });
+    } else if (name === 'state') {
+      setForm({ ...form, state: value, city: '' }); // Reset city when state changes
+    } else if (name === 'city') {
+      // ✅ FIX: city must match option values exactly (Title Case) — do NOT uppercase it
+      setForm({ ...form, city: value });
     } else {
       setForm({ ...form, [name]: value.toUpperCase() });
     }
@@ -111,9 +123,23 @@ function SignupContent() {
       return;
     }
 
+    // ✅ Validate Aadhaar against raw digits (strip the display spaces first)
+    const aadhaarDigits = form.aadhaarNo.replace(/\s/g, '');
+    if (aadhaarDigits && !/^\d{12}$/.test(aadhaarDigits)) {
+      setError("Please enter a valid 12-digit Aadhaar number!");
+      setLoading(false);
+      return;
+    }
+
     const uppercaseState = form.state.trim().toUpperCase();
     if (!Object.keys(INDIAN_STATES_AND_DISTRICTS).includes(uppercaseState)) {
-      setError("Please select a valid State from the provided dropdown list!");
+      setError("Please select a valid State from the dropdown!");
+      setLoading(false);
+      return;
+    }
+
+    if (!form.city) {
+      setError("Please select a City / District from the dropdown!");
       setLoading(false);
       return;
     }
@@ -187,12 +213,16 @@ function SignupContent() {
 
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
 
+    // ✅ Store Aadhaar as raw digits (no spaces) in the database
+    const aadhaarForDb = form.aadhaarNo.replace(/\s/g, '');
+
     const { error: profileError } = await supabase.from('profiles').insert([
       {
         id: user.id,
         full_name: form.fullName,
         mobile: form.mobile,
         email: form.email.toLowerCase(),
+        aadhaar_no: aadhaarForDb || null,
         user_type: form.userType,
         plan_type: 'BASIC PLAN',
         firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
@@ -201,6 +231,7 @@ function SignupContent() {
         user_code: generatedUserId,
         partner_id: form.partnerId || null,
         status: 'active',
+        approval_status: 'APPROVED',
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
       },
@@ -282,61 +313,80 @@ function SignupContent() {
           {step === 1 && (
             <form onSubmit={sendOtp} className="space-y-3">
               <input name="fullName" required placeholder="FULL NAME" value={form.fullName} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase" />
-              <input name="mobile" required type="tel" maxLength={10} placeholder="MOBILE NUMBER" value={form.mobile} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
-              <input name="email" required type="email" placeholder="EMAIL ADDRESS" value={form.email} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
-              <input name="password" required type="password" placeholder="PASSWORD" value={form.password} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input name="mobile" required type="tel" maxLength={10} placeholder="MOBILE NUMBER" value={form.mobile} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+                {/* ✅ maxLength increased to 14 to allow for the 2 inserted spaces (1111 1111 1111) */}
+                <input name="aadhaarNo" type="tel" maxLength={14} placeholder="AADHAAR NO (OPTIONAL)" value={form.aadhaarNo} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+              </div>
 
-              {/* STATE & CITY SEARCHABLE DROPDOWN */}
+              <input name="email" required type="email" placeholder="EMAIL ADDRESS" value={form.email} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" />
+              
+              {/* PASSWORD FIELD WITH EYE TOGGLE KEY */}
+              <div className="relative">
+                <input 
+                  name="password" 
+                  required 
+                  type={showPassword ? "text" : "password"} 
+                  placeholder="PASSWORD" 
+                  value={form.password} 
+                  onChange={handleChange} 
+                  className="w-full border p-2 pr-10 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold" 
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-blue-900 text-xs font-bold cursor-pointer"
+                  title={showPassword ? "Hide Password" : "Show Password"}
+                >
+                  {showPassword ? "👁️‍🗨️" : "👁️"}
+                </button>
+              </div>
+
+              {/* STATE & CITY PROPER SELECT DROPDOWNS */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <input
-                    type="text"
+                  <select
                     name="state"
                     required
-                    placeholder="SELECT STATE"
                     value={form.state}
                     onChange={handleChange}
-                    list="all-states-list"
-                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
-                  />
-                  <datalist id="all-states-list">
+                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white text-slate-800 cursor-pointer"
+                  >
+                    <option value="">SELECT STATE</option>
                     {Object.keys(INDIAN_STATES_AND_DISTRICTS).sort().map((stateName) => (
-                      <option key={stateName} value={stateName} />
+                      <option key={stateName} value={stateName}>
+                        {stateName}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
                 </div>
 
                 <div>
-                  <input
-                    type="text"
+                  <select
                     name="city"
                     required
-                    placeholder="CITY / DISTRICT"
                     value={form.city}
                     onChange={handleChange}
-                    list="all-districts-list"
-                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white"
-                  />
-                  <datalist id="all-districts-list">
+                    disabled={!form.state}
+                    className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-semibold uppercase bg-white text-slate-800 cursor-pointer disabled:bg-gray-100 disabled:cursor-not-allowed"
+                  >
+                    <option value="">SELECT CITY / DISTRICT</option>
                     {form.state && INDIAN_STATES_AND_DISTRICTS[form.state.trim().toUpperCase()] ? (
                       INDIAN_STATES_AND_DISTRICTS[form.state.trim().toUpperCase()].map((district) => (
-                        <option key={`${district}-${form.state}`} value={district} />
+                        <option key={district} value={district}>
+                          {district}
+                        </option>
                       ))
-                    ) : (
-                      Object.entries(INDIAN_STATES_AND_DISTRICTS).flatMap(([stateName, districts]) =>
-                        districts.map((district) => (
-                          <option key={`${district}-${stateName}`} value={district} />
-                        ))
-                      )
-                    )}
-                  </datalist>
+                    ) : null}
+                  </select>
                 </div>
               </div>
 
               {/* USER CATEGORY DROPDOWN */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">Select User Category</label>
-                <select name="userType" value={form.userType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800">
+                <select name="userType" value={form.userType} onChange={handleChange} className="w-full border p-2 rounded focus:ring-2 focus:ring-blue-700 text-sm font-bold bg-white text-slate-800 cursor-pointer">
                   <option value="BANKER">BANKER</option>
                   <option value="ENGINEER">ENGINEER</option>
                   <option value="ARCHITECT">ARCHITECT</option>
@@ -464,6 +514,7 @@ function SignupContent() {
               <div className="bg-gray-100 p-4 rounded-xl mt-3 text-left text-xs font-mono border border-gray-200 space-y-1">
                 <p><b>SYSTEM ID :</b> <span className="text-blue-900 font-bold">{credentials.userId}</span></p>
                 <p><b>PASSWORD  :</b> <span className="text-slate-800 font-bold">{credentials.password}</span></p>
+                {form.aadhaarNo && <p><b>AADHAAR   :</b> <span className="text-slate-800 font-bold">XXXX-XXXX-{form.aadhaarNo.replace(/\s/g, '').slice(-4)}</span></p>}
                 <p><b>CATEGORY  :</b> <span className="text-slate-800 font-bold">{form.userType}</span></p>
                 <p><b>LOCATION  :</b> <span className="text-slate-800 font-bold">{form.city}, {form.state}</span></p>
                 <p><b>PLAN TYPE :</b> <span className="text-slate-800 font-bold">BASIC PLAN</span></p>

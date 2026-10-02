@@ -140,7 +140,7 @@ export default function AdminRazorpayLiveWidget({
         source_table: item.source_table || (isServiceRecord ? 'service_records' : 'estimates'),
         customer_name: resolvedCustomerName,
         client_name: item.client_name || resolvedCustomerName,
-        reference_no: item.reference_no || item.ref_no || item.razorpay_payment_id || item.id || 'N/A',
+        reference_no: item.ref_no || item.reference_no || item.razorpay_payment_id || item.id || 'N/A',
       };
     });
   }, [transactions, estimates, serviceRecords]);

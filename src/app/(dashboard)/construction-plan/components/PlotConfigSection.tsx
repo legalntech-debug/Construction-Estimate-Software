@@ -3,12 +3,17 @@
 import React from "react";
 import { PlotDimensions, PlotShape } from "../engine/planningTypes";
 
-
 interface PlotConfigSectionProps {
   measurementUnit: "FEET" | "METERS";
   setMeasurementUnit: (val: "FEET" | "METERS") => void;
   roadFacingOption: string;
   setRoadFacingOption: (val: string) => void;
+
+  // Parking side (for 2+ road plots)
+  parkingSide?: string;
+  setParkingSide?: (val: string) => void;
+  parkingSideOptions?: string[];
+
   plotShape: PlotShape | "IRREGULAR" | "L-SHAPE" | "";
   setPlotShape: (val: PlotShape | "IRREGULAR" | "L-SHAPE" | "") => void;
   plotArea: number;
@@ -48,6 +53,9 @@ export default function PlotConfigSection({
   setMeasurementUnit,
   roadFacingOption,
   setRoadFacingOption,
+  parkingSide,
+  setParkingSide,
+  parkingSideOptions,
   plotShape,
   setPlotShape,
   plotArea,
@@ -86,9 +94,13 @@ export default function PlotConfigSection({
   const areDimensionsFilled = isShapeSelected && plotArea > 0;
   const areDetailsCompleted = areDimensionsFilled && Boolean(coverageType);
 
-  // Check if rectangle is selected
-  // Line 91 ko yeh kar dein:
-const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
+  const isMultiRoadPlot =
+    roadFacingOption.includes("CORNER") ||
+    roadFacingOption.includes("2 SIDE") ||
+    roadFacingOption.includes("3 SIDE") ||
+    roadFacingOption.includes("4 SIDE");
+
+  const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
 
   const onResetClick = () => {
     const confirmed = window.confirm("Are you sure you want to reset?");
@@ -102,21 +114,21 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
   };
 
   return (
-    <div className="border border-black mb-4 bg-white">
-      <div className="bg-slate-900 text-white p-2 font-black text-xl flex justify-between items-center px-4">
-        <div className="flex gap-2 invisible opacity-0 pointer-events-none">
+    <div className="border border-black mb-4 bg-white shadow-sm md:shadow-none">
+      <div className="bg-slate-900 text-white p-3 md:p-2 font-black text-base md:text-xl flex flex-col sm:flex-row justify-between items-center px-4 gap-2">
+        <div className="hidden md:flex gap-2 invisible opacity-0 pointer-events-none">
           <button type="button" className="px-3 py-1 text-xs">UNDO</button>
           <button type="button" className="px-3 py-1 text-xs">RESET</button>
         </div>
         
-        <span className="text-center flex-1">PLOT GEOMETRY & CAD SETUP</span>
+        <span className="text-center flex-1 tracking-tight">PLOT GEOMETRY & CAD SETUP</span>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full sm:w-auto justify-end">
           <button
             type="button"
             onClick={handleUndo}
             disabled={!areDimensionsFilled || dimensionHistory.length === 0}
-            className="bg-yellow-500 text-black px-3 py-1 text-xs font-black rounded hover:bg-yellow-400 disabled:opacity-40 cursor-pointer"
+            className="bg-yellow-500 text-black px-3 py-1.5 md:py-1 text-xs font-black rounded hover:bg-yellow-400 disabled:opacity-40 cursor-pointer flex-1 sm:flex-initial text-center"
           >
             ↩ UNDO
           </button>
@@ -124,25 +136,26 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
             type="button"
             onClick={onResetClick}
             disabled={!areDimensionsFilled}
-            className="bg-red-600 text-white px-3 py-1 text-xs font-black rounded hover:bg-red-700 disabled:opacity-40 cursor-pointer"
+            className="bg-red-600 text-white px-3 py-1.5 md:py-1 text-xs font-black rounded hover:bg-red-700 disabled:opacity-40 cursor-pointer flex-1 sm:flex-initial text-center"
           >
             🔄 RESET
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-12 divide-x divide-black">
+      {/* Responsive Grid System: Stacked on mobile (grid-cols-1), 12 columns on desktop (md:grid-cols-12) */}
+      <div className="grid grid-cols-1 md:grid-cols-12 divide-y md:divide-y-0 md:divide-x divide-black">
         
         {/* 1. PLOT & COVERAGE */}
-        <div className="col-span-3 p-3 space-y-3">
-          <div className="font-black text-sm bg-gray-200 p-1 text-center border border-black">1. PLOT & COVERAGE</div>
+        <div className="col-span-12 md:col-span-3 p-4 md:p-3 space-y-4 md:space-y-3">
+          <div className="font-black text-sm bg-gray-200 p-1.5 md:p-1 text-center border border-black">1. PLOT & COVERAGE</div>
           
           <div>
-            <label className="font-bold text-[11pt] block mb-1">UNIT</label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">UNIT</label>
             <select
               value={measurementUnit}
               onChange={(e) => setMeasurementUnit(e.target.value as any)}
-              className="w-full border border-black p-2 text-sm font-bold bg-white cursor-pointer"
+              className="w-full border border-black p-2.5 md:p-2 text-sm font-bold bg-white cursor-pointer"
             >
               <option value="FEET">FEET</option>
               <option value="METERS">METERS</option>
@@ -150,11 +163,11 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
           </div>
 
           <div>
-            <label className="font-bold text-[11pt] block mb-1">ROAD / FRONT SIDE <span className="text-red-600">*</span></label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">ROAD / FRONT SIDE <span className="text-red-600">*</span></label>
             <select
               value={roadFacingOption}
               onChange={(event) => setRoadFacingOption(event.target.value)}
-              className="w-full border border-black p-2 text-sm font-bold bg-yellow-50 focus:bg-white cursor-pointer"
+              className="w-full border border-black p-2.5 md:p-2 text-sm font-bold bg-yellow-50 focus:bg-white cursor-pointer"
             >
               <option value="">-- SELECT ROAD SIDE FIRST --</option>
               {ROAD_FACING_OPTIONS.map((option) => (
@@ -163,13 +176,34 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
             </select>
           </div>
 
+          {/* Parking side dropdown — for 2+ road plots */}
+          {isMultiRoadPlot && parkingSideOptions && parkingSideOptions.length > 0 && (
+            <div>
+              <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">
+                PARKING SIDE <span className="text-amber-600">*</span>
+              </label>
+              <select
+                value={parkingSide || "SOUTH"}
+                onChange={(event) => setParkingSide?.(event.target.value)}
+                className="w-full border border-black p-2.5 md:p-2 text-sm font-bold bg-amber-50 focus:bg-white cursor-pointer"
+              >
+                {parkingSideOptions.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              <div className="text-[11px] md:text-[10px] text-gray-500 font-bold mt-1">
+                Main road ke alawa, dusri road par parking choose karo.
+              </div>
+            </div>
+          )}
+
           <div>
-            <label className="font-bold text-[11pt] block mb-1">PLOT SHAPE</label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">PLOT SHAPE</label>
             <select
               value={plotShape}
               disabled={!isRoadSelected}
               onChange={(event) => setPlotShape(event.target.value as any)}
-              className="w-full border border-black p-2 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400 cursor-pointer"
+              className="w-full border border-black p-2.5 md:p-2 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400 cursor-pointer"
             >
               <option value="">-- CHOOSE ONE SHAPE --</option>
               {PLOT_SHAPES.map((shape) => (
@@ -179,19 +213,19 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
           </div>
 
           <div>
-            <label className="font-bold text-[11pt] block mb-1">PLOT AREA</label>
-            <div className={`border border-black p-2 text-center font-black text-base ${isShapeSelected ? "bg-gray-100 text-black" : "bg-gray-200 text-gray-400"}`}>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">PLOT AREA</label>
+            <div className={`border border-black p-2.5 md:p-2 text-center font-black text-base ${isShapeSelected ? "bg-gray-100 text-black" : "bg-gray-200 text-gray-400"}`}>
               {isShapeSelected ? `${plotArea.toFixed(2)} SQ.${measurementUnit === "FEET" ? "FT" : "M"}` : "---"}
             </div>
           </div>
 
           <div>
-            <label className="font-bold text-[11pt] block mb-1">GROUND COVERAGE</label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">GROUND COVERAGE</label>
             <select
               value={coverageType}
               disabled={!isShapeSelected}
               onChange={(event) => setCoverageType(event.target.value)}
-              className="w-full border border-black p-2 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400 mb-2 cursor-pointer"
+              className="w-full border border-black p-2.5 md:p-2 text-sm font-bold bg-white disabled:bg-gray-100 disabled:text-gray-400 mb-2 cursor-pointer"
             >
               <option value="100_PERCENT">100% — FULL (DEFAULT)</option>
               <option value="AS_PER_NORMS">AS PER NORMS</option>
@@ -200,7 +234,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
           </div>
 
           <div>
-            <label className="font-bold text-[11pt] block mb-1">FLOORS & CAD</label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">FLOORS & CAD</label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -209,7 +243,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                   setTempSelectedFloors(selectedFloors);
                   setIsFloorModalOpen(true);
                 }}
-                className="w-1/2 border border-black bg-gray-100 p-2 text-xs font-bold hover:bg-gray-200 disabled:opacity-40 transition cursor-pointer"
+                className="w-1/2 border border-black bg-gray-100 p-2.5 md:p-2 text-xs font-bold hover:bg-gray-200 disabled:opacity-40 transition cursor-pointer"
               >
                 FLOORS ({selectedFloors.length})
               </button>
@@ -217,7 +251,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                 type="button"
                 disabled={!areDetailsCompleted}
                 onClick={() => setIsCadModalOpen(true)}
-                className="w-1/2 bg-blue-700 text-white p-2 text-xs font-black hover:bg-blue-800 disabled:opacity-40 transition cursor-pointer"
+                className="w-1/2 bg-blue-700 text-white p-2.5 md:p-2 text-xs font-black hover:bg-blue-800 disabled:opacity-40 transition cursor-pointer"
               >
                 OPEN CAD
               </button>
@@ -226,22 +260,22 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
         </div>
 
         {/* 2. DIMENSIONS / CAD */}
-        <div className={`${isMultiDimShape ? "col-span-5" : "col-span-3"} p-3 flex flex-col justify-between space-y-3`}>
-          <div className="bg-gray-200 border border-black p-1 text-center font-black text-sm flex justify-center items-center px-2">
+        <div className={`col-span-12 ${isMultiDimShape ? "md:col-span-5" : "md:col-span-3"} p-4 md:p-3 flex flex-col justify-between space-y-4 md:space-y-3`}>
+          <div className="bg-gray-200 border border-black p-1.5 md:p-1 text-center font-black text-sm flex justify-center items-center px-2">
             <span>{isMultiDimShape ? "2. SIDES & EDIT DIMENSIONS" : "2. DIMENSIONS"}</span>
             {!isShapeSelected && <span className="text-red-600 text-[10px] ml-2">(Locked)</span>}
           </div>
 
           {!isShapeSelected ? (
-            <div className="flex-1 flex items-center justify-center bg-gray-50 border border-dashed border-gray-400 p-6 text-center text-gray-500 font-bold text-sm">
+            <div className="flex-1 flex items-center justify-center bg-gray-50 border border-dashed border-gray-400 p-8 md:p-6 text-center text-gray-500 font-bold text-sm min-h-[220px]">
               🔒 Select Road & Plot Shape first to unlock dimensions.
             </div>
           ) : isMultiDimShape ? (
             <div className="border border-black bg-[#090d16] text-white p-2 flex-1 flex flex-col items-center justify-between">
-              <div className="text-[10px] font-bold text-cyan-400 mb-1 text-center">EDIT DIMENSIONS DIRECTLY ON CAD (SCROLL TO ZOOM)</div>
+              <div className="text-[10px] font-bold text-cyan-400 mb-1 text-center">EDIT DIMENSIONS DIRECTLY ON CAD (SCROLL OR PINCH TO ZOOM)</div>
               
               <div 
-                className="relative bg-[#05070b] border border-cyan-900/50 w-full flex-1 min-h-[300px] flex items-center justify-center shadow-inner my-1 select-none overflow-hidden"
+                className="relative bg-[#05070b] border border-cyan-900/50 w-full flex-1 min-h-[300px] flex items-center justify-center shadow-inner my-1 select-none overflow-hidden touch-none"
                 onWheel={(e) => {
                   e.stopPropagation();
                   const zoomDelta = e.deltaY < 0 ? 0.15 : -0.15;
@@ -267,39 +301,39 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                     </svg>
 
                     {/* SIDE A */}
-                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '12%', left: '50%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-yellow-400 mr-1">A:</span>
-                      <input type="number" value={plotDimensions.A} onChange={(e) => updateDimensionPart("A", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '12%', left: '50%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-yellow-400 mr-1">A:</span>
+                      <input type="number" value={plotDimensions.A} onChange={(e) => updateDimensionPart("A", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE B */}
-                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '38%', left: '88%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-yellow-400 mr-1">B:</span>
-                      <input type="number" value={plotDimensions.B} onChange={(e) => updateDimensionPart("B", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '38%', left: '88%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-yellow-400 mr-1">B:</span>
+                      <input type="number" value={plotDimensions.B} onChange={(e) => updateDimensionPart("B", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE C */}
-                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '88%', left: '33%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-yellow-400 mr-1">C:</span>
-                      <input type="number" value={plotDimensions.C} onChange={(e) => updateDimensionPart("C", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '88%', left: '33%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-yellow-400 mr-1">C:</span>
+                      <input type="number" value={plotDimensions.C} onChange={(e) => updateDimensionPart("C", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE D */}
-                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '51%', left: '13%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-yellow-400 mr-1">D:</span>
-                      <input type="number" value={plotDimensions.D} onChange={(e) => updateDimensionPart("D", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '51%', left: '13%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-yellow-400 mr-1">D:</span>
+                      <input type="number" value={plotDimensions.D} onChange={(e) => updateDimensionPart("D", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE E */}
-                    <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '53%', left: '67%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-cyan-300 mr-1">E:</span>
-                      <input type="number" value={plotDimensions.E} onChange={(e) => updateDimensionPart("E", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '53%', left: '67%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-cyan-300 mr-1">E:</span>
+                      <input type="number" value={plotDimensions.E} onChange={(e) => updateDimensionPart("E", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE F */}
-                    <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1 py-0.5 rounded shadow z-30" style={{ top: '69%', left: '44%', transform: 'translate(-50%, -50%)' }}>
-                      <span className="text-[9px] font-bold text-cyan-300 mr-1">F:</span>
-                      <input type="number" value={plotDimensions.F} onChange={(e) => updateDimensionPart("F", "ft", Number(e.target.value))} className="w-10 text-center text-[10px] font-black bg-white text-black rounded" />
+                    <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '69%', left: '44%', transform: 'translate(-50%, -50%)' }}>
+                      <span className="text-[10px] font-bold text-cyan-300 mr-1">F:</span>
+                      <input type="number" value={plotDimensions.F} onChange={(e) => updateDimensionPart("F", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
                   </div>
                 </div>
@@ -313,14 +347,13 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                 { key: "C", label: "SIDE C", sub: "RIGHT DEPTH" },
                 ...(isRectangle ? [] : [{ key: "D", label: "SIDE D", sub: "LEFT DEPTH" }]),
               ].map((item) => (
-                <div key={item.key} className="border border-black p-2 bg-white">
+                <div key={item.key} className="border border-black p-2.5 md:p-2 bg-white">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="font-black text-xs">{item.label}</span>
+                    <span className="font-black text-xs md:text-xs">{item.label}</span>
                     <span className="text-[10px] text-gray-500 font-bold">{item.sub}</span>
                   </div>
 
                   {measurementUnit === "FEET" ? (
-                    // --- FEET & INCHES VIEW ---
                     <div className="grid grid-cols-2 gap-2">
                       <div className="flex items-center">
                         <input
@@ -328,7 +361,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                           min={0}
                           value={dimDetails[item.key]?.ft || 0}
                           onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
-                          className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
+                          className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                         />
                         <span className="ml-1 text-xs font-bold">FT</span>
                       </div>
@@ -339,13 +372,12 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                           max={11}
                           value={dimDetails[item.key]?.in || 0}
                           onChange={(e) => updateDimensionPart(item.key as any, "in", Number(e.target.value))}
-                          className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
+                          className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                         />
                         <span className="ml-1 text-xs font-bold">IN</span>
                       </div>
                     </div>
                   ) : (
-                    // --- METERS VIEW (Single Input Box) ---
                     <div className="flex items-center">
                       <input
                         type="number"
@@ -353,7 +385,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                         step="0.01"
                         value={plotDimensions[item.key] || 0}
                         onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
-                        className="w-full border border-black p-1 text-center text-sm font-bold bg-white"
+                        className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                       />
                       <span className="ml-1 text-xs font-bold">M</span>
                     </div>
@@ -361,7 +393,7 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
                 </div>
               ))}
               {isRectangle && (
-                <div className="p-2 bg-blue-50 border border-blue-300 text-[11px] font-bold text-blue-800 text-center">
+                <div className="p-2.5 md:p-2 bg-blue-50 border border-blue-300 text-[11px] font-bold text-blue-800 text-center">
                   💡 Rectangle mode: Side B & D are automatically synced with A & C. Open CAD view to adjust details if needed.
                 </div>
               )}
@@ -370,23 +402,25 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
         </div>
 
         {/* 3. MOS */}
-        <div className={`${isMultiDimShape ? "col-span-1" : "col-span-3"} p-3 space-y-3 flex flex-col justify-between`}>
+        <div className={`col-span-12 ${isMultiDimShape ? "md:col-span-1" : "md:col-span-3"} p-4 md:p-3 space-y-4 md:space-y-3 flex flex-col justify-between`}>
           <div className="space-y-3">
-            <div className="font-black text-sm bg-gray-200 p-1 text-center border border-black">3. MOS</div>
-            {["front", "rear", "left", "right"].map((key) => (
-              <div key={key}>
-                <label className="font-bold text-[9pt] uppercase block mb-1">{key}</label>
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  disabled={!isShapeSelected || coverageType === "100_PERCENT"}
-                  value={coverageType === "100_PERCENT" ? 0 : setbackInputs[key as keyof typeof setbackInputs]}
-                  onChange={(event) => setSetbackInputs((prev) => ({ ...prev, [key]: Math.max(0, Number(event.target.value) || 0) }))}
-                  className="w-full border border-black p-1.5 text-xs font-bold text-center disabled:bg-gray-100 bg-white"
-                />
-              </div>
-            ))}
+            <div className="font-black text-sm bg-gray-200 p-1.5 md:p-1 text-center border border-black">3. MOS</div>
+            <div className="grid grid-cols-2 md:grid-cols-1 gap-2 md:gap-3">
+              {["front", "rear", "left", "right"].map((key) => (
+                <div key={key}>
+                  <label className="font-bold text-[10px] md:text-[9pt] uppercase block mb-1">{key}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    disabled={!isShapeSelected || coverageType === "100_PERCENT"}
+                    value={coverageType === "100_PERCENT" ? 0 : setbackInputs[key as keyof typeof setbackInputs]}
+                    onChange={(event) => setSetbackInputs((prev) => ({ ...prev, [key]: Math.max(0, Number(event.target.value) || 0) }))}
+                    className="w-full border border-black p-2 md:p-1.5 text-xs font-bold text-center disabled:bg-gray-100 bg-white"
+                  />
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-3 rounded-lg border border-slate-700 shadow-md text-center mt-3">
@@ -398,31 +432,32 @@ const isRectangle = (plotShape as string).toUpperCase() === "RECTANGLE";
         </div>
 
         {/* 4. BOUNDARIES */}
-        <div className="col-span-3 p-3 space-y-3">
-          <div className="font-black text-sm bg-gray-200 p-1 text-center border border-black">4. BOUNDARIES</div>
+        <div className="col-span-12 md:col-span-3 p-4 md:p-3 space-y-4 md:space-y-3">
+          <div className="font-black text-sm bg-gray-200 p-1.5 md:p-1 text-center border border-black">4. BOUNDARIES</div>
           {!areDetailsCompleted ? (
-            <div className="h-[260px] flex items-center justify-center bg-gray-50 border border-dashed border-gray-400 p-4 text-center text-gray-500 font-bold text-xs">
+            <div className="h-[220px] md:h-[260px] flex items-center justify-center bg-gray-50 border border-dashed border-gray-400 p-4 text-center text-gray-500 font-bold text-xs">
               🔒 Complete Road, Shape & Dimensions to unlock boundaries.
             </div>
           ) : (
-            [
-              { label: "EAST", value: boundaryEast, setter: setBoundaryEast },
-              { label: "WEST", value: boundaryWest, setter: setBoundaryWest },
-              { label: "NORTH", value: boundaryNorth, setter: setBoundaryNorth },
-              { label: "SOUTH", value: boundarySouth, setter: setBoundarySouth },
-
-            ].map((item) => (
-              <div key={item.label}>
-                <label className="font-bold text-[9pt] block mb-1">{item.label}</label>
-                <textarea
-                  rows={2}
-                  value={item.value}
-                  onChange={(event) => item.setter(event.target.value)}
-                  placeholder={`Enter ${item.label.toLowerCase()} boundary...`}
-                  className="w-full border border-black p-1.5 text-xs font-bold uppercase bg-white resize-y min-h-[36px] focus:outline-none"
-                />
-              </div>
-            ))
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-1 gap-3 md:gap-3">
+              {[
+                { label: "EAST", value: boundaryEast, setter: setBoundaryEast },
+                { label: "WEST", value: boundaryWest, setter: setBoundaryWest },
+                { label: "NORTH", value: boundaryNorth, setter: setBoundaryNorth },
+                { label: "SOUTH", value: boundarySouth, setter: setBoundarySouth },
+              ].map((item) => (
+                <div key={item.label}>
+                  <label className="font-bold text-[10px] md:text-[9pt] block mb-1">{item.label}</label>
+                  <textarea
+                    rows={2}
+                    value={item.value}
+                    onChange={(event) => item.setter(event.target.value)}
+                    placeholder={`Enter ${item.label.toLowerCase()} boundary...`}
+                    className="w-full border border-black p-2 md:p-1.5 text-xs font-bold uppercase bg-white resize-y min-h-[40px] focus:outline-none"
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </div>
 

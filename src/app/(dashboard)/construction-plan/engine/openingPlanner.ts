@@ -15,7 +15,13 @@ export interface RoomLayout {
   type?: string;
   doors?: PlacedDoor[];
   windows?: PlacedWindow[];
+  /** attached toilet -> parent bedroom id (roomPlanner set karta hai) */
+  attachedTo?: string;
+  subZoneOf?: string;
+  embeddedStair?: any;
 }
+
+type Wall = "TOP" | "BOTTOM" | "LEFT" | "RIGHT";
 
 export interface SharedBoundary {
   roomAIndex: number;
@@ -40,6 +46,8 @@ const EDGE_OFFSET = 0.5;
 
 // ✅ Bathroom door width (auto 2' wide)
 const BATHROOM_DOOR_WIDTH = 2.0;
+// ✅ Bathroom/toilet door wall ke corner se itna door (frame + hinge ke liye)
+const BATHROOM_DOOR_WALL_CLEARANCE = 0.75;
 
 export function calculateDoorsAndWindows(totalBuiltUpArea: number, floorCount: number, hasTower: boolean): DoorWindowSpec {
   const base = totalBuiltUpArea > 2000 ? 8 : totalBuiltUpArea > 1500 ? 7 : totalBuiltUpArea > 1000 ? 6 : totalBuiltUpArea > 600 ? 5 : 4;
@@ -295,12 +303,133 @@ function exteriorWallForRoom(room: RoomLayout, floorW: number, floorH: number): 
   return null;
 }
 
+// ============================================================
+// ✅ WINDOW RULE: window sirf us bahri wall par jiske bahar MOS (open setback) ho ya road ho.
+// Road wall plan-local coordinates me BOTTOM (parking gate wali taraf) hai.
+// ============================================================
+export function isWindowWallAllowed(
+  wall: Wall,
+  setbacks: SetbackMosSpec | undefined,
+  roadWall: Wall = "BOTTOM"
+): boolean {
+  if (wall === roadWall) return true;
+  const mos =
+    wall === "LEFT" ? setbacks?.left :
+    wall === "RIGHT" ? setbacks?.right :
+    wall === "TOP" ? setbacks?.back :
+    setbacks?.front;
+  return Number(mos ?? 0) > 0;
+}
+
+function externalWalls(room: RoomLayout, W: number, H: number): Wall[] {
+  const walls: Wall[] = [];
+  (["BOTTOM", "RIGHT", "LEFT", "TOP"] as Wall[]).forEach((w) => {
+    if (edgeWall(room, w, W, H)) walls.push(w);
+  });
+  return walls;
+}
+
+/** Wall par free interval dhoondo (doors + child-rooms ko bacha kar), center ke sabse paas */
+function findFreeWindowOffset(
+  room: RoomLayout, wall: Wall, length: number, all: RoomLayout[]
+): number | null {
+  const vertical = wall === "LEFT" || wall === "RIGHT";
+  const span = vertical ? room.h : room.w;
+  const base = vertical ? room.y : room.x;
+  const blocked: Array<[number, number]> = [];
+
+  (room.doors || []).forEach((d: any) => {
+    if (d.wall !== wall) return;
+    blocked.push([Number(d.offsetFeet || 0) - 0.4, Number(d.offsetFeet || 0) + Number(d.widthFeet || 0) + 0.4]);
+  });
+  // is wall se lagne wale child rooms (attached toilet) ka hissa
+  all.forEach((c) => {
+    if (c === room) return;
+    const isChild = String(c.subZoneOf || c.attachedTo || "") === String(room.id || "__none__");
+    if (!isChild) return;
+    const touches =
+      (wall === "LEFT" && Math.abs(c.x - room.x) < 0.1) ||
+      (wall === "RIGHT" && Math.abs(c.x + c.w - (room.x + room.w)) < 0.1) ||
+      (wall === "TOP" && Math.abs(c.y - room.y) < 0.1) ||
+      (wall === "BOTTOM" && Math.abs(c.y + c.h - (room.y + room.h)) < 0.1);
+    if (!touches) return;
+    const s = (vertical ? c.y : c.x) - base;
+    const e = s + (vertical ? c.h : c.w);
+    blocked.push([s - 0.3, e + 0.3]);
+  });
+
+  const margin = 0.5;
+  const center = (span - length) / 2;
+  const candidates: number[] = [];
+  for (let k = 0; k <= Math.ceil(span / 0.25); k++) {
+    candidates.push(center + k * 0.25, center - k * 0.25);
+  }
+  for (const off of candidates) {
+    if (off < margin - 0.001 || off + length > span - margin + 0.001) continue;
+    if (blocked.every(([bs, be]) => off + length <= bs || off >= be)) return Number(off.toFixed(2));
+  }
+  return null;
+}
+
+/**
+ * Bathroom/toilet ke doors ko wall ke corner se BATHROOM_DOOR_WALL_CLEARANCE door rakho.
+ * Shared door ho to dusre room ki copy bhi usi global position par update hoti hai.
+ */
+function enforceBathroomDoorClearance(rooms: RoomLayout[]): void {
+  const clear = BATHROOM_DOOR_WALL_CLEARANCE;
+  rooms.forEach((room) => {
+    if (normalizeType(room) !== "bathroom") return;
+    (room.doors || []).forEach((d: any) => {
+      const vertical = d.wall === "LEFT" || d.wall === "RIGHT";
+      const wallLen = vertical ? room.h : room.w;
+      const width = Number(d.widthFeet || 0);
+      if (!width) return;
+      const lo = clear;
+      const hi = wallLen - width - clear;
+      const next = hi < lo ? Math.max(0, (wallLen - width) / 2) : Math.max(lo, Math.min(Number(d.offsetFeet || 0), hi));
+      if (Math.abs(next - Number(d.offsetFeet || 0)) < 0.001) return;
+      d.offsetFeet = Number(next.toFixed(2));
+
+      const sid = d.sharedOpeningId || (String(d.id || "").startsWith("shared-") ? d.id : null);
+      if (!sid) return;
+      const globalStart = (vertical ? room.y : room.x) + d.offsetFeet;
+      rooms.forEach((other) => {
+        if (other === room) return;
+        (other.doors || []).forEach((od: any) => {
+          if ((od.sharedOpeningId || od.id) !== sid) return;
+          const oVertical = od.wall === "LEFT" || od.wall === "RIGHT";
+          od.offsetFeet = Number((globalStart - (oVertical ? other.y : other.x)).toFixed(2));
+        });
+      });
+    });
+  });
+}
+
+/** Window: free interval dhoond kar lagao (door/child-toilet ko bacha kar) */
+function addWindowAvoidingDoors(
+  room: RoomLayout, wall: Wall, desired: number, windowType: PlacedWindow["windowType"],
+  id: string, all: RoomLayout[]
+) {
+  room.windows = room.windows || [];
+  if (room.windows.some((w) => w.wall === wall)) return;
+  const span = wall === "LEFT" || wall === "RIGHT" ? room.h : room.w;
+  let length = Math.min(desired, Math.max(1.5, span - 1.0));
+  for (; length >= 1.5 - 0.001; length -= 0.5) {
+    const off = findFreeWindowOffset(room, wall, length, all);
+    if (off !== null) {
+      room.windows.push({ id, wall, offsetFeet: off, lengthFeet: length, windowType } as any);
+      return;
+    }
+  }
+}
+
 export function generateFloorOpenings(
   rooms: RoomLayout[],
   _roadOrientation: "NORTH" | "SOUTH" | "EAST" | "WEST" = "SOUTH",
   floorW?: number,
   floorH?: number,
-  setbacks?: SetbackMosSpec
+  setbacks?: SetbackMosSpec,
+  roadWall: Wall = "BOTTOM"
 ): RoomLayout[] {
   // ============================================================
   // ✅ FIX #3: Existing doors ko PRESERVE karo (roomPlanner ne jo set kiye)
@@ -333,6 +462,14 @@ export function generateFloorOpenings(
 
     if (ta === "duct" || tb === "duct") return false;
     if (ta === "bathroom" && tb === "bathroom") return false;
+
+    // ✅ Attached toilet ka door SIRF apne bedroom se. Living/passage/kitchen ki taraf se koi door nahi.
+    const isParentOf = (toilet: RoomLayout, other: RoomLayout) => {
+      const parentId = String(toilet.attachedTo || toilet.subZoneOf || "");
+      return !!parentId && !!other.id && String(other.id) === parentId;
+    };
+    if (isAttachedToilet(a) && !isParentOf(a, b)) return false;
+    if (isAttachedToilet(b) && !isParentOf(b, a)) return false;
     if (ta === "parking" && tb === "parking") return false;
     if (ta === "parking" && tb !== "hall") return false;
     if (tb === "parking" && ta !== "hall") return false;
@@ -416,10 +553,9 @@ export function generateFloorOpenings(
       const hallRoom = is(b, "hall") ? b : a;
 
       const isNarrowPlot = W <= 20.5;
-      const doorWidth = isNarrowPlot
-        ? Math.min(3.5, Math.max(3.0, parkingRoom.w * 0.35))
-        : Math.min(4.5, Math.max(3.5, parkingRoom.w * 0.45));
-      const isDoubleLeaf = !isNarrowPlot && doorWidth >= 4.0;
+      // ✅ Single frame door: parking width se 1 ft chhota, max 3.5 ft (kitchen tak nahi jaata)
+      const doorWidth = Math.max(2.0, Math.min(3.5, Number((parkingRoom.w - 1).toFixed(2))));
+      const isDoubleLeaf = false;
 
       const parkingWall = edge.boundary.wallForA;
       const hallWall = edge.boundary.wallForB;
@@ -762,33 +898,38 @@ export function generateFloorOpenings(
   }
 
   // ============================================================
-  // WINDOW & MOS VALIDATION
+  // WINDOW RULE (MOS / ROAD)
+  //  1) roomPlanner ne jo windows pehle se rakhi hain, un me se sirf wahi bachti hain jo
+  //     bahri wall par ho AUR us side MOS ho ya road ho.
+  //  2) Phir har room ki har allowed bahri wall par ek window (door / attached toilet bacha kar).
   // ============================================================
-  const leftMos = setbacks?.left ?? 0;
-  const rightMos = setbacks?.right ?? 0;
-  const frontMos = setbacks?.front ?? 0;
-  const backMos = setbacks?.back ?? 0;
+  updated.forEach((room) => {
+    room.windows = (room.windows || []).filter((w: any) => {
+      const wall = w.wall as Wall;
+      return edgeWall(room, wall, W, H) && isWindowWallAllowed(wall, setbacks, roadWall);
+    });
+  });
 
   updated.forEach((room, index) => {
     const type = normalizeType(room);
-    const ext = exteriorWallForRoom(room, W, H);
-    if (!ext || type === "parking" || type === "stairs" || type === "duct") return;
+    if (type === "parking" || type === "stairs" || type === "duct") return;
 
-    let hasValidMos = true;
-    if (ext === "LEFT" && leftMos <= 0) hasValidMos = false;
-    if (ext === "RIGHT" && rightMos <= 0) hasValidMos = false;
-    if (ext === "TOP" && backMos <= 0) hasValidMos = false;
-    if (ext === "BOTTOM" && frontMos <= 0) hasValidMos = false;
-
-    if (!hasValidMos) return;
-
-    const horizontal = ext === "TOP" || ext === "BOTTOM";
-    const span = horizontal ? room.w : room.h;
-    const desired = type === "bathroom" ? Math.min(2, span * 0.5) : Math.min(4, span * 0.65);
-    const offset = Math.max(0.5, (span - desired) / 2);
-
-    addWindow(room, ext, offset, desired, type === "bathroom" ? "VENTILATOR" : "STANDARD", `${type === "bathroom" ? "vent" : "win"}-${index}`);
+    externalWalls(room, W, H).forEach((wall) => {
+      if (!isWindowWallAllowed(wall, setbacks, roadWall)) return;
+      const horizontal = wall === "TOP" || wall === "BOTTOM";
+      const span = horizontal ? room.w : room.h;
+      const desired = type === "bathroom" ? Math.min(2, span * 0.5) : Math.min(4, span * 0.65);
+      addWindowAvoidingDoors(
+        room, wall, desired,
+        type === "bathroom" ? "VENTILATOR" : "STANDARD",
+        `${type === "bathroom" ? "vent" : "win"}-${index}-${wall.toLowerCase()}`,
+        updated
+      );
+    });
   });
+
+  // ✅ Bathroom doors wall ke corner se door
+  enforceBathroomDoorClearance(updated);
 
   return updated;
 }

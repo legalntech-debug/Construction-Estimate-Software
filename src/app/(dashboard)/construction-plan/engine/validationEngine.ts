@@ -72,7 +72,6 @@ export type RenderedRoomBox = {
   bathroomIndex?: number;
   isOpen?: boolean;
   exteriorProjection?: boolean;
-  // ✅ NEW: stair inheritance markers
   placementRule?: string;
   inheritedFrom?: string;
   [key: string]: any;
@@ -89,6 +88,14 @@ export type ValidationResult = {
   isValid: boolean;
   errors: ValidationError[];
   warnings: ValidationError[];
+  /**
+   * ✅ NEW: UI helper flags
+   * - bannerText: what to show in the banner (if shown at all)
+   * - autoHideBanner: if true, the UI should NOT show the banner by default
+   *   (only when the user manually toggles it)
+   */
+  bannerText: string;
+  autoHideBanner: boolean;
 };
 
 const EPS = 0.15;
@@ -187,48 +194,29 @@ function bfsConnected(rooms: RenderedRoomBox[], start: number): Set<number> {
 // HELPER FUNCTIONS FOR SUB-ROOM / PARENT-CHILD DETECTION
 // ============================================================
 
-/**
- * Checks if two rooms have a parent-child relationship.
- * Parent-child overlap is EXPECTED (e.g., staircase inside living room,
- * attached toilet inside master bedroom) and should NOT be an error.
- */
 function isParentChild(a: RenderedRoomBox, b: RenderedRoomBox): boolean {
   if (!a || !b) return false;
   const aParent = (a as any).subZoneOf;
   const bParent = (b as any).subZoneOf;
 
-  // b is child of a
   if (bParent && a.id && bParent === a.id) return true;
-  // a is child of b
   if (aParent && b.id && aParent === b.id) return true;
-  // siblings under same parent
   if (aParent && bParent && aParent === bParent) return true;
 
   return false;
 }
 
-/**
- * Whether the room is a sub-room (embedded inside another room).
- * Sub-rooms should be excluded from circulation BFS because they connect
- * via their parent, not through their own doors.
- */
 function isSubRoom(room: RenderedRoomBox): boolean {
   return !!((room as any).subZoneOf || (room as any).isSubRoom);
 }
 
-/**
- * ✅ NEW: Check if a room is a critical service core that must NOT be
- * considered as a circulation blocker.
- */
 function isServiceCore(room: RenderedRoomBox): boolean {
   const t = roomType(room);
   return t === "duct" || t === "balcony" || t === "stairs";
 }
 
 // ============================================================
-// ✅ NEW: STAIR VERTICAL ALIGNMENT RULE
-// Ground floor stair (x, y) and upper floor stair (x, y) MUST align
-// (same relative offset within host living room or passage).
+// STAIR VERTICAL ALIGNMENT RULE
 // ============================================================
 function validateStairVerticalAlignment(
   floors: Record<string, RenderedRoomBox[]>,
@@ -237,7 +225,6 @@ function validateStairVerticalAlignment(
   const errors: ValidationError[] = [];
   const warnings: ValidationError[] = [];
 
-  // Find ground floor
   const groundFloorName = selectedFloors.find(f => f.toUpperCase().includes('GROUND'));
   if (!groundFloorName) return { errors, warnings };
 
@@ -245,7 +232,6 @@ function validateStairVerticalAlignment(
   const groundStair = groundRooms.find(r => roomType(r) === 'stairs');
   if (!groundStair) return { errors, warnings };
 
-  // Relative offset of stair within ground living (or its parent)
   const groundHost = groundStair.subZoneOf
     ? groundRooms.find(r => r.id === groundStair.subZoneOf)
     : groundRooms.find(r => roomType(r) === 'hall');
@@ -254,28 +240,24 @@ function validateStairVerticalAlignment(
     ? { dx: groundStair.x - groundHost.x, dy: groundStair.y - groundHost.y }
     : { dx: groundStair.x, dy: groundStair.y };
 
-  // Check each upper floor
   for (const floorName of selectedFloors) {
     if (floorName === groundFloorName) continue;
     if (floorName.toUpperCase().includes('TOWER') || floorName.toUpperCase().includes('MUMTY')) continue;
 
     const upperRooms = floors[floorName] || [];
     const upperStair = upperRooms.find(r => roomType(r) === 'stairs');
-    if (!upperStair) continue; // No stair to align
+    if (!upperStair) continue;
 
     const upperHost = upperStair.subZoneOf
       ? upperRooms.find(r => r.id === upperStair.subZoneOf)
       : upperRooms.find(r => roomType(r) === 'hall');
 
-    // Relative offset of upper stair
     const upperOffset = upperHost
       ? { dx: upperStair.x - upperHost.x, dy: upperStair.y - upperHost.y }
       : { dx: upperStair.x, dy: upperStair.y };
 
     const dx = Math.abs(groundOffset.dx - upperOffset.dx);
     const dy = Math.abs(groundOffset.dy - upperOffset.dy);
-
-    // ✅ Tolerance: 2 ft — stair should be within 2 ft of ground floor's relative offset
     const TOLERANCE_FT = 2.0;
 
     if (dx > TOLERANCE_FT || dy > TOLERANCE_FT) {
@@ -296,6 +278,26 @@ function validateStairVerticalAlignment(
   }
 
   return { errors, warnings };
+}
+
+// ============================================================
+// ✅ NEW: Banner text builder — UI component isko use kare
+// ============================================================
+function buildBannerText(result: { isValid: boolean; errors: ValidationError[]; warnings: ValidationError[] }): {
+  bannerText: string;
+  autoHideBanner: boolean;
+} {
+  if (!result.isValid) {
+    return {
+      bannerText: `⚠️ INVALID PLAN (${result.errors.length} ERROR${result.errors.length === 1 ? '' : 'S'})`,
+      autoHideBanner: false, // invalid → always show
+    };
+  }
+  // ✅ Valid plan → auto-hide banner (user can toggle manually)
+  return {
+    bannerText: `✅ PLAN VALIDATED BY ENGINE${result.warnings.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'})` : ''}`,
+    autoHideBanner: true,
+  };
 }
 
 export function validateConstructionPlan(
@@ -339,9 +341,6 @@ export function validateConstructionPlan(
     const ducts = layout.filter((r) => roomType(r) === "duct");
     const passages = layout.filter((r) => roomType(r) === "passage");
 
-    // ============================================================
-    // CIRCULATION LAYOUT — exclude ducts, sub-rooms, and service cores
-    // ============================================================
     const circulationLayout = layout.filter((r) =>
       roomType(r) !== "duct" &&
       !isSubRoom(r) &&
@@ -349,9 +348,7 @@ export function validateConstructionPlan(
       !String(r.name || "").toUpperCase().includes("OPEN TERRACE")
     );
 
-    // ============================================================
     // PASSAGE PROTECTED ZONE CHECK
-    // ============================================================
     for (const passage of passages) {
       const minPassageWidth = Number((passage as any).corridorWidthFt || Math.min(passage.w, passage.h) || 0);
       if (minPassageWidth < 3.0 - EPS) {
@@ -391,9 +388,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // REQUESTED PROGRAM CHECK
-    // ============================================================
     const requestedProgram: string[] = Array.isArray(info.requestedProgram) ? info.requestedProgram.map((x: any) => String(x).toUpperCase()) : [];
     if (requestedProgram.length) {
       const canon = (value: string) => {
@@ -425,9 +420,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // OPENING GEOMETRY AUDIT
-    // ============================================================
     for (const r of layout) {
       const spans: Record<string, number> = { TOP: r.w, BOTTOM: r.w, LEFT: r.h, RIGHT: r.h };
       for (const d of (r.doors || [])) {
@@ -440,9 +433,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // BOUNDARY & NBC SPEC CHECKS
-    // ============================================================
     for (const r of layout) {
       if (r.x < -EPS || r.y < -EPS || r.x + r.w > floorW + EPS || r.y + r.h > floorH + EPS) {
         errors.push({ floor, roomKey: r.name, severity: "ERROR", message: `${floor} → ${r.name}: Room extends beyond planning boundary.` });
@@ -465,9 +456,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // SPATIAL COLLISION DETECTION
-    // ============================================================
     for (let i = 0; i < layout.length; i++) {
       for (let j = i + 1; j < layout.length; j++) {
         const a = layout[i];
@@ -476,29 +465,20 @@ export function validateConstructionPlan(
         const aContainer = isTower || String(a.name || "").toUpperCase().includes("OPEN TERRACE");
         const bContainer = isTower || String(b.name || "").toUpperCase().includes("OPEN TERRACE");
         if (aContainer || bContainer) continue;
-
-        // ✅ Skip if either room is a sub-room (their overlap with parent is EXPECTED)
         if (isSubRoom(a) || isSubRoom(b)) continue;
-
-        // ✅ Skip parent-child pairs (defensive check)
         if (isParentChild(a, b)) continue;
-
-        // ✅ Skip duct overlaps (service shafts can overlap visually)
         if (roomType(a) === 'duct' || roomType(b) === 'duct') continue;
 
         const overlapX = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
         const overlapY = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
 
-        // ✅ Raised tolerance from 0.35 to 0.5 — allows minor touching artifacts
         if (overlapX > 0.5 && overlapY > 0.5) {
           errors.push({ floor, severity: "ERROR", message: `${floor}: Spatial overlap between "${a.name}" and "${b.name}" (Δx=${overlapX.toFixed(2)}, Δy=${overlapY.toFixed(2)}).` });
         }
       }
     }
 
-    // ============================================================
     // PARKING FRONT-EDGE CHECK
-    // ============================================================
     if (isGround && parking) {
       const parkingAtFront = parking.y + parking.h >= floorH - 1.5;
       if (!parkingAtFront) {
@@ -506,9 +486,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // HALL / LIVING ROOM ACCESSIBILITY
-    // ============================================================
     if (hall && isGround) {
       const directOrOneHop = (parking && (hasDoorBetween(hall, parking) || touches(hall, parking))) ||
         layout.some((r) => ["passage", "porch", "stairs", "foyer"].includes(roomType(r)) && !isSubRoom(r) && touches(r, hall));
@@ -518,15 +496,12 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
-    // STAIRCASE CHECK — size + collision
-    // ============================================================
+    // STAIRCASE CHECK
     if (stairs && !isTower) {
       if (stairs.w < 5.0 || stairs.h < 7.0) {
         warnings.push({ floor, roomKey: stairs.name, severity: "WARNING", message: `${floor}: Staircase footprint (${stairs.w.toFixed(1)}' × ${stairs.h.toFixed(1)}') is compact.` });
       }
 
-      // ✅ Skip collision check if staircase is a sub-room (embedded in living)
       const stairsIsSub = isSubRoom(stairs);
 
       if (!stairsIsSub) {
@@ -549,9 +524,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // VENTILATION CHECK
-    // ============================================================
     if (bathrooms.length > 0) {
       for (const bath of bathrooms) {
         const ventilated = (bath.windows || []).length > 0 || ducts.some((d) => touches(bath, d));
@@ -561,9 +534,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
-    // CONNECTIVITY BFS CHECK — sub-rooms excluded
-    // ============================================================
+    // CONNECTIVITY BFS CHECK
     if (circulationLayout.length > 1 && !isTower) {
       const startRoom = circulationLayout.find((r) => ["parking", "hall", "passage"].includes(roomType(r))) || circulationLayout[0];
       const startIndex = Math.max(0, circulationLayout.indexOf(startRoom));
@@ -573,7 +544,6 @@ export function validateConstructionPlan(
         for (let i = 0; i < circulationLayout.length; i++) {
           if (!connected.has(i)) {
             const room = circulationLayout[i];
-            // ✅ Skip sub-rooms and service cores from connectivity errors
             if (isSubRoom(room)) continue;
             if (isServiceCore(room)) continue;
             errors.push({ floor, roomKey: room.name, severity: "ERROR", message: `${floor}: ${room.name} has no generated door/opening path to the circulation network.` });
@@ -582,9 +552,7 @@ export function validateConstructionPlan(
       }
     }
 
-    // ============================================================
     // PASSAGE-FIRST ORDERING CHECK
-    // ============================================================
     if (passages.length > 0 && !isTower) {
       const realRooms = layout.filter(
         r => !isSubRoom(r) && roomType(r) !== "duct" && r !== parking
@@ -615,22 +583,26 @@ export function validateConstructionPlan(
     }
   }
 
-  // ============================================================
-  // ✅ NEW: STAIR VERTICAL ALIGNMENT across floors
-  // ============================================================
+  // STAIR VERTICAL ALIGNMENT across floors
   if (renderedLayoutMap && selectedFloors.length > 1) {
     const alignmentResult = validateStairVerticalAlignment(renderedLayoutMap, selectedFloors);
     errors.push(...alignmentResult.errors);
     warnings.push(...alignmentResult.warnings);
   }
 
-  const result = { isValid: errors.length === 0, errors, warnings };
+  const baseResult = { isValid: errors.length === 0, errors, warnings };
+  const { bannerText, autoHideBanner } = buildBannerText(baseResult);
+
+  const result: ValidationResult = { ...baseResult, bannerText, autoHideBanner };
+
+  // ✅ Quieter log — only summary
   if (typeof console !== 'undefined') {
-    console.log('[VALIDATION ENGINE] RESULT', {
+    console.log('[VALIDATION ENGINE]', {
       isValid: result.isValid,
-      errors: result.errors.map(e => ({ floor: e.floor, room: e.roomKey, message: e.message })),
-      warnings: result.warnings.map(w => ({ floor: w.floor, room: w.roomKey, message: w.message })),
+      errorCount: result.errors.length,
+      warningCount: result.warnings.length,
     });
   }
+
   return result;
 }

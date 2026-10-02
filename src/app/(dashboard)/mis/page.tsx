@@ -56,8 +56,11 @@ export default function MISPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
-  const [authError, setAuthError] = useState('');
+    const [authError, setAuthError] = useState('');
   const [walletBalance, setWalletBalance] = useState<number>(100);
+  const [userPlanType, setUserPlanType] = useState<string>('BASIC PLAN'); // ← NEW
+  const [userRole, setUserRole] = useState<string>('user'); // ← NEW (admin ke liye bhi allow karne ke liye)
+  
 
   // Wallet and Data Fetching logic
   useEffect(() => {
@@ -67,25 +70,26 @@ export default function MISPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { setLoading(false); return; }
 
-        const { data: profile } = await supabase
+               const { data: profile } = await supabase
           .from('profiles')
-          .select('wallet_balance, role')
+          .select('wallet_balance, role, plan_type')   // ← plan_type add kiya
           .eq('id', user.id)
           .single();
         
         if (profile) {
           setWalletBalance(profile.wallet_balance || 0);
+          setUserPlanType(profile.plan_type || 'BASIC PLAN');  // ← NEW
+          setUserRole(profile.role || 'user');                  // ← NEW
         }
 
         const isAdmin = profile?.role === 'admin';
 
         // 1. Fetch Estimate Data from 'mis_records'
+                // 1. Fetch Estimate Data from 'mis_records'
+        // ✅ FIX: Direct user_id filter — no join needed (mis_records already has user_id)
         let misQuery = supabase.from('mis_records').select('*');
         if (!isAdmin) {
-          misQuery = supabase
-            .from('mis_records')
-            .select(`*, estimates!inner(user_id)`)
-            .eq('estimates.user_id', user.id);
+          misQuery = misQuery.eq('user_id', user.id);
         }
         const { data: misData, error: misError } = await misQuery;
         if (misError) throw misError;
@@ -187,18 +191,19 @@ export default function MISPage() {
   }, [records, filterRefNo, filterDate, filterClient, filterRepresentative, filterCaseType, filterStatus]);
 
   const metrics = useMemo(() => {
-    return records.reduce((acc, curr) => {
+    return filteredRecords.reduce((acc, curr) => {
       const currentStatus = (curr.status || "").toUpperCase();
       const fee = (curr.fee_standard || 0);
       
       acc.total += fee;
+      acc.count += 1;
       if (currentStatus === 'RECEIVED') acc.received += fee;
       if (currentStatus === 'PENDING') acc.pending += fee;
       if (currentStatus === 'WAIVED') acc.waived += fee;
       
       return acc;
-    }, { total: 0, received: 0, pending: 0, waived: 0 });
-  }, [records]);
+    }, { total: 0, received: 0, pending: 0, waived: 0, count: 0 });
+  }, [filteredRecords]);
 
   // Core Mutation Engine for Status Handling and Revenue Auditing (#PROTECT & #SYNC)
   const updateStatus = async (id: string, newStatus: string) => {
@@ -697,19 +702,124 @@ const triggerEmailBroadcast = async () => {
     }
   };
 
+    // ============ EXCEL DOWNLOAD FUNCTION ============
+  const downloadExcel = () => {
+    if (filteredRecords.length === 0) {
+      alert("⚠️ No records available to export. Please adjust your filters.");
+      return;
+    }
+
+    const headers = [
+      "Ref No",
+      "Date",
+      "Customer Name",
+      "Client",
+      "Representative",
+      "Case Type",
+      "Fee Standard",
+      "Status",
+      "Remark",
+      "Mobile No",
+      "Email ID",
+    ];
+
+    const rows = filteredRecords.map((rec) => {
+      const cleanName = (rec.customer_name || "")
+        .split(/s\/o|d\/o|w\/o/i)[0]
+        .replace(/[,.-]+$/, "")
+        .trim();
+
+      const dateStr = rec.created_date
+        ? new Date(rec.created_date).toLocaleDateString("en-GB")
+        : "";
+
+      return [
+        rec.ref_no || "",
+        dateStr,
+        cleanName,
+        rec.client_name || "",
+        rec.representative || "",
+        rec.case_type || "",
+        rec.fee_standard || 0,
+        (rec.status || "PENDING").toUpperCase(),
+        rec.remark || "",
+        rec.mobile_no || "",
+        rec.email_id || "",
+      ];
+    });
+
+    const totals = filteredRecords.reduce(
+      (acc, curr) => {
+        const fee = curr.fee_standard || 0;
+        const status = (curr.status || "").toUpperCase();
+        acc.total += fee;
+        if (status === "RECEIVED") acc.received += fee;
+        if (status === "PENDING") acc.pending += fee;
+        if (status === "WAIVED") acc.waived += fee;
+        return acc;
+      },
+      { total: 0, received: 0, pending: 0, waived: 0 }
+    );
+
+    const escapeCSV = (val: any) => {
+      const str = String(val ?? "");
+      if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    let csv = "\uFEFF";
+    csv += headers.map(escapeCSV).join(",") + "\n";
+    rows.forEach((row) => {
+      csv += row.map(escapeCSV).join(",") + "\n";
+    });
+
+    csv += "\n";
+    csv += `"SUMMARY","","","","","","","","","",""\n`;
+    csv += `"Total Records","${filteredRecords.length}","","","","","","","","",""\n`;
+    csv += `"Total Value Stream","${totals.total}","","","","","","","","",""\n`;
+    csv += `"Collections Realized","${totals.received}","","","","","","","","",""\n`;
+    csv += `"Outstanding Escrow","${totals.pending}","","","","","","","","",""\n`;
+    csv += `"Waived Revenue","${totals.waived}","","","","","","","","",""\n`;
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const today = new Date().toISOString().split("T")[0];
+    link.href = url;
+    link.download = `MIS_Report_${today}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  
+
   return (
     <div className="space-y-4 max-w-[1600px] mx-auto p-2 bg-slate-50 min-h-screen">
       
       {/* Header Panel */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 bg-white px-5 py-3 rounded border border-slate-200 shadow-xs">
         <h1 className="text-sm font-black tracking-wider text-slate-800 uppercase">MIS Analytics Engine</h1>
-        <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
-          <button onClick={triggerWhatsAppBroadcast} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
-            💬 <span className="hidden sm:inline">WHATSAPP</span> BROADCAST
-          </button>
-          <button onClick={triggerEmailBroadcast} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
-            ✉️ <span className="hidden sm:inline">EMAIL</span> BROADCAST
-          </button>
+                       <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
+          {/* ✅ PREMIUM / ADMIN ONLY — WhatsApp, Email, Excel */}
+          {(userPlanType === 'PREMIUM PLAN' || userRole === 'admin') && (
+            <>
+              <button onClick={triggerWhatsAppBroadcast} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
+                💬 <span className="hidden sm:inline">WHATSAPP</span> BROADCAST
+              </button>
+              <button onClick={triggerEmailBroadcast} disabled={loading} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
+                ✉️ <span className="hidden sm:inline">EMAIL</span> BROADCAST
+              </button>
+              <button onClick={downloadExcel} disabled={loading} className="bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
+                📊 <span className="hidden sm:inline">DOWNLOAD</span> EXCEL
+              </button>
+            </>
+          )}
+
+          {/* ✅ SABHI USERS — Create Entry */}
           <button onClick={handleCreateClick} className="bg-blue-950 hover:bg-slate-900 text-white text-[10px] font-bold uppercase px-3 py-2 rounded transition-all tracking-wider flex-1 md:flex-initial justify-center">
             + Create Entry
           </button>

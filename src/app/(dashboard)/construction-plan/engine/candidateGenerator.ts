@@ -80,8 +80,10 @@ export function generateAllCandidates(request: MultiCandidateRequest): MultiCand
     H,
   );
 
-  const stairType: StaircaseType =
-    W >= 28 && H >= 45 ? 'DOG_LEGGED' : 'L_SHAPED';
+  const stairType: StaircaseType = (
+    W >= 28 && H >= 45 ? 'DOG_LEGGED' :
+    W >= 18 && H >= 38 ? 'L_SHAPED' : 'DOG_LEGGED'
+  ) as StaircaseType;
 
   const staircase = calculateStaircase(
   Number(request.floorToFloorHeightFeet) || 10,   // 1. floorToFloorHeightFt

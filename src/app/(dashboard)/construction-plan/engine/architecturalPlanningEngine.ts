@@ -17,6 +17,17 @@ import {
 } from './roomPlanner';
 import { scorePlan } from './planningScore';
 
+// ✅ Import from layoutFormulas.ts (single source of truth)
+import {
+  n,
+  clean,
+  canonical,
+  getExternalWallThicknessFt,
+} from './layoutFormulas';
+
+// ✅ Backward compat: `num` is now just an alias for `n`
+const num = n;
+
 export interface DynamicFloorRequest {
   floorName: string;
   width: number;
@@ -77,37 +88,9 @@ export interface GeneratedConstructionPlan {
   generatedAt: string;
 }
 
-function num(v: any, fallback = 0): number { const x = Number(v); return Number.isFinite(x) ? x : fallback; }
-
 // ============================================================================
-// ✅ FIX 1: canonical() — check LIVING + STAIR combo FIRST (matches roomPlanner)
+// LOCAL HELPERS
 // ============================================================================
-function canonical(raw: string): string {
-  const s = String(raw || '').toUpperCase().trim();
-
-  if ((s.includes('LIVING') || s.includes('DRAWING') || s.includes('HALL')) && s.includes('STAIR')) {
-    return 'LIVING ROOM + STAIR';
-  }
-
-  if (s.includes('MASTER')) return 'MASTER BEDROOM';
-  if (s.includes('BEDROOM') || s === 'BED') return 'BEDROOM';
-  if (s.includes('LIVING') || s.includes('DRAWING') || s.includes('HALL')) return 'LIVING ROOM';
-  if (s.includes('KITCHEN') && (s.includes('DINING') || s.includes('CUM'))) return 'KITCHEN CUM DINING';
-  if (s.includes('KITCHEN')) return 'KITCHEN';
-  if (s.includes('DINING')) return 'DINING';
-  if (s.includes('ATTACHED') && (s.includes('TOILET') || s.includes('BATH'))) return 'ATTACHED TOILET';
-  if (s.includes('COMMON') && (s.includes('TOILET') || s.includes('BATH'))) return 'COMMON TOILET';
-  if (s.includes('TOILET') || s.includes('BATH')) return 'BATHROOM';
-  if (s.includes('POOJA')) return 'POOJA ROOM';
-  if (s.includes('STUDY')) return 'STUDY ROOM';
-  if (s.includes('STAIR')) return 'STAIRCASE';
-  if (s.includes('PARK') || s.includes('PORCH')) return 'PARKING';
-  if (s.includes('DUCT') || s.includes('OTS')) return 'DUCT';
-  if (s.includes('BALCONY')) return 'BALCONY';
-  if (s.includes('UTILITY')) return 'UTILITY';
-  if (s.includes('STORE')) return 'STORE';
-  return s || 'ROOM';
-}
 
 function typeOf(r: any): string {
   const s = `${r.type || ''} ${r.name || ''}`.toLowerCase();
@@ -132,7 +115,7 @@ function touches(a: any, b: any): boolean {
 }
 
 // ============================================================================
-// ✅ FIX 2: normalizeSelectedRooms — preserve RAW key (not canonical)
+// normalizeSelectedRooms — preserve RAW key (not canonical)
 // ============================================================================
 function normalizeSelectedRooms(selectedRooms: any): any {
   if (!selectedRooms) return undefined;
@@ -158,7 +141,9 @@ function normalizeSelectedRooms(selectedRooms: any): any {
 }
 
 // ============================================================================
-// ✅ FIX #3: generateTowerPlan
+// ✅ generateTowerPlan — TOWER EXACTLY at STAIR position (no terrace, no overlap)
+// ============================================================================
+// ✅ generateTowerPlan — TOWER EXACTLY at STAIR position + 4ft PASSAGE
 // ============================================================================
 function generateTowerPlan(
   width: number,
@@ -169,17 +154,19 @@ function generateTowerPlan(
 ) {
   const W = Math.max(1, width), H = Math.max(1, length);
 
+  // ✅ Stair size (same as ground floor stair — inherited)
   let targetStairW = groundStairPosition?.w && groundStairPosition.w > 0
     ? Number(groundStairPosition.w)
-    : Math.min(6, Math.max(5, W * .55));
+    : Math.min(6, Math.max(5, W * 0.55));
 
   let targetStairH = groundStairPosition?.h && groundStairPosition.h > 0
     ? Number(groundStairPosition.h)
-    : Math.min(Math.max(8.5, H * .75), 12);
+    : Math.min(Math.max(8.5, H * 0.75), 12);
 
   targetStairW = Math.min(targetStairW, W);
   targetStairH = Math.min(targetStairH, H);
 
+  // ✅ STAIR position = ground stair position (inherited, EXACT)
   let stairX = Math.max(0, W - targetStairW);
   let stairY = 0;
 
@@ -190,11 +177,124 @@ function generateTowerPlan(
     stairY = Math.max(0, Math.min(groundStairPosition.y, H - targetStairH));
   }
 
-  const rooms: FloorRoom[] = [
-    { id: 'tower_terrace', name: 'OPEN TERRACE', label: 'OPEN TERRACE', roomType: 'balcony', type: 'balcony', x: 0, y: 0, w: W, h: H, selected: true, count: 1, areaMode: 'AUTO', areaPerRoom: W * H },
-    { id: 'tower_stair', name: 'STAIR TOWER / MUMTY', label: 'STAIR TOWER / MUMTY', roomType: 'stairs', type: 'stairs', x: stairX, y: stairY, w: targetStairW, h: targetStairH, selected: true, count: 1, areaMode: 'AUTO', areaPerRoom: targetStairW * targetStairH },
-  ];
-  const stair = generateArchitecturalFloorPlan({ floorName, width: targetStairW, length: targetStairH, bhk: '1 RK', selectedRooms: ['STAIRCASE'], planningMode: 'AUTO', roadSide: '1 SIDE ROAD (SOUTH)', hasParking: false, floorToFloorHeightFeet: floorToFloorHeight }).staircase;
+  // ✅ TOWER = SAME SIZE as stair (exact same area)
+  const towerW = targetStairW;
+  const towerH = targetStairH;
+  const towerX = stairX;
+  const towerY = stairY;
+
+  // ✅ PASSAGE: 4 ft
+  const PASSAGE_FT = 4;
+  const hasTopSpace = stairY >= PASSAGE_FT;
+  const hasBottomSpace = (stairY + targetStairH) <= (H - PASSAGE_FT);
+
+  // ✅ BUILD ROOMS
+  const rooms: FloorRoom[] = [];
+
+  // ✅ Passage at TOP (above stair) — if space
+  if (hasTopSpace) {
+    rooms.push({
+      id: 'tower_passage_top',
+      name: 'PASSAGE',
+      label: 'PASSAGE',
+      roomType: 'passage',
+      type: 'passage',
+      x: 0,
+      y: 0,
+      w: W,
+      h: Math.min(PASSAGE_FT, stairY),
+      selected: true,
+      count: 1,
+      areaMode: 'AUTO',
+      areaPerRoom: W * PASSAGE_FT,
+      circulationZone: true,
+      protectedCorridor: true,
+      corridorWidthFt: PASSAGE_FT,
+    });
+  }
+
+  // ✅ TOWER block — exact stair position par
+  rooms.push({
+    id: 'tower_block',
+    name: 'TOWER',
+    label: 'TOWER',
+    roomType: 'room',
+    type: 'room',
+    x: towerX,
+    y: towerY,
+    w: towerW,
+    h: towerH,
+    selected: true,
+    count: 1,
+    areaMode: 'AUTO',
+    areaPerRoom: towerW * towerH,
+  });
+
+  // ✅ STAIR TOWER / MUMTY — same position, same size
+  rooms.push({
+    id: 'tower_stair',
+    name: 'STAIR TOWER / MUMTY',
+    label: 'STAIR TOWER / MUMTY',
+    roomType: 'stairs',
+    type: 'stairs',
+    x: stairX,
+    y: stairY,
+    w: targetStairW,
+    h: targetStairH,
+    selected: true,
+    count: 1,
+    areaMode: 'AUTO',
+    areaPerRoom: targetStairW * targetStairH,
+  });
+
+  // ✅ Passage at BOTTOM (below stair) — if space
+  if (hasBottomSpace) {
+    rooms.push({
+      id: 'tower_passage_bottom',
+      name: 'PASSAGE',
+      label: 'PASSAGE',
+      roomType: 'passage',
+      type: 'passage',
+      x: 0,
+      y: stairY + targetStairH,
+      w: W,
+      h: Math.min(PASSAGE_FT, H - (stairY + targetStairH)),
+      selected: true,
+      count: 1,
+      areaMode: 'AUTO',
+      areaPerRoom: W * PASSAGE_FT,
+      circulationZone: true,
+      protectedCorridor: true,
+      corridorWidthFt: PASSAGE_FT,
+    });
+  }
+
+  // ✅ Generate stair spec
+  const stair = generateArchitecturalFloorPlan({
+    floorName,
+    width: targetStairW,
+    length: targetStairH,
+    bhk: '1 RK',
+    selectedRooms: ['STAIRCASE'],
+    planningMode: 'AUTO',
+    roadSide: '1 SIDE ROAD (SOUTH)',
+    hasParking: false,
+    floorToFloorHeightFeet: floorToFloorHeight,
+  }).staircase;
+
+  if (typeof console !== 'undefined') {
+    console.log('[generateTowerPlan] ✅ Tower at stair position + 4ft passage', {
+      W, H,
+      stairPos: { x: stairX, y: stairY, w: targetStairW, h: targetStairH },
+      towerPos: { x: towerX, y: towerY, w: towerW, h: towerH },
+      passages: {
+        top: hasTopSpace ? { x: 0, y: 0, w: W, h: Math.min(PASSAGE_FT, stairY) } : 'NO_SPACE',
+        bottom: hasBottomSpace ? { x: 0, y: stairY + targetStairH, w: W, h: Math.min(PASSAGE_FT, H - (stairY + targetStairH)) } : 'NO_SPACE',
+      },
+      roomsCount: rooms.length,
+    });
+  }
+
   return { rooms, stair };
 }
 
@@ -207,7 +307,8 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   const requestedL = Math.max(1, num(request.length, maxFootprint.length));
   const outerW = Math.min(requestedW, Math.max(1, maxFootprint.width));
   const outerL = Math.min(requestedL, Math.max(1, maxFootprint.length));
-  const wall = 9 / 12;
+
+  const wall = 4 / 12;
   const clearW = Math.max(1, outerW - 2 * wall);
   const clearL = Math.max(1, outerL - 2 * wall);
   const floorArea = outerW * outerL;
@@ -222,7 +323,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
 
   const orientation = getRoadOrientation(request.roadSide || '1 SIDE ROAD (SOUTH)');
   const requestedProgram = isTower
-    ? ['OPEN TERRACE', 'STAIRCASE']
+    ? ['OPEN TERRACE', 'TOWER', 'STAIRCASE']
     : roomProgramForFloor(
         normalizeSelectedRooms(request.selectedRooms),
         request.bhk || 'AUTO',
@@ -287,7 +388,6 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     staircase = smart.staircase;
     furnitureChecks = smart.furnitureChecks;
 
-    // ✅ CHANGE #1: DEBUG LOG — roomPlanner output doors check
     if (typeof console !== 'undefined') {
       console.log('[ENGINE] 🔍 roomPlanner output doors:', smart.rooms.map((r: any) => ({
         name: r.name,
@@ -307,7 +407,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     }
   }
 
-  // ✅ CHANGE #2: doors aur windows explicitly preserve karo
+  // ✅ doors aur windows explicitly preserve karo
   rooms = rooms.map((r, i) => ({
     ...r,
     id: r.id || `room_${i}`,
@@ -316,16 +416,30 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     w: Number(Math.max(.1, Math.min(num(r.w), clearW - num(r.x))).toFixed(3)),
     h: Number(Math.max(.1, Math.min(num(r.h), clearL - num(r.y))).toFixed(3)),
     areaPerRoom: Number((Math.max(.1, num(r.w)) * Math.max(.1, num(r.h))).toFixed(2)),
-    // ✅ Explicit preserve — spread ke baad bhi
     doors: Array.isArray(r.doors) ? [...r.doors] : [],
     windows: Array.isArray(r.windows) ? [...r.windows] : [],
   }));
 
-  if (isTower) rooms = rooms.filter((r, i) => i === 0 || typeOf(r) === 'stairs');
+  // ✅ FIX: Tower floor ke liye TOWER block + STAIR dono preserve karo
+  if (isTower) {
+    // ✅ Sirf OPEN TERRACE, TOWER, aur STAIRS ko rakho — baaki sab hataao
+    rooms = rooms.filter((r) => {
+      const name = String(r.name || '').toUpperCase();
+      return name.includes('TERRACE') ||
+             name === 'TOWER' ||
+             name.includes('STAIR') ||
+             name.includes('MUMTY');
+    });
+
+    if (typeof console !== 'undefined') {
+      console.log('[ENGINE] 🔍 Tower rooms preserved:', rooms.map((r: any) => ({
+        name: r.name, x: r.x, y: r.y, w: r.w, h: r.h,
+      })));
+    }
+  }
 
   const opened = generateFloorOpenings(rooms as any, orientation.mainRoad, clearW, clearL) as any[];
 
-  // ✅ CHANGE #3: DEBUG LOG — openingPlanner output check
   if (typeof console !== 'undefined') {
     console.log('[ENGINE] 🔍 after openingPlanner doors:', opened.map((r: any) => ({
       name: r.name,
@@ -473,7 +587,8 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     const gW = Math.max(1, num(gInput.width, maxFootprint.width));
     const gL = Math.max(1, num(gInput.length, maxFootprint.length));
 
-    const wall = 9 / 12;
+    const wall = getExternalWallThicknessFt();
+
     const gClearW = Math.max(1, Math.min(gW, maxFootprint.width) - 2 * wall);
     const gClearL = Math.max(1, Math.min(gL, maxFootprint.length) - 2 * wall);
 
@@ -573,7 +688,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       area: plan.area, outerArea: plan.outerArea, buildableArea: plan.buildableArea,
       originX: plan.originX, originY: plan.originY, rooms: plan.rooms, walls: plan.walls, columns: plan.columns,
       openings: plan.openings, staircase: plan.staircase, staircaseConfig: plan.staircase,
-      outerWallThickness: 9 / 12, innerWallThickness: 4 / 12,
+      outerWallThickness: getExternalWallThicknessFt(), innerWallThickness: 4 / 12,
       connectivity: plan.connectivity, orientation: plan.orientation,
       planningScore: plan.planningScore, furnitureChecks: plan.furnitureChecks,
       validation: { errors: plan.errors, warnings: plan.warnings, isValid: plan.errors.length === 0 },

@@ -730,6 +730,7 @@ export default function CadModalView({
                       roadFacingOption={roadFacingOption}
                       floorBuiltUpAreas={floorBuiltUpAreas}
                       floorData={normalizedFloorData}
+                       floorRooms={floorRooms}
                       frontMos={sideMos.A ?? frontMos}
                       backMos={sideMos.B ?? rearMos}
                       measurementUnit={measurementUnit}

@@ -3,16 +3,20 @@
 import React, { useState, useEffect, useRef } from "react";
 import { FloorData as BaseFloorData, FloorRoom as BaseFloorRoom } from "../engine/planningTypes";
 
-// ✅ LOCAL EXTENSION: FloorData me setbacks, x, y add karo
+import {
+  getParkingWidth,
+  getCommonToiletOrientation,
+  getAttachedToiletOrientation,
+  getWallThicknessFt,
+  n,
+  clamp,
+  canonical,
+} from "../engine/layoutFormulas";
+
 export interface FloorData extends BaseFloorData {
   clearWidth?: number;
   clearLength?: number;
-  setbacks?: {
-    front?: number;
-    rear?: number;
-    left?: number;
-    right?: number;
-  };
+  setbacks?: { front?: number; rear?: number; left?: number; right?: number };
   x?: number;
   y?: number;
 }
@@ -30,11 +34,9 @@ export interface FloorRoom extends BaseFloorRoom {
   inheritedY?: number;
   stairW?: number;
   stairH?: number;
+  userAdjusted?: boolean;
 }
 
-// ============================================================================
-// IS CODE & NBC TECHNICAL MINIMUM STANDARDS
-// ============================================================================
 export const IS_CODE_MINIMUMS = {
   floorHeightFt: 10.0,
   plinthHeightFt: 1.5,
@@ -92,18 +94,21 @@ export interface TechnicalSpecs {
   [key: string]: any;
 }
 
-// ============================================================================
-// ✅ Constants: DYNAMIC wall thickness
-//    - Width ≤ 15 ft → 4" wall (0.333 ft per side)
-//    - Width >  15 ft → 8" wall (0.667 ft per side)
-// ============================================================================
 const WALL_THICKNESS_SMALL_FT = 4 / 12;
-const WALL_THICKNESS_LARGE_FT = 8 / 12;
+const WALL_THICKNESS_LARGE_FT = 4 / 12;
 const WALL_THICKNESS_BREAKPOINT_FT = 15;
 
-// ============================================================================
-// HELPER: PROPORTIONAL ROOM LENGTH ADJUSTMENT
-// ============================================================================
+export { getParkingWidth };
+
+export function getCommonToiletSize(W: number): { w: number; h: number; orientation: 'H' | 'V' } {
+  return getCommonToiletOrientation(W);
+}
+
+export function getAttachedToiletSize(masterW: number, masterH: number): { w: number; h: number; orientation: 'H' | 'V' } {
+  const placement = getAttachedToiletOrientation(masterW, masterH);
+  return { w: placement.w, h: placement.h, orientation: placement.orientation };
+}
+
 export function adjustRoomLengthsProportionally(
   floorLength: number,
   desiredLengths: { key: string; length: number; minLength: number }[],
@@ -148,9 +153,6 @@ export function adjustRoomLengthsProportionally(
   return out;
 }
 
-// ============================================================================
-// HELPER: DYNAMIC DIMENSION RESOLVER
-// ============================================================================
 export function resolveDynamicDimensions(
   roomKey: string,
   presetW: number,
@@ -180,49 +182,6 @@ export function resolveDynamicDimensions(
   };
 }
 
-// ============================================================================
-// ✅ NEW: Parking Width (Dynamic based on W)
-// ============================================================================
-export function getParkingWidth(W: number): number {
-  if (W <= 11) return 4;
-  if (W <= 12) return 4;
-  if (W <= 13) return 5;
-  if (W <= 14) return 6;
-  if (W <= 15) return 7;
-  if (W <= 16) return 7.5;
-  if (W <= 17) return 8;
-  if (W <= 18) return 8.5;
-  if (W <= 19) return 8.5;
-  return 9;
-}
-
-// ============================================================================
-// ✅ NEW: Common Toilet Orientation (Dynamic)
-// ============================================================================
-export function getCommonToiletSize(W: number): { w: number; h: number; orientation: 'H' | 'V' } {
-  if (W >= 13) {
-    return { w: 6, h: 4.5, orientation: 'H' };
-  }
-  return { w: 4, h: 6.5, orientation: 'V' };
-}
-
-// ============================================================================
-// ✅ NEW: Attached Toilet Orientation
-// ============================================================================
-export function getAttachedToiletSize(masterW: number, masterH: number): { w: number; h: number; orientation: 'H' | 'V' } {
-  if (masterW >= 15) {
-    const aw = 5;
-    const ah = Math.min(7, masterH * 0.7);
-    return { w: aw, h: ah, orientation: 'V' };
-  }
-  const aw = Math.min(10, masterW * 0.7);
-  const ah = 4.5;
-  return { w: aw, h: ah, orientation: 'H' };
-}
-
-// ============================================================================
-// HELPER: DYNAMIC DOOR/WINDOW/VENTILATOR COUNTER
-// ============================================================================
 export function calculateFloorOpenings(floorRoomsMap: Record<string, FloorRoom>) {
   let mainDoors = 0;
   let internalDoors = 0;
@@ -261,9 +220,6 @@ export function calculateFloorOpenings(floorRoomsMap: Record<string, FloorRoom>)
   return { mainDoors, internalDoors, toiletDoors, windows, ventilators };
 }
 
-// ============================================================================
-// STANDARD PRESETS DATABASE
-// ============================================================================
 export const STANDARD_LOAN_PRESETS: Record<string, { label: string; width: number; length: number }> = {
   "10x30": { label: "10' x 30' (300 SQ.FT)", width: 10, length: 30 },
   "12x30": { label: "12' x 30' (360 SQ.FT)", width: 12, length: 30 },
@@ -308,9 +264,6 @@ export function getNearestPreset(w: number, l: number) {
   return { key: nearestKey, ...STANDARD_LOAN_PRESETS[nearestKey] };
 }
 
-// ============================================================================
-// ✅ SMART AUTO-PLANNING — FINAL RULES (FIXED — no duplicate code)
-// ============================================================================
 export function getAutoRoomsForFloor(
   floorName: string,
   width: number,
@@ -330,9 +283,6 @@ export function getAutoRoomsForFloor(
 
   console.log(`[getAutoRoomsForFloor] floor=${floorName}, W=${W}, L=${L}, isGround=${isGround}`);
 
-  // ============================================================
-  // ✅ GROUND FLOOR — fixed layout
-  // ============================================================
   if (isGround) {
     const rooms: string[] = [];
     rooms.push("parking");
@@ -341,34 +291,38 @@ export function getAutoRoomsForFloor(
     rooms.push("common_bathroom");
 
     if (W <= 14) {
-      rooms.push("bedroom");
+      rooms.push("master_bedroom");
+      rooms.push("attached_bathroom");
     } else {
       rooms.push("master_bedroom", "attached_bathroom");
     }
 
-    console.log(`[getAutoRoomsForFloor] GROUND returning:`, rooms);
     return rooms;
   }
 
-  // ============================================================
-  // ✅ UPPER FLOOR — WIDTH KE ACCORDING DYNAMIC PLANNING
-  // ============================================================
-  const rooms: string[] = [];
+     const rooms: string[] = [];
 
-  if (W >= 10) {
-    rooms.push("front_bedroom");
-    rooms.push("rear_bedroom");
-    rooms.push("front_attached_bath");
-    rooms.push("rear_attached_bath");
+  if (W >= 12) {
+    rooms.push("master_bedroom");
+    rooms.push("attached_bathroom");
     rooms.push("staircase");
+    rooms.push("master_bedroom");
+    rooms.push("attached_bathroom");
   } else if (W >= 8) {
-    rooms.push("front_bedroom");
-    rooms.push("rear_bedroom");
+    rooms.push("master_bedroom");
+    rooms.push("attached_bathroom");
     rooms.push("staircase");
+    rooms.push("bedroom");
+    rooms.push("attached_bathroom");
+  } else if (W >= 6) {
+    rooms.push("master_bedroom");
+    rooms.push("attached_bathroom");
+    rooms.push("staircase");
+    rooms.push("hall");
   } else if (W >= 4.5) {
-    // 10×40 case: W = 7.33 → 1 bedroom + stair
-    rooms.push("front_bedroom");
+    rooms.push("bedroom");
     rooms.push("staircase");
+    rooms.push("hall");
   } else {
     rooms.push("living_room");
     rooms.push("staircase");
@@ -378,9 +332,6 @@ export function getAutoRoomsForFloor(
   return rooms;
 }
 
-// ============================================================================
-// ROOM CATALOG
-// ============================================================================
 export const ROOM_CATALOG = [
   { key: "parking", label: "PARKING", defaultWidth: 9, defaultLength: 8, minWidth: 4, minLength: 7, defaultArea: 72, minArea: 28, category: "Ground" },
   { key: "parking_with_stair", label: "PARKING WITH STAIRCASE", defaultWidth: 6, defaultLength: 7, minWidth: 6, minLength: 7, defaultArea: 42, minArea: 42, category: "Ground" },
@@ -391,8 +342,8 @@ export const ROOM_CATALOG = [
   { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultWidth: 6, defaultLength: 8, minWidth: 5, minLength: 5, defaultArea: 48, minArea: 25, category: "Kitchen" },
   { key: "kitchen_cum_dining", label: "KITCHEN CUM DINING", defaultWidth: 10, defaultLength: 8, minWidth: 8, minLength: 7, defaultArea: 80, minArea: 56, category: "Kitchen" },
   { key: "store_room", label: "STORE ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Utility" },
-  { key: "master_bedroom", label: "MASTER BEDROOM (WITH ATTACHED TOILET)", defaultWidth: 12, defaultLength: 10, minWidth: 10.5, minLength: 9, defaultArea: 120, minArea: 95, category: "Bedroom" },
-  { key: "bedroom", label: "BEDROOM", defaultWidth: 10, defaultLength: 10, minWidth: 9, minLength: 8.5, defaultArea: 100, minArea: 76, category: "Bedroom" },
+  { key: "master_bedroom", label: "MASTER BEDROOM (WITH ATTACHED TOILET)", defaultWidth: 10, defaultLength: 12, minWidth: 7.5, minLength: 9, defaultArea: 100, minArea: 60, category: "Bedroom" },
+  { key: "bedroom", label: "BEDROOM", defaultWidth: 10, defaultLength: 10, minWidth: 7, minLength: 8.5, defaultArea: 100, minArea: 60, category: "Bedroom" },
   { key: "dressing", label: "DRESSING ROOM", defaultWidth: 5, defaultLength: 6, minWidth: 4, minLength: 4, defaultArea: 30, minArea: 16, category: "Bedroom" },
   { key: "common_bathroom", label: "COMMON BATHROOM", defaultWidth: 4.5, defaultLength: 6.5, minWidth: 4, minLength: 4, defaultArea: 29.25, minArea: 16, category: "Bathroom" },
   { key: "attached_bathroom", label: "ATTACHED BATHROOM", defaultWidth: 5, defaultLength: 7, minWidth: 4.5, minLength: 4.5, defaultArea: 35, minArea: 20, category: "Bathroom" },
@@ -430,9 +381,6 @@ function isBlockedByExclusive(
   return { blocked: false };
 }
 
-// ============================================================================
-// PROPS
-// ============================================================================
 interface FloorManagerSectionProps {
   selectedFloors: string[];
   floorData: Record<string, FloorData>;
@@ -471,6 +419,8 @@ interface FloorManagerSectionProps {
   }) => void;
   groundStairPositionExternal?: { x: number; y: number; w?: number; h?: number } | null;
   groundStairRelativeOffsetExternal?: { dx: number; dy: number } | null;
+  parkingSide?: string;
+  roadFacingOption?: string;
 }
 
 interface SetbackType {
@@ -480,9 +430,6 @@ interface SetbackType {
   right: number;
 }
 
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
 export default function FloorManagerSection({
   selectedFloors,
   floorData,
@@ -509,7 +456,12 @@ export default function FloorManagerSection({
   onPlanningContextReady,
   groundStairPositionExternal,
   groundStairRelativeOffsetExternal,
+  parkingSide = "SOUTH",
+  roadFacingOption = "",
 }: FloorManagerSectionProps) {
+  void parkingSide;
+  void roadFacingOption;
+
   const [mosEditorFloor, setMosEditorFloor] = useState<string | null>(null);
   const [localSetbacks, setLocalSetbacks] = useState<Record<string, SetbackType>>({});
 
@@ -520,6 +472,8 @@ export default function FloorManagerSection({
   const [activeGearFloor, setActiveGearFloor] = useState<string | null>(null);
 
   const inheritanceApplied = useRef<Record<string, boolean>>({});
+
+  const autoProcessedSignature = useRef<Record<string, string>>({});
 
   const [internalStairPosition, setInternalStairPosition] = useState<{ x: number; y: number } | null>(null);
   const [internalRelativeOffset, setInternalRelativeOffset] = useState<{ dx: number; dy: number } | null>(null);
@@ -545,18 +499,10 @@ export default function FloorManagerSection({
     }
   }, [groundStairRelativeOffsetExternal]);
 
-  // ==========================================================================
-  // ✅ Helper: Plot width ke hisaab se dynamic wall thickness
-  // ==========================================================================
-  const getWallThicknessForWidth = (plotWidthFt: number): number => {
-    return plotWidthFt > WALL_THICKNESS_BREAKPOINT_FT
-      ? WALL_THICKNESS_LARGE_FT
-      : WALL_THICKNESS_SMALL_FT;
+  const getWallThicknessForWidth = (_plotWidthFt: number): number => {
+    return 4 / 12;
   };
 
-  // ==========================================================================
-  // ✅ HELPER: Available CARPET size (plot - setbacks - dynamic walls)
-  // ==========================================================================
   const getAvailableSize = (floor: string): { W: number; L: number } => {
     const data = (floorData[floor] || {}) as Partial<FloorData> & {
       clearWidth?: number;
@@ -565,8 +511,8 @@ export default function FloorManagerSection({
     };
     const isTower = floor.toUpperCase().includes("TOWER") || floor.toUpperCase().includes("MUMTY");
 
-    const plotW = Number(data.width) || (isTower ? 10 : Number(plotLength) || 20);
-    const plotL = Number(data.length) || (isTower ? 10 : Number(plotWidth) || 50);
+    const plotW = Number(data.width) || (isTower ? 10 : Number(plotWidth) || 20);
+    const plotL = Number(data.length) || (isTower ? 10 : Number(plotLength) || 50);
 
     const floorSetbacks = data.setbacks || {};
     const sLeft = Number(floorSetbacks.left) || Number(leftSetback) || 0;
@@ -577,7 +523,6 @@ export default function FloorManagerSection({
     const afterSetbackW = plotW - (sLeft + sRight);
     const afterSetbackL = plotL - (sFront + sRear);
 
-    // ✅ DYNAMIC wall thickness
     const wallThicknessFt = getWallThicknessForWidth(plotW);
     const wallDeductionW = wallThicknessFt * 2;
     const wallDeductionL = wallThicknessFt * 2;
@@ -592,16 +537,6 @@ export default function FloorManagerSection({
       availableW = Math.max(3.5, afterSetbackW - wallDeductionW);
       availableL = Math.max(6, afterSetbackL - wallDeductionL);
     }
-
-    console.log(`[FLOOR MANAGER] getAvailableSize("${floor}") →`, {
-      plotW, plotL,
-      setbacks: { sLeft, sRight, sFront, sRear },
-      afterSetbackW, afterSetbackL,
-      wallThicknessInches: (wallThicknessFt * 12).toFixed(0) + '"',
-      wallThicknessRule: plotW > WALL_THICKNESS_BREAKPOINT_FT ? '8" (width > 15 ft)' : '4" (width ≤ 15 ft)',
-      wallDeduction: { W: wallDeductionW, L: wallDeductionL },
-      availableW, availableL,
-    });
 
     return { W: availableW, L: availableL };
   };
@@ -646,54 +581,52 @@ export default function FloorManagerSection({
   ]);
 
   // ============================================================================
-  // ✅ SMART AUTO-MODE EFFECT — FINAL RULES
+  // ✅ SMART AUTO-MODE EFFECT — FINAL (with signature guard)
   // ============================================================================
   useEffect(() => {
-    console.log("[FLOOR MANAGER] AUTO EFFECT CALLED", {
-      planningMode,
-      selectedFloors,
-      floorRoomsKeys: Object.keys(floorRooms || {}),
-      firstFloorRooms: Object.keys((floorRooms || {})["FIRST FLOOR"] || {}),
-    });
+    if (planningMode !== "AUTO") return;
 
-    if (planningMode !== "AUTO") {
-      console.log("[FLOOR MANAGER] ⛔ planningMode is not AUTO, skipping");
-      return;
-    }
-
-    console.groupCollapsed('[FLOOR MANAGER] AUTO MODE EFFECT START');
+    const currentSignatures: Record<string, string> = {};
 
     selectedFloors.forEach((floor) => {
-      console.groupCollapsed(`[FLOOR MANAGER] Processing: ${floor}`);
-      console.log(`[FLOOR MANAGER] ✅ ENTERED for ${floor}`);
-      console.log(`[FLOOR MANAGER] floorRooms[${floor}] BEFORE =`, Object.keys(floorRooms[floor] || {}));
+      const { W, L } = getAvailableSize(floor);
+      const roomsInState = floorRooms[floor] || {};
+      const selectedCount = Object.values(roomsInState).filter((r: any) => r?.selected).length;
+
+      const sig = `${floor}|${W.toFixed(2)}|${L.toFixed(2)}|${selectedCount}`;
+      currentSignatures[floor] = sig;
+
+      const lastSig = autoProcessedSignature.current[floor];
+      if (lastSig === sig && selectedCount > 0) {
+        return;
+      }
 
       ensureFloorRooms(floor);
+
       const data = (floorData[floor] || {}) as Partial<FloorData>;
       const isTower = floor.toUpperCase().includes("TOWER") || floor.toUpperCase().includes("MUMTY");
       const isGround = floor.toUpperCase().includes("GROUND");
 
       const { W: currentW, L: currentL } = getAvailableSize(floor);
 
-      console.log(`[FLOOR MANAGER] ${floor} — Available Size:`, {
-        floor, isGround, isTower,
-        availableW: currentW, availableL: currentL,
-      });
-
       if (isTower) {
         const towerRooms = getAutoRoomsForFloor(floor, currentW, currentL);
         const towerCounts: Record<string, number> = {};
         towerRooms.forEach(k => { towerCounts[k] = (towerCounts[k] || 0) + 1; });
-        const towerRoomMap = floorRooms[floor] || {};
 
         ROOM_CATALOG.forEach((room) => {
           const shouldSelect = towerCounts[room.key] > 0;
-          const isCurrentlySelected = !!towerRoomMap[room.key]?.selected;
-          if (shouldSelect !== isCurrentlySelected) {
-            toggleRoom(floor, room.key);
+          const currentRoomInfo = roomsInState[room.key] || {};
+          const isCurrentlySelected = !!currentRoomInfo.selected;
+
+          if (shouldSelect && !isCurrentlySelected) {
+            updateRoom(floor, room.key, { selected: true, count: 1 });
+          } else if (!shouldSelect && isCurrentlySelected) {
+            updateRoom(floor, room.key, { selected: false });
           }
         });
-        console.groupEnd();
+
+        autoProcessedSignature.current[floor] = sig;
         return;
       }
 
@@ -702,12 +635,6 @@ export default function FloorManagerSection({
       const presetFloorL = preset.length;
 
       const targetRooms = getAutoRoomsForFloor(floor, currentW, currentL, groundFloorProgram);
-      const floorRoomState = floorRooms[floor] || {};
-
-      console.log('[FLOOR MANAGER] TARGET ROOMS:', {
-        floor, isGround, currentW, currentL,
-        targetRooms,
-      });
 
       const targetCounts: Record<string, number> = {};
       targetRooms.forEach((key) => {
@@ -742,6 +669,10 @@ export default function FloorManagerSection({
         upperRearBedH = Math.max(7, bachaHua * 0.6);
       }
 
+      const masterCount = targetCounts["master_bedroom"] || 0;
+      const attachedBathCount = targetCounts["attached_bathroom"] || 0;
+      const isSingleMasterUpper = !isGround && masterCount === 1;
+
       ROOM_CATALOG.forEach((room) => {
         const shouldSelect = targetCounts[room.key] > 0;
         if (!shouldSelect) return;
@@ -760,21 +691,33 @@ export default function FloorManagerSection({
         } else if (room.key === "living_room_with_stair" || room.key === "living_room") {
           targetWidth = currentW;
           targetLength = fixedMiddleH;
+        } else if (room.key === "hall") {
+          targetWidth = currentW;
+          const usedByOthers = (upperFrontBedH || 0) + (upperStairH || 0) + fixedServiceH;
+          const remaining = Math.max(8, currentL - usedByOthers);
+          targetLength = remaining;
+          targetCount = 1;
         } else if (room.key === "common_bathroom") {
-          const ctSize = getCommonToiletSize(currentW);
+          const ctSize = getCommonToiletOrientation(currentW);
           targetWidth = ctSize.w;
           targetLength = Math.min(ctSize.h, fixedServiceH);
           targetCount = 1;
         } else if (room.key === "master_bedroom") {
           targetWidth = currentW;
-          targetLength = Math.max(10, rearH);
-          targetCount = 1;
+          if (isSingleMasterUpper) {
+            targetLength = Math.max(12, currentL - upperStairH - fixedServiceH);
+          } else if (masterCount > 1) {
+            targetLength = Math.max(9, upperFrontBedH);
+          } else {
+            targetLength = Math.max(10, rearH);
+          }
+          targetCount = masterCount;
         } else if (room.key === "bedroom") {
           targetWidth = currentW;
           targetLength = Math.max(9.5, rearH);
           targetCount = 1;
         } else if (room.key === "attached_bathroom") {
-          targetCount = 1;
+          targetCount = Math.max(1, attachedBathCount);
           const attachedArea = Math.max(30, currentW * 4);
           targetWidth = Math.min(5, currentW * 0.4);
           targetLength = Math.max(5, attachedArea / targetWidth);
@@ -820,7 +763,7 @@ export default function FloorManagerSection({
         const EXACT_RULE_ROOMS = new Set([
           "parking", "living_room_with_stair", "living_room", "kitchen",
           "kitchen_cum_dining", "master_bedroom", "bedroom",
-          "attached_bathroom", "common_bathroom", "staircase",
+          "attached_bathroom", "common_bathroom", "staircase", "hall",
           "front_bedroom", "rear_bedroom", "front_attached_bath", "rear_attached_bath",
         ]);
 
@@ -846,9 +789,18 @@ export default function FloorManagerSection({
       });
 
       const isGroundFloor = floor.toUpperCase().includes("GROUND");
+      const bedroomCount = (targetCounts["bedroom"] || 0) + (targetCounts["master_bedroom"] || 0);
       const stackOrder = isGroundFloor
-        ? ["parking", "common_bathroom", "living_room_with_stair", "master_bedroom", "bedroom"]
-        : ["front_bedroom", "front_attached_bath", "staircase", "rear_attached_bath", "rear_bedroom"];
+        ? ["parking", "common_bathroom", "living_room_with_stair", "master_bedroom", "attached_bathroom"]
+        : (bedroomCount >= 2
+            ? [
+                targetCounts["master_bedroom"] ? "master_bedroom" : "bedroom",
+                "attached_bathroom",
+                "staircase",
+                targetCounts["master_bedroom"] ? "master_bedroom" : "bedroom",
+                "attached_bathroom",
+              ]
+            : (targetCounts["master_bedroom"] ? ["master_bedroom", "attached_bathroom", "staircase", "hall"] : ["bedroom", "attached_bathroom", "staircase", "hall"]));
 
       const stackRooms = stackOrder
         .filter(k => desiredDims[k] && desiredDims[k].count > 0)
@@ -879,44 +831,33 @@ export default function FloorManagerSection({
         dim.w = Number(Math.min(dim.w, currentW).toFixed(2));
       });
 
-      // ==========================================================================
-      // ✅ STEP A: Force-remove upper-floor pe kuch bhi jo target me nahi hai
-      // (inheritance se aaye living_room_with_stair ko hatao taaki staircase block na ho)
-      // ==========================================================================
       const FORCE_REMOVE_FOR_UPPER: string[] = isGround
         ? []
-        : ["living_room_with_stair", "living_room", "kitchen", "kitchen_cum_dining", "parking", "common_bathroom"];
+        : [
+            "living_room_with_stair", "living_room", "kitchen", "kitchen_cum_dining",
+            "parking", "common_bathroom",
+            "front_bedroom", "rear_bedroom", "front_attached_bath", "rear_attached_bath",
+          ];
 
       FORCE_REMOVE_FOR_UPPER.forEach((roomKey) => {
-        const currentInfo = floorRoomState[roomKey];
+        const currentInfo = roomsInState[roomKey];
         if (currentInfo?.selected) {
-          console.log(`[FLOOR MANAGER] FORCE REMOVING (upper floor cleanup): ${roomKey}`);
-          toggleRoom(floor, roomKey);
+          updateRoom(floor, roomKey, { selected: false });
         }
       });
 
-      // ==========================================================================
-      // ✅ STEP B: Saare rooms remove karo jo target me nahi hain
-      // ==========================================================================
       ROOM_CATALOG.forEach((room) => {
         const shouldSelect = targetCounts[room.key] > 0;
-        const currentRoomInfo = floorRoomState[room.key] || {};
+        const currentRoomInfo = roomsInState[room.key] || {};
         const isCurrentlySelected = !!currentRoomInfo.selected;
         const desiredEntry = desiredDims[room.key];
         const desiredCount = desiredEntry?.count ?? 0;
 
-        if (!shouldSelect || desiredCount === 0) {
-          if (isCurrentlySelected) {
-            console.log(`[FLOOR MANAGER] REMOVING: ${room.key}`);
-            toggleRoom(floor, room.key);
-          }
-          return;
+        if ((!shouldSelect || desiredCount === 0) && isCurrentlySelected) {
+          updateRoom(floor, room.key, { selected: false });
         }
       });
 
-      // ==========================================================================
-      // ✅ STEP C: Ab add/update karo — force upsert
-      // ==========================================================================
       ROOM_CATALOG.forEach((room) => {
         const shouldSelect = targetCounts[room.key] > 0;
         if (!shouldSelect) return;
@@ -924,22 +865,15 @@ export default function FloorManagerSection({
         const desiredEntry = desiredDims[room.key];
         if (!desiredEntry || desiredEntry.count === 0) return;
 
-        const currentRoomInfo = floorRoomState[room.key] || {};
-        const isCurrentlySelected = !!currentRoomInfo.selected;
+        const currentRoomInfo = roomsInState[room.key] || {};
 
-        if (!isCurrentlySelected) {
-          console.log(`[FLOOR MANAGER] toggleRoom: ${room.key}`);
-          toggleRoom(floor, room.key);
-        }
+        if ((currentRoomInfo as any).userAdjusted === true) return;
 
         const { w, h, count } = desiredEntry;
         const safeW = Number(Math.min(w, currentW).toFixed(2));
         const safeH = Number(Math.min(h, currentL).toFixed(2));
         const expectedArea = Number((safeW * safeH).toFixed(2));
 
-        console.log(`[FLOOR MANAGER] updateRoom (forced): ${room.key} →`, {
-          count, width: safeW, length: safeH, area: expectedArea,
-        });
         updateRoom(floor, room.key, {
           count,
           width: safeW,
@@ -949,14 +883,19 @@ export default function FloorManagerSection({
         });
       });
 
-      console.log(`[FLOOR MANAGER] ${floor} DONE. Rooms:`, Object.keys(floorRooms[floor] || {}));
-      console.groupEnd();
+      autoProcessedSignature.current[floor] = sig;
     });
 
-    console.groupEnd();
+    Object.keys(autoProcessedSignature.current).forEach((f) => {
+      if (!selectedFloors.includes(f)) {
+        delete autoProcessedSignature.current[f];
+      }
+    });
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     planningMode,
+    selectedFloors.join('|'),
     plotLength,
     plotWidth,
     groundFloorProgramKey,
@@ -971,10 +910,7 @@ export default function FloorManagerSection({
   // ✅ STAIRCASE INHERITANCE EFFECT — only for MANUAL mode
   // ============================================================================
   useEffect(() => {
-    if (planningMode === "AUTO") {
-      console.log("[FLOOR MANAGER] ⏭️ Skipping STAIRCASE INHERITANCE (AUTO mode)");
-      return;
-    }
+    if (planningMode === "AUTO") return;
 
     const groundFloor = selectedFloors.find(f => f.toUpperCase().includes("GROUND"));
     if (!groundFloor) return;
@@ -1004,7 +940,6 @@ export default function FloorManagerSection({
       if (groundLivingStair?.selected) {
         const existingLivingStair = floorRoomsMap["living_room_with_stair"];
         if (!existingLivingStair?.selected) {
-          toggleRoom(floor, "living_room_with_stair");
           updateRoom(floor, "living_room_with_stair", {
             count: groundLivingStair.count || 1,
             width: Number(groundLivingStair.width || 10),
@@ -1026,7 +961,6 @@ export default function FloorManagerSection({
 
       const existingStair = floorRoomsMap["staircase"];
       if (!existingStair?.selected) {
-        toggleRoom(floor, "staircase");
         updateRoom(floor, "staircase", {
           count: groundStair.count || 1,
           width: Number(groundStairW),
@@ -1052,8 +986,8 @@ export default function FloorManagerSection({
     (groundStairPosition as any)?.h,
   ]);
 
-  const plotFrontWidth = Number(plotLength) > 0 ? Number(plotLength) : 20;
-  const plotDepth = Number(plotWidth) > 0 ? Number(plotWidth) : 50;
+  const plotFrontWidth = Number(plotWidth) > 0 ? Number(plotWidth) : 20;
+  const plotDepth = Number(plotLength) > 0 ? Number(plotLength) : 50;
 
   const numFrontSetback = Number(frontSetback) || 0;
   const numRearSetback = Number(rearSetback) || 0;
@@ -1069,7 +1003,7 @@ export default function FloorManagerSection({
 
   return (
     <div className="border-2 border-black mb-4 bg-white shadow-sm uppercase font-sans text-xs">
-      {/* ✅ HEADER — Mobile Responsive */}
+      {/* HEADER */}
       <div className="bg-slate-900 text-white p-2 font-black text-[10px] sm:text-sm flex flex-col md:flex-row justify-between items-center px-2 sm:px-4 gap-2">
         <span className="text-center font-extrabold tracking-wide text-[10px] sm:text-sm leading-tight">
           FLOOR-WISE BUILT-UP AREA & ROOM PLANNING
@@ -1105,7 +1039,7 @@ export default function FloorManagerSection({
         </div>
       </div>
 
-      {/* ✅ MOBILE LAYOUT (Cards) */}
+      {/* MOBILE LAYOUT */}
       <div className="block md:hidden">
         {selectedFloors.map((floor) => {
           const isGround = floor === "GROUND FLOOR" || floor.toUpperCase().includes("GROUND");
@@ -1214,7 +1148,7 @@ export default function FloorManagerSection({
         })}
       </div>
 
-      {/* ✅ DESKTOP LAYOUT (Table) */}
+      {/* DESKTOP LAYOUT */}
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-slate-200 text-black border-b-2 border-black">
@@ -1259,11 +1193,8 @@ export default function FloorManagerSection({
               let currentLength = 0;
 
               if (isGround) {
-                let w = rawW > 0 ? rawW : plotFrontWidth;
-                let l = rawL > 0 ? rawL : plotDepth;
-                if (w > plotFrontWidth && l <= plotFrontWidth) { const t = w; w = l; l = t; }
-                currentWidth = w > plotFrontWidth ? plotFrontWidth : w;
-                currentLength = l > plotDepth ? plotDepth : l;
+                currentWidth = rawW > 0 ? rawW : plotFrontWidth;
+                currentLength = rawL > 0 ? rawL : plotDepth;
               } else if (isTower) {
                 currentWidth = rawW > 0 ? rawW : 10;
                 currentLength = rawL > 0 ? rawL : 10;
@@ -1467,6 +1398,7 @@ export default function FloorManagerSection({
                                     onClick={() => {
                                       resetFloorRooms(floor);
                                       inheritanceApplied.current[floor] = false;
+                                      delete autoProcessedSignature.current[floor];
                                     }}
                                     className="bg-red-600 hover:bg-red-700 text-white px-2 py-0.5 text-[10px] font-black uppercase border border-white cursor-pointer"
                                   >
@@ -1545,7 +1477,12 @@ export default function FloorManagerSection({
                                               onChange={(e) => {
                                                 let val = Math.max(room.minWidth, Number(e.target.value) || room.minWidth);
                                                 if (val > currentWidth * 1.5) val = Number(currentWidth.toFixed(2));
-                                                updateRoom(floor, room.key, { width: val, areaPerRoom: Number((val * rL).toFixed(2)), areaMode: 'MANUAL' });
+                                                updateRoom(floor, room.key, {
+                                                  width: val,
+                                                  areaPerRoom: Number((val * rL).toFixed(2)),
+                                                  areaMode: 'MANUAL',
+                                                  userAdjusted: true,
+                                                } as any);
                                               }}
                                               className="w-14 border border-black p-1 text-center font-bold text-xs bg-white"
                                             />
@@ -1560,7 +1497,12 @@ export default function FloorManagerSection({
                                               onChange={(e) => {
                                                 let val = Math.max(room.minLength, Number(e.target.value) || room.minLength);
                                                 if (val > currentLength * 1.5) val = Number(currentLength.toFixed(2));
-                                                updateRoom(floor, room.key, { length: val, areaPerRoom: Number((rW * val).toFixed(2)), areaMode: 'MANUAL' });
+                                                updateRoom(floor, room.key, {
+                                                  length: val,
+                                                  areaPerRoom: Number((rW * val).toFixed(2)),
+                                                  areaMode: 'MANUAL',
+                                                  userAdjusted: true,
+                                                } as any);
                                               }}
                                               className="w-14 border border-black p-1 text-center font-bold text-xs bg-white"
                                             />

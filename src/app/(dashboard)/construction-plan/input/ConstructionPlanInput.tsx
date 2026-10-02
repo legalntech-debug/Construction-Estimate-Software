@@ -13,13 +13,6 @@ import { generateCompleteConstructionPlan } from "../engine/planGenerator";
 import { generateCadVectorBlueprint } from "../engine/cad/cadRenderer";
 import { supabase } from "@/lib/supabase";
 
-
-// ✅ NEW: Import for stair inheritance
-import {
-  generateArchitecturalFloorPlan,
-  extractStairPositionFromResult,
-} from "../engine/roomPlanner";
-
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
   "BASEMENT", "FIRST FLOOR", "SECOND FLOOR", "TOWER", "THIRD FLOOR", 
@@ -61,6 +54,10 @@ export default function ConstructionPlanInput() {
 
   const [measurementUnit, setMeasurementUnit] = useState<"FEET" | "METERS">("FEET");
   const [roadFacingOption, setRoadFacingOption] = useState("");
+
+  // ✅ NEW: Parking side state — for 2+ road / corner plots
+  const [parkingSide, setParkingSide] = useState<string>("SOUTH");
+
   const [coverageType, setCoverageType] = useState("100_PERCENT");
   const [selectedFloors, setSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
   const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
@@ -86,14 +83,6 @@ export default function ConstructionPlanInput() {
   });
 
   const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
-
-  // ✅ NEW: Stair position inheritance state
-  const [groundStairPos, setGroundStairPos] = useState<{ x: number; y: number; w?: number; h?: number } | null>(null);
-  const [groundStairOffset, setGroundStairOffset] = useState<{ dx: number; dy: number } | null>(null);
-  const [groundFloorProgram, setGroundFloorProgram] = useState<string[]>([]);
-
-  // ✅ NEW: Guard to avoid infinite re-render
-  const lastExtractedSignature = useRef<string>("");
 
   useEffect(() => {
     if (coverageType === "100_PERCENT") {
@@ -275,101 +264,6 @@ export default function ConstructionPlanInput() {
     });
   }, [selectedFloors, planningMode]);
 
-  // ============================================================================
-  // ✅ NEW: GROUND FLOOR STAIR POSITION — runs actual layout engine
-  // Priority order:
-  //   1. Parent's own extraction (this effect)
-  //   2. onPlanningContextReady from FloorManagerSection (if it fires)
-  // ============================================================================
-  useEffect(() => {
-    const groundFloor = selectedFloors.find(f => f.toUpperCase().includes('GROUND'));
-    if (!groundFloor) {
-      setGroundStairPos(null);
-      setGroundStairOffset(null);
-      setGroundFloorProgram([]);
-      return;
-    }
-
-    // ✅ FIX: cast to Partial<FloorData>
-    const gData = (floorData[groundFloor] || {}) as Partial<FloorData>;
-    const gfW = Number(gData.width) || frontWidthFt || 20;
-    const gfL = Number(gData.length) || depthFt || 50;
-
-    if (gfW <= 0 || gfL <= 0) return;
-
-    // ✅ NEW: Avoid running on identical inputs
-    const signature = JSON.stringify({
-      floor: groundFloor,
-      w: gfW,
-      l: gfL,
-      rooms: floorRooms[groundFloor] ? Object.keys(floorRooms[groundFloor]).sort() : [],
-      mode: planningMode,
-      road: roadFacingOption,
-    });
-    if (signature === lastExtractedSignature.current) return;
-    lastExtractedSignature.current = signature;
-
-    try {
-      // ✅ FIX: always pass hasParking: true for GROUND floor
-      const gfResult = generateArchitecturalFloorPlan({
-        floorName: groundFloor,
-        width: gfW,
-        length: gfL,
-        selectedRooms: floorRooms[groundFloor] || {},
-        planningMode: planningMode,
-        roadSide: roadFacingOption || '1 SIDE ROAD (SOUTH)',
-        planningArea: gfW * gfL,
-        hasParking: true,                     // ✅ CRITICAL FIX
-      });
-
-      const stairInfo = extractStairPositionFromResult(gfResult);
-
-      if (stairInfo) {
-        setGroundStairPos({
-          x: stairInfo.x,
-          y: stairInfo.y,
-          w: stairInfo.w,
-          h: stairInfo.h,
-        });
-        setGroundStairOffset(stairInfo.relativeOffset);
-      } else {
-        setGroundStairPos(null);
-        setGroundStairOffset(null);
-      }
-
-      // Extract program for upper floors to know which stair type was used
-      const program = gfResult.rooms.map(r =>
-        String(r.name || '').toLowerCase().replace(/\s+/g, '_')
-      );
-      setGroundFloorProgram(program);
-
-      if (typeof console !== 'undefined') {
-        const stairRoom = gfResult.rooms.find(r => String(r.name || '').toUpperCase().includes('STAIR'));
-        const livingRoom = gfResult.rooms.find(r => String(r.name || '').toUpperCase().includes('LIVING'));
-        console.log('[PARENT] Ground floor stair extracted:', {
-          stairInfo,
-          stairRoom: stairRoom ? { x: stairRoom.x, y: stairRoom.y, w: stairRoom.w, h: stairRoom.h, name: stairRoom.name } : null,
-          livingRoom: livingRoom ? { x: livingRoom.x, y: livingRoom.y, w: livingRoom.w, h: livingRoom.h, name: livingRoom.name } : null,
-          program,
-          totalRooms: gfResult.rooms.length,
-        });
-      }
-    } catch (err) {
-      console.error('[PARENT] Ground floor stair extraction failed:', err);
-      setGroundStairPos(null);
-      setGroundStairOffset(null);
-      setGroundFloorProgram([]);
-    }
-  }, [
-    selectedFloors,
-    floorData,
-    floorRooms,
-    planningMode,
-    frontWidthFt,
-    depthFt,
-    roadFacingOption,
-  ]);
-
   const ROAD_FACING_OPTIONS = [
     "1 SIDE ROAD (NORTH)", "1 SIDE ROAD (SOUTH)", "1 SIDE ROAD (EAST)", "1 SIDE ROAD (WEST)",
     "CORNER: MAIN RD NORTH & EAST", "CORNER: MAIN RD NORTH & WEST", "CORNER: MAIN RD SOUTH & EAST", "CORNER: MAIN RD SOUTH & WEST",
@@ -377,6 +271,11 @@ export default function ConstructionPlanInput() {
     "2 SIDE FRONT & REAR (NORTH & SOUTH)", "2 SIDE FRONT & REAR (SOUTH & NORTH)", "2 SIDE FRONT & REAR (EAST & WEST)", "2 SIDE FRONT & REAR (WEST & EAST)",
     "3 SIDE ROAD (NORTH, EAST & WEST)", "3 SIDE ROAD (SOUTH, EAST & WEST)", "3 SIDE ROAD (EAST, NORTH & SOUTH)", "3 SIDE ROAD (WEST, NORTH & SOUTH)",
     "4 SIDE ROAD (ISLAND / OPEN)",
+  ];
+
+  const PARKING_SIDE_OPTIONS = [
+    "SOUTH", "NORTH", "EAST", "WEST",
+    "SOUTH-EAST", "SOUTH-WEST", "NORTH-EAST", "NORTH-WEST",
   ];
   
   const PLOT_SHAPES = [
@@ -464,6 +363,7 @@ export default function ConstructionPlanInput() {
     });
     setDimensionHistory([]);
     setRoadFacingOption("");
+    setParkingSide("SOUTH");
     setPlotShape("");
   };
 
@@ -495,16 +395,7 @@ export default function ConstructionPlanInput() {
   const toggleRoom = (floor: string, roomKey: string) => {
     setFloorRooms(prev => {
       const floorMap = prev[floor] || {};
-      const currentRoom = floorMap[roomKey];
-      const nextSelected = !(currentRoom?.selected ?? false);
-
-      console.log("[PARENT] toggleRoom:", {
-        floor,
-        roomKey,
-        wasSelected: currentRoom?.selected,
-        nowSelected: nextSelected,
-      });
-
+      const currentRoom = floorMap[roomKey] || { selected: false, count: 1, areaMode: "AUTO", areaPerRoom: 100 };
       return {
         ...prev,
         [floor]: {
@@ -522,31 +413,7 @@ export default function ConstructionPlanInput() {
   const updateRoom = (floor: string, roomKey: string, patch: Partial<FloorRoom>) => {
     setFloorRooms(prev => {
       const floorMap = prev[floor] || {};
-      const currentRoom = floorMap[roomKey];
-
-      // ✅ UPSERT: naya room create karo agar exist nahi karta
-      const nextRoom: any = currentRoom
-        ? { ...currentRoom, ...patch }
-        : {
-            selected: true,
-            count: 1,
-            areaMode: "AUTO",
-            areaPerRoom: 100,
-            ...patch,
-          };
-
-      // ✅ selected force true (agar patch me explicitly nahi diya)
-      if (nextRoom.selected === undefined || nextRoom.selected === null) {
-        nextRoom.selected = true;
-      }
-
-      console.log("[PARENT] updateRoom UPSERT:", {
-        floor,
-        roomKey,
-        wasExisting: !!currentRoom,
-        nextRoom,
-      });
-
+      const currentRoom = floorMap[roomKey] || { selected: true, count: 1, areaMode: "AUTO", areaPerRoom: 100 };
       return {
         ...prev,
         [floor]: {
@@ -563,6 +430,7 @@ export default function ConstructionPlanInput() {
     setSelectedClientName("");
     setRepresentative("");
     setRoadFacingOption("");
+    setParkingSide("SOUTH");
     setPlotShape("");
     handleResetDimensions();
     setSelectedFloors(DEFAULT_FLOORS);
@@ -575,11 +443,6 @@ export default function ConstructionPlanInput() {
     setBoundarySouth("");
     setBoundaryEast("");
     setBoundaryWest("");
-    // ✅ NEW: Reset stair cache
-    lastExtractedSignature.current = "";
-    setGroundStairPos(null);
-    setGroundStairOffset(null);
-    setGroundFloorProgram([]);
     alert("Form cleared successfully!");
   };
 
@@ -588,13 +451,10 @@ export default function ConstructionPlanInput() {
       const inputPayload = {
         caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
         selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
+        parkingSide,
         plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
         boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
         selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
-        // ✅ NEW: Pass stair inheritance to plan generator
-        groundStairPosition: groundStairPos,
-        groundStairRelativeOffset: groundStairOffset,
-        groundFloorProgram,
         createdAt: new Date().toISOString(),
       };
 
@@ -630,11 +490,12 @@ export default function ConstructionPlanInput() {
       room_details: floorRooms,
       selected_floors: selectedFloors,
       road_side: roadFacingOption,
+      parking_side: parkingSide,
       boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
       planning_mode: planningMode,
       floor_settings: floorSettings
     };
-  }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
+  }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, parkingSide, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
 
   const liveGeneratedPlan = useMemo(() => {
     try {
@@ -642,14 +503,11 @@ export default function ConstructionPlanInput() {
         caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
         selectedClientName, representative, measurementUnit,
         roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
+        parkingSide,
         plotShape: plotShape || "RECTANGULAR",
         plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
         boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
         selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
-        // ✅ NEW: Pass stair inheritance
-        groundStairPosition: groundStairPos,
-        groundStairRelativeOffset: groundStairOffset,
-        groundFloorProgram,
       });
     } catch (error) {
       console.warn("Live construction-plan generation preview fallback:", error);
@@ -657,11 +515,12 @@ export default function ConstructionPlanInput() {
     }
   }, [
     caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
-    selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
+    selectedClientName, representative, measurementUnit, roadFacingOption,
+    parkingSide,
+    plotShape,
     plotArea, coverageType, plotDimensions, dimDetails, setbackInputs, boundaryNorth,
     boundarySouth, boundaryEast, boundaryWest, selectedFloors, floorData, floorBhkConfig,
-    floorRooms, planningMode, floorSettings,
-    groundStairPos, groundStairOffset, groundFloorProgram,  // ✅ NEW deps
+    floorRooms, planningMode, floorSettings
   ]);
 
   const enrichedFloorData = useMemo(() => {
@@ -713,6 +572,9 @@ export default function ConstructionPlanInput() {
         setMeasurementUnit={setMeasurementUnit}
         roadFacingOption={roadFacingOption}
         setRoadFacingOption={setRoadFacingOption}
+        parkingSide={parkingSide}
+        setParkingSide={setParkingSide}
+        parkingSideOptions={PARKING_SIDE_OPTIONS}
         plotShape={plotShape}
         setPlotShape={setPlotShape}
         plotArea={plotArea}
@@ -776,27 +638,9 @@ export default function ConstructionPlanInput() {
         toggleRoom={toggleRoom}
         updateRoom={updateRoom}
         BHK_CONFIGURATIONS={BHK_CONFIGURATIONS}
-        plotLength={frontWidthFt}
-        plotWidth={depthFt}
+        plotWidth={frontWidthFt}
+        plotLength={depthFt}
         groundCoverage={coverageType}
-        // ✅ NEW: Pass actual stair position + relative offset from layout engine
-        groundStairPositionExternal={groundStairPos}
-        groundStairRelativeOffsetExternal={groundStairOffset}
-        onPlanningContextReady={(ctx) => {
-          // ✅ FIX: Only use child's context if parent hasn't extracted its own
-          if (typeof console !== 'undefined') {
-            console.log('[PARENT] Planning context ready from child:', ctx);
-          }
-          if (!groundStairPos && ctx.groundStairPosition) {
-            setGroundStairPos(ctx.groundStairPosition);
-          }
-          if (!groundStairOffset && ctx.groundStairRelativeOffset) {
-            setGroundStairOffset(ctx.groundStairRelativeOffset);
-          }
-          if ((!groundFloorProgram || groundFloorProgram.length === 0) && ctx.groundFloorProgram?.length) {
-            setGroundFloorProgram(ctx.groundFloorProgram);
-          }
-        }}
       />
 
       <div className="flex flex-wrap gap-2 border-t-2 border-black pt-3">
@@ -877,48 +721,14 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-               floorRooms={(() => {
-          // ✅ FIX: Merge floorRooms state (parent) with generated CAD rooms
-          // Parent state (from FloorManagerSection) is source of truth.
-          const merged: Record<string, Record<string, FloorRoom>> = {};
-
-          // Step 1: Add all generated CAD rooms (from engine)
-          Object.entries(generatedCadFloorRooms || {}).forEach(([floor, rooms]) => {
-            if (Array.isArray(rooms)) {
-              merged[floor] = Object.fromEntries(
-                rooms.map((r: any, idx) => [r.id || r.type || idx, r])
-              );
-            } else if (rooms && typeof rooms === "object") {
-              merged[floor] = { ...(rooms as any) };
-            }
-          });
-
-          // Step 2: Override with floorRooms state (user-facing + FloorManagerSection)
-          Object.entries(floorRooms || {}).forEach(([floor, roomsMap]) => {
-            const existing = merged[floor] || {};
-            const mergedFloor: Record<string, FloorRoom> = { ...existing };
-
-            Object.entries(roomsMap || {}).forEach(([roomKey, room]) => {
-              if (room && (room as any).selected) {
-                // ✅ Include only selected rooms
-                mergedFloor[roomKey] = { ...(existing[roomKey] || {}), ...room };
-              } else if (mergedFloor[roomKey]) {
-                // ✅ Selected nahi to hata do
-                delete mergedFloor[roomKey];
-              }
-            });
-
-            merged[floor] = mergedFloor;
-          });
-
-          console.log("[PARENT] CadModalView floorRooms merged:", {
-            floorKeys: Object.keys(merged),
-            firstFloorCount: Object.keys(merged["FIRST FLOOR"] || {}).length,
-            groundFloorCount: Object.keys(merged["GROUND FLOOR"] || {}).length,
-          });
-
-          return merged;
-        })()}
+        floorRooms={Object.fromEntries(
+  Object.entries(generatedCadFloorRooms).map(([floor, rooms]) => [
+    floor,
+    Array.isArray(rooms) 
+      ? Object.fromEntries(rooms.map((r: any, idx) => [r.id || r.type || idx, r]))
+      : rooms
+  ])
+)}
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}
         planningMode={planningMode}

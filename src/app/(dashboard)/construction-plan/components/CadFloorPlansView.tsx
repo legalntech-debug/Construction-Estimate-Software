@@ -1,9 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { formatDim, renderSideDim } from "./CadDimUtils";
+import { placeRoomLabel, buildNameVariants, doorSwingBox, Box } from "../engine/labelPlacer";
 import { FloorData, FloorRoom, PlacedDoor, PlacedWindow } from "../engine/planningTypes";
 import { validateConstructionPlan, RenderedRoomBox } from "../engine/validationEngine";
 
-// Prevent React re-renders from flooding the browser console.
 const cadDiagnosticCache = new Set<string>();
 const cadValidationCache = new Set<string>();
 const cadStairDebugCache = new Set<string>();
@@ -54,6 +54,8 @@ export default function CadFloorPlansView({
   baseArea,
 }: CadFloorPlansViewProps) {
 
+  const [showValidationBanner, setShowValidationBanner] = useState(false);
+
   const getFloorInfo = (name: string) => {
     if (!floorData) return null;
     const cleanKey = name.trim().toLowerCase();
@@ -87,7 +89,6 @@ export default function CadFloorPlansView({
     return name;
   };
 
-  // Floor-to-floor height (ft) — planning settings se, warna 10'
   const stairFloorHeightFt: number = (() => {
     const infos: any[] = Object.values(floorData || {});
     for (const f of infos) {
@@ -102,20 +103,11 @@ export default function CadFloorPlansView({
     return 10;
   })();
 
-  // ============================================================
-  // ✅ STAIRCASE RENDERER
-  // ============================================================
   const renderEngineStaircase = (
     x: number, y: number, w: number, h: number,
-    stairConfig?: StaircaseConfig, isBottomZone: boolean = true
+    stairConfig?: StaircaseConfig
   ) => {
     const preCalcSpec = (stairConfig as any)?.staircaseSpec || {};
-
-    const flight1Treads = Number(preCalcSpec?.flight1Treads || preCalcSpec?.flight1?.treads || 6);
-    const flight2Treads = Number(preCalcSpec?.flight2Treads || preCalcSpec?.flight2?.treads || 6);
-    const middleTreads = Number(preCalcSpec?.middleTreads || 3);
-    const treadInches = Number(preCalcSpec?.treadInches || 11);
-    const landing1LengthFt = Number(preCalcSpec?.landing1LengthFt || preCalcSpec?.landing1?.lengthFt || 3);
 
     const stairType = String(
       preCalcSpec?.staircaseType ||
@@ -123,20 +115,7 @@ export default function CadFloorPlansView({
       "2_QUARTER_LANDING"
     ).toUpperCase();
 
-    if (typeof console !== 'undefined') {
-      console.log('[RENDER STAIRCASE] CALLED', {
-        x, y, w, h, stairType, flight1Treads, flight2Treads, middleTreads, treadInches, landing1LengthFt,
-      });
-    }
-
     const renderCShape = () => {
-      // ------------------------------------------------------------
-      // ✅ PROPER STAIR CALCULATION (floor height → risers → treads)
-      //   riser  : max 7" (NBC/IS residential ≤ 7.5")
-      //   tread  : min 10" (≥ 250 mm)
-      //   risers : ceil(floorHeight / 7")   (spec.riserCount use hota hai agar valid ho)
-      //   2 landings + 3 flights  →  going treads = risers − 3
-      // ------------------------------------------------------------
       const floorHeightFt =
         Number(preCalcSpec?.floorToFloorHeightFeet || preCalcSpec?.floorHeightFt || preCalcSpec?.floorHeightFeet) ||
         stairFloorHeightFt || 10;
@@ -146,41 +125,43 @@ export default function CadFloorPlansView({
 
       const specRisers = Number(preCalcSpec?.riserCount);
       const specRiserIn = specRisers > 0 ? floorHeightIn / specRisers : 0;
-      const riserCount =
-        specRisers > 0 && specRiserIn >= 5 && specRiserIn <= 7.5
-          ? specRisers
-          : Math.ceil(floorHeightIn / MAX_RISER_IN);
+
+      let riserCount: number;
+      if (specRisers > 0 && specRiserIn >= 5 && specRiserIn <= 7.5) {
+        riserCount = specRisers;
+      } else {
+        riserCount = Math.ceil(floorHeightIn / MAX_RISER_IN);
+      }
+      riserCount = Math.max(17, riserCount);
+
       const riserIn = floorHeightIn / riserCount;
       const minTreadIn = Math.max(MIN_TREAD_IN, Number(preCalcSpec?.treadInches) || MIN_TREAD_IN);
       const requiredTreads = Math.max(3, riserCount - 3);
 
-      // Geometry (feet). Landing = going-width x going-width square.
       const boxWft = w / scale;
       const boxHft = h / scale;
       const G = Math.min(3.0, Math.max(2.5, Number(preCalcSpec?.landing1WidthFt) || 3.0), boxWft * 0.5);
-      const flightLenFt = Math.max(0, boxWft - G);        // flight 1 & 2 (horizontal)
-      const middleLenFt = Math.max(0, boxHft - 2 * G);    // middle flight (vertical)
+      const flightLenFt = Math.max(0, boxWft - G);
+      const middleLenFt = Math.max(0, boxHft - 2 * G);
 
       const flightCap = Math.floor((flightLenFt * 12) / minTreadIn);
       const middleCap = Math.floor((middleLenFt * 12) / minTreadIn);
 
-      let f1 = Math.min(flightCap, Math.ceil(requiredTreads / 3));
-      let f2 = Math.min(flightCap, Math.ceil((requiredTreads - f1) / 2));
+      const f1 = Math.min(flightCap, Math.ceil(requiredTreads / 3));
+      const f2 = Math.min(flightCap, Math.ceil((requiredTreads - f1) / 2));
       let m = Math.max(0, requiredTreads - f1 - f2);
       let shortBy = 0;
       if (m > middleCap) { shortBy = m - middleCap; m = middleCap; }
-      const drawnTreads = f1 + m + f2;
 
-      const col1W = G * scale;                 // landing column
-      const col2W = Math.max(0, w - col1W);    // flight column
-      const rowGH = G * scale;                 // landing row height
+      const col1W = G * scale;
+      const col2W = Math.max(0, w - col1W);
+      const rowGH = G * scale;
       const row2H = Math.max(0, h - 2 * rowGH);
 
       const row1Y = y;
       const row2Y = y + rowGH;
       const row3Y = y + rowGH + row2H;
 
-      // Treads poore available length me barabar baante jaate hain
       const flight1TreadStep = col2W / Math.max(1, f1);
       const flight2TreadStep = col2W / Math.max(1, f2);
       const middleTreadStep = row2H / Math.max(1, m);
@@ -189,24 +170,11 @@ export default function CadFloorPlansView({
       const middleTreadIn = m > 0 ? (middleLenFt * 12) / m : 0;
       const fs = Math.max(1.5, Math.min(2.4, scale * 0.4));
 
-      if (typeof console !== 'undefined') {
-        const key = `${riserCount}-${f1}-${m}-${f2}-${boxWft.toFixed(1)}-${boxHft.toFixed(1)}`;
-        if (!cadStairDebugCache.has(key)) {
-          cadStairDebugCache.add(key);
-          console.log('[STAIR CALC]', {
-            floorHeightFt, riserCount, riserIn: Number(riserIn.toFixed(2)), minTreadIn,
-            requiredTreads, boxWft: Number(boxWft.toFixed(2)), boxHft: Number(boxHft.toFixed(2)),
-            landingFt: G, flight1Treads: f1, middleTreads: m, flight2Treads: f2, shortBy,
-          });
-          if (shortBy > 0) {
-            console.warn(`[STAIR CALC] Stair box chhota hai: ${shortBy} tread kam pad rahe hain (risers=${riserCount}, floor=${floorHeightFt}').`);
-          }
-        }
-      }
+      void stairType;
 
       return (
         <g id="c-shape-stair">
-          {/* ROW 1 — 1st landing + flight 1 (right → left) */}
+          {/* ROW 1 — 1st landing + flight 1 */}
           <rect x={x} y={row1Y} width={col1W} height={rowGH} fill="#0f172a" stroke="#38bdf8" strokeWidth="0.5" />
           <text x={x + col1W / 2} y={row1Y + rowGH / 2} fill="#38bdf8" fontSize={Math.min(2.5, col1W * 0.12)} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
             {col1W > 8 ? "1ST LANDING" : "1ST LNDG"}
@@ -221,7 +189,7 @@ export default function CadFloorPlansView({
             <polygon points="-4.5,0 -1,-1.5 -1,1.5" fill="#eab308" />
           </g>
 
-          {/* ROW 2 — middle flight (top → bottom) + well */}
+          {/* ROW 2 — middle flight + well */}
           <rect x={x} y={row2Y} width={col1W} height={row2H} fill="none" stroke="#38bdf8" strokeWidth="0.5" />
           {Array.from({ length: Math.max(0, m - 1) }).map((_, i) => (
             <line key={`mid-${i}`} x1={x} y1={row2Y + ((i + 1) * middleTreadStep)} x2={x + col1W} y2={row2Y + ((i + 1) * middleTreadStep)} stroke="#38bdf8" strokeWidth="0.4" />
@@ -239,7 +207,7 @@ export default function CadFloorPlansView({
             </text>
           )}
 
-          {/* ROW 3 — 2nd landing + flight 2 (left → right) */}
+          {/* ROW 3 — 2nd landing + flight 2 */}
           <rect x={x} y={row3Y} width={col1W} height={rowGH} fill="#0f172a" stroke="#38bdf8" strokeWidth="0.5" />
           <text x={x + col1W / 2} y={row3Y + rowGH / 2} fill="#38bdf8" fontSize={Math.min(2.5, col1W * 0.12)} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
             {col1W > 8 ? "2ND LANDING" : "2ND LNDG"}
@@ -263,10 +231,230 @@ export default function CadFloorPlansView({
     );
   };
 
+  const GATE_SIDE_GAP_FT = 0.5;
+
+  const isParkingGateDoor = (d: any): boolean => {
+    const id = String(d?.id || "").toLowerCase();
+    const role = String(d?.entryRole || "").toLowerCase();
+    return (id.includes("parking") && id.includes("gate")) || role.includes("main_road_vehicle_gate");
+  };
+
+  const resolveOpeningSpan = (o: any, wallLenFt: number) => {
+    const width0 = Math.max(0, Number(o?.widthFeet ?? o?.lengthFeet ?? 0));
+    const off0 = Math.max(0, Number(o?.offsetFeet || 0));
+    if (!isParkingGateDoor(o) || wallLenFt <= 0) return { offsetFeet: off0, widthFeet: width0 };
+    const width = Math.max(2.5, Math.min(width0 || wallLenFt, wallLenFt - 2 * GATE_SIDE_GAP_FT));
+    const offset = Math.max(GATE_SIDE_GAP_FT, (wallLenFt - width) / 2);
+    return { offsetFeet: offset, widthFeet: width };
+  };
+
+  const normalizeRoomList = (input: any[], W: number, H: number): any[] => {
+    const EPS = 0.2;
+    const rooms: any[] = input.map((r: any) => ({
+      ...r,
+      doors: Array.isArray(r.doors) ? r.doors.map((d: any) => ({ ...d })) : [],
+      windows: Array.isArray(r.windows) ? r.windows.map((w: any) => ({ ...w })) : [],
+    }));
+
+    const up = (r: any) => String(r?.name || "").toUpperCase();
+    const has = (r: any, ...keys: string[]) => keys.some((k) => up(r).includes(k));
+    const isStair = (r: any) => r.type === "stairs" || has(r, "STAIR");
+    const isHall = (r: any) => has(r, "LIVING", "HALL", "DRAWING") && !isStair(r) && !has(r, "KITCHEN");
+    const isCirc = (r: any) => (has(r, "PASSAGE", "CORRIDOR", "LIVING", "HALL", "DRAWING", "DINING")) && !isStair(r) && !has(r, "KITCHEN");
+    const xOv = (a: any, b: any) => Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+    const yOv = (a: any, b: any) => Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    const overlaps = (a: any, b: any) => xOv(a, b) > 0.05 && yOv(a, b) > 0.05;
+    const contains = (p: any, r: any) =>
+      r.x >= p.x - 0.05 && r.y >= p.y - 0.05 && r.x + r.w <= p.x + p.w + 0.05 && r.y + r.h <= p.y + p.h + 0.05 && p.w * p.h > r.w * r.h + 0.5;
+    const onBoundary = (r: any, wall: string) =>
+      wall === "TOP" ? r.y <= EPS :
+      wall === "BOTTOM" ? r.y + r.h >= H - EPS :
+      wall === "LEFT" ? r.x <= EPS :
+      r.x + r.w >= W - EPS;
+    const OPP: Record<string, string> = { TOP: "BOTTOM", BOTTOM: "TOP", LEFT: "RIGHT", RIGHT: "LEFT" };
+
+    const addDoor = (room: any, wall: string, nb: any, width: number, tag: string) => {
+      const horizontal = wall === "TOP" || wall === "BOTTOM";
+      const r0 = horizontal ? room.x : room.y;
+      const lo = Math.max(r0, horizontal ? nb.x : nb.y);
+      const hi = Math.min(r0 + (horizontal ? room.w : room.h), horizontal ? nb.x + nb.w : nb.y + nb.h);
+      const span = hi - lo;
+      if (span < 2.4) return;
+      const w = Math.min(width, Math.max(2.5, span - 1));
+      const start = lo + Math.max(0.5, (span - w) / 2);
+      const id = `shared-norm-${tag}-${String(room.id ?? room.name)}`;
+      room.doors.push({
+        id, sharedOpeningId: id, wall, offsetFeet: Number((start - r0).toFixed(3)), widthFeet: w,
+        heightFeet: 7, swingInside: true, hingeSide: "START", renderSymbol: true, doorType: "INTERNAL",
+      });
+    };
+
+    const hasDoorBetween = (room: any, wall: string, nb: any) => {
+      const horizontal = wall === "TOP" || wall === "BOTTOM";
+      const r0 = horizontal ? room.x : room.y;
+      const lo = Math.max(r0, horizontal ? nb.x : nb.y);
+      const hi = Math.min(r0 + (horizontal ? room.w : room.h), horizontal ? nb.x + nb.w : nb.y + nb.h);
+      const covers = (owner: any, ownWall: string, d: any) => {
+        if (d.wall !== ownWall || d.renderSymbol === false) return false;
+        const g0 = (horizontal ? owner.x : owner.y) + Number(d.offsetFeet || 0);
+        const g1 = g0 + Number(d.widthFeet ?? 0);
+        return g1 > lo + 0.05 && g0 < hi - 0.05;
+      };
+      return room.doors.some((d: any) => covers(room, wall, d)) || nb.doors.some((d: any) => covers(nb, OPP[wall], d));
+    };
+
+    // ---------- A) align PARKING / KITCHEN band tops ----------
+    const band = rooms.filter((r) => !isStair(r) && Math.abs(r.y + r.h - H) <= EPS && has(r, "PARKING", "KITCHEN"));
+    if (band.length >= 2) {
+      const topY = Math.min(...band.map((r) => r.y));
+      band.forEach((r) => {
+        if (r.y <= topY + 0.05) return;
+        const strip = { x: r.x, y: topY, w: r.w, h: r.y - topY };
+        if (rooms.some((o) => o !== r && overlaps(strip, o))) return;
+        const delta = r.y - topY;
+        r.h += delta; r.y = topY;
+        [...r.doors, ...r.windows].forEach((o: any) => {
+          if (o.wall === "LEFT" || o.wall === "RIGHT") o.offsetFeet = Number(o.offsetFeet || 0) + delta;
+        });
+      });
+    }
+
+    // ---------- B) hall absorbs the leftover gap below it ----------
+    rooms.filter(isHall).forEach((h) => {
+      const bottom = h.y + h.h;
+      if (bottom >= H - EPS) return;
+      let limit = H;
+      rooms.forEach((o) => { if (o !== h && xOv(h, o) > 0.12 && o.y >= bottom - 0.05) limit = Math.min(limit, o.y); });
+      const gap = limit - bottom;
+      if (limit >= H - EPS || gap <= 0.05 || gap > 8) return;
+      const strip = { x: h.x, y: bottom, w: h.w, h: gap };
+      if (rooms.some((o) => o !== h && overlaps(strip, o))) return;
+      h.h += gap;
+      h.doors = h.doors.filter((d: any) => d.wall !== "BOTTOM");
+      h.windows = h.windows.filter((w: any) => w.wall !== "BOTTOM");
+    });
+
+    // ---------- E) narrow bedroom => horizontal attached bath at the entry side ----------
+    rooms.filter((r) => has(r, "ATTACHED") || (has(r, "BATH", "TOILET") && !has(r, "COMMON"))).forEach((b) => {
+      const parent = rooms.find((p) => p !== b && has(p, "BEDROOM") && contains(p, b));
+      if (!parent || parent.w > 12.01 || b.h <= b.w) return;
+      const below = rooms.some((o) => o !== parent && isCirc(o) && Math.abs(parent.y + parent.h - o.y) <= 0.25 && xOv(parent, o) >= 2.5);
+      const above = rooms.some((o) => o !== parent && isCirc(o) && Math.abs(o.y + o.h - parent.y) <= 0.25 && xOv(parent, o) >= 2.5);
+      const entry = below ? "BOTTOM" : above ? "TOP" : null;
+      if (!entry) return;
+      const bw = Math.min(parent.w - 3.5, Math.max(5, Math.round(parent.w * 0.55 * 4) / 4));
+      if (bw < 4) return;
+      const area = Math.max(b.w * b.h, 30);
+      const bh = Math.min(5, Math.max(4.5, Math.ceil((area / bw) * 4) / 4));
+      if (parent.h - bh < 4) return;
+      b.w = bw; b.h = bh; b.x = parent.x;
+      b.y = entry === "BOTTOM" ? parent.y + parent.h - bh : parent.y;
+      b.doors = [];
+      const doorWall = entry === "BOTTOM" ? "TOP" : "BOTTOM";
+      const dw = 2.5;
+      const id = `shared-norm-bath-door-${String(b.id ?? b.name)}`;
+      b.doors.push({ id, sharedOpeningId: id, wall: doorWall, offsetFeet: Number(((bw - dw) / 2).toFixed(2)), widthFeet: dw, heightFeet: 7, swingInside: true, hingeSide: "START", renderSymbol: true, doorType: "INTERNAL" });
+      b.windows = b.windows.filter((w: any) => onBoundary(b, w.wall));
+      if (b.windows.length === 0) {
+        const wall = (["LEFT", "RIGHT", "TOP", "BOTTOM"] as const).find((s) => onBoundary(b, s));
+        if (wall) {
+          const len = wall === "TOP" || wall === "BOTTOM" ? b.w : b.h;
+          b.windows.push({ id: `norm-bath-vent-${String(b.id ?? b.name)}`, wall, offsetFeet: Number(((len - 1.5) / 2).toFixed(2)), lengthFeet: 1.5, widthFeet: 1.5, type: "VENTILATOR" });
+        }
+      }
+    });
+
+    // ---------- D) private-room doors must never open to the outside ----------
+    const isPrivate = (r: any) => has(r, "BEDROOM", "BATH", "TOILET", "DRESS", "STORE", "POOJA", "STUDY") && !has(r, "PARKING");
+    const bestInterval = (lo: number, hi: number, forbidden: [number, number][], need: number): [number, number] | null => {
+      const sorted = forbidden.filter((f) => f[1] > lo && f[0] < hi).sort((a, b) => a[0] - b[0]);
+      let cur = lo; let best: [number, number] | null = null;
+      const consider = (a: number, b: number) => { if (b - a >= need && (!best || b - a > best[1] - best[0])) best = [a, b]; };
+      for (const [f0, f1] of sorted) { consider(cur, Math.min(f0, hi)); cur = Math.max(cur, f1); }
+      consider(cur, hi);
+      return best;
+    };
+
+    rooms.filter(isPrivate).forEach((r) => {
+      const parent = rooms.find((p) => p !== r && has(p, "BEDROOM") && contains(p, r));
+      const subs = rooms.filter((s) => s !== r && !isStair(s) && contains(r, s));
+      r.doors.forEach((d: any) => {
+        if (!onBoundary(r, d.wall)) return;
+        const dw = Math.min(Number(d.widthFeet) || 3, 3);
+        let pick: { wall: string; a: number; b: number; score: number } | null = null;
+
+        (["BOTTOM", "TOP", "LEFT", "RIGHT"] as const).forEach((wall) => {
+          if (onBoundary(r, wall)) return;
+          const horizontal = wall === "TOP" || wall === "BOTTOM";
+          const r0 = horizontal ? r.x : r.y;
+          const r1 = r0 + (horizontal ? r.w : r.h);
+          const fixed = wall === "TOP" ? r.y : wall === "BOTTOM" ? r.y + r.h : wall === "LEFT" ? r.x : r.x + r.w;
+          const forbidden: [number, number][] = subs
+            .filter((s) => (wall === "TOP" ? s.y - r.y : wall === "BOTTOM" ? r.y + r.h - (s.y + s.h) : wall === "LEFT" ? s.x - r.x : r.x + r.w - (s.x + s.w)) < 1.2)
+            .map((s) => (horizontal ? [s.x - 0.25, s.x + s.w + 0.25] : [s.y - 0.25, s.y + s.h + 0.25]) as [number, number]);
+
+          if (parent) {
+            const depth = wall === "TOP" ? r.y - parent.y : wall === "BOTTOM" ? parent.y + parent.h - (r.y + r.h) : wall === "LEFT" ? r.x - parent.x : parent.x + parent.w - (r.x + r.w);
+            if (depth < 2.5) return;
+            const itv = bestInterval(r0, r1, forbidden, dw + 0.4);
+            if (itv && (!pick || depth > pick.score)) pick = { wall, a: itv[0], b: itv[1], score: depth };
+            return;
+          }
+          rooms.forEach((o) => {
+            if (o === r || !isCirc(o)) return;
+            const adjacent = wall === "TOP" ? Math.abs(o.y + o.h - fixed) <= 0.25 : wall === "BOTTOM" ? Math.abs(o.y - fixed) <= 0.25 : wall === "LEFT" ? Math.abs(o.x + o.w - fixed) <= 0.25 : Math.abs(o.x - fixed) <= 0.25;
+            if (!adjacent) return;
+            const lo = Math.max(r0, horizontal ? o.x : o.y);
+            const hi = Math.min(r1, horizontal ? o.x + o.w : o.y + o.h);
+            const itv = bestInterval(lo, hi, forbidden, dw + 0.6);
+            if (!itv) return;
+            const score = (has(o, "PASSAGE") ? 100 : 0) + (itv[1] - itv[0]);
+            if (!pick || score > pick.score) pick = { wall, a: itv[0], b: itv[1], score };
+          });
+        });
+
+        if (pick) {
+          const p = pick as { wall: string; a: number; b: number; score: number };
+          const horizontal = p.wall === "TOP" || p.wall === "BOTTOM";
+          const start = p.a + Math.max(0.3, (p.b - p.a - dw) / 2);
+          d.wall = p.wall;
+          d.widthFeet = dw;
+          d.offsetFeet = Number((start - (horizontal ? r.x : r.y)).toFixed(3));
+          d.swingInside = true;
+          d.renderSymbol = true;
+          d.sharedOpeningId = `shared-reloc-${String(d.id || "door")}`;
+        }
+      });
+    });
+
+    // ---------- C) gate/door on PARKING <-> HALL partition (+ kitchen door) ----------
+    rooms.filter((r) => has(r, "PARKING")).forEach((p) => {
+      const hall = rooms.find((h) => isCirc(h) && Math.abs(h.y + h.h - p.y) <= 0.25 && xOv(h, p) >= 3);
+      if (hall && !hasDoorBetween(p, "TOP", hall)) addDoor(p, "TOP", hall, 3, "parking-hall");
+    });
+    rooms.filter((r) => has(r, "KITCHEN") && !isStair(r)).forEach((k) => {
+      if (k.doors.length > 0) return;
+      const hall = rooms.find((h) => isCirc(h) && Math.abs(h.y + h.h - k.y) <= 0.25 && xOv(h, k) >= 2.5);
+      if (hall && !hasDoorBetween(k, "TOP", hall)) addDoor(k, "TOP", hall, 2.5, "kitchen-hall");
+    });
+
+    rooms.forEach((r) => r.doors.forEach((d: any) => { d.__onBoundary = onBoundary(r, d.wall); }));
+
+    return rooms;
+  };
+
   const renderCadDoorSymbol = (door: PlacedDoor, rx: number, ry: number, rw: number, rh: number, keyStr: string) => {
     const d = door as any;
-    const dw = door.widthFeet * scale;
-    const offset = door.offsetFeet * scale;
+
+    const isParkingGate = isParkingGateDoor(d);
+    const wallLenFt = (door.wall === 'BOTTOM' || door.wall === 'TOP') ? rw / scale : rh / scale;
+    const resolvedSpan = resolveOpeningSpan(d, wallLenFt);
+    const effectiveWidthFeet = resolvedSpan.widthFeet || door.widthFeet;
+    const dw = effectiveWidthFeet * scale;
+    const offset = resolvedSpan.offsetFeet * scale;
+
+    const externalWallThickPx = (isParkingGate || d.__onBoundary) ? (4 / 12) * scale : 0;
+
     const isDouble = Boolean(d.isDoubleLeaf || d.doubleLeaf || (d.leafCount && d.leafCount > 1) || d.doorType === "MAIN");
     const swingInside = Boolean(d.swingInside);
 
@@ -279,34 +467,29 @@ export default function CadFloorPlansView({
       const hw = dw / 2;
       if (door.wall === "BOTTOM") {
         dx = rx + offset;
-        dy = ry + rh;
+        dy = ry + rh + externalWallThickPx;
         shutterPath = `M ${dx} ${dy} L ${dx} ${dy - hw} M ${dx + dw} ${dy} L ${dx + dw} ${dy - hw}`;
         arcPath = `M ${dx + hw} ${dy} A ${hw} ${hw} 0 0 0 ${dx} ${dy - hw} M ${dx + hw} ${dy} A ${hw} ${hw} 0 0 1 ${dx + dw} ${dy - hw}`;
       } else if (door.wall === "TOP") {
-        dx = rx + offset;
-        dy = ry;
+        dx = rx + offset; dy = ry;
         shutterPath = `M ${dx} ${dy} L ${dx} ${dy + hw} M ${dx + dw} ${dy} L ${dx + dw} ${dy + hw}`;
         arcPath = `M ${dx + hw} ${dy} A ${hw} ${hw} 0 0 1 ${dx} ${dy + hw} M ${dx + hw} ${dy} A ${hw} ${hw} 0 0 0 ${dx + dw} ${dy + hw}`;
       } else if (door.wall === "LEFT") {
-        dx = rx;
-        dy = ry + offset;
+        dx = rx; dy = ry + offset;
         shutterPath = `M ${dx} ${dy} L ${dx + hw} ${dy} M ${dx} ${dy + dw} L ${dx + hw} ${dy + dw}`;
         arcPath = `M ${dx} ${dy + hw} A ${hw} ${hw} 0 0 0 ${dx + hw} ${dy} M ${dx} ${dy + hw} A ${hw} ${hw} 0 0 1 ${dx + hw} ${dy + dw}`;
       } else {
-        dx = rx + rw;
-        dy = ry + offset;
+        dx = rx + rw; dy = ry + offset;
         shutterPath = `M ${dx} ${dy} L ${dx - hw} ${dy} M ${dx} ${dy + dw} L ${dx - hw} ${dy + dw}`;
         arcPath = `M ${dx} ${dy + hw} A ${hw} ${hw} 0 0 1 ${dx - hw} ${dy} M ${dx} ${dy + hw} A ${hw} ${hw} 0 0 0 ${dx - hw} ${dy + dw}`;
       }
     } else {
-      // hingeSide === 'END' → hinge opening ke doosre end par (mirror). Default: start.
       const hingeEnd = String(d.hingeSide || "").toUpperCase() === "END";
 
       if (door.wall === "BOTTOM") {
         dx = rx + offset;
-        dy = ry + rh;
+        dy = ry + rh + externalWallThickPx;
         if (hingeEnd) {
-          // hinge right jamb, leaf upar (room ke andar)
           shutterPath = `M ${dx + dw} ${dy} L ${dx + dw} ${dy - dw}`;
           arcPath = `M ${dx} ${dy} A ${dw} ${dw} 0 0 1 ${dx + dw} ${dy - dw}`;
         } else {
@@ -314,8 +497,7 @@ export default function CadFloorPlansView({
           arcPath = `M ${dx + dw} ${dy} A ${dw} ${dw} 0 0 0 ${dx} ${dy - dw}`;
         }
       } else if (door.wall === "TOP") {
-        dx = rx + offset;
-        dy = ry;
+        dx = rx + offset; dy = ry;
         if (hingeEnd) {
           shutterPath = `M ${dx + dw} ${dy} L ${dx + dw} ${dy + dw}`;
           arcPath = `M ${dx} ${dy} A ${dw} ${dw} 0 0 0 ${dx + dw} ${dy + dw}`;
@@ -324,11 +506,9 @@ export default function CadFloorPlansView({
           arcPath = `M ${dx + dw} ${dy} A ${dw} ${dw} 0 0 1 ${dx} ${dy + dw}`;
         }
       } else if (door.wall === "LEFT") {
-        dx = rx;
-        dy = ry + offset;
+        dx = rx; dy = ry + offset;
         if (swingInside) {
           if (hingeEnd) {
-            // hinge neeche wale jamb par, leaf room ke andar
             shutterPath = `M ${dx} ${dy + dw} L ${dx + dw} ${dy + dw}`;
             arcPath = `M ${dx} ${dy} A ${dw} ${dw} 0 0 1 ${dx + dw} ${dy + dw}`;
           } else {
@@ -340,16 +520,13 @@ export default function CadFloorPlansView({
           arcPath = `M ${dx} ${dy + dw} A ${dw} ${dw} 0 0 1 ${dx - dw} ${dy}`;
         }
       } else {
-        dx = rx + rw;
-        dy = ry + offset;
+        dx = rx + rw; dy = ry + offset;
         if (swingInside) {
           if (hingeEnd) {
-            // hinge neeche wale jamb par, leaf room ke andar (neeche wali wall ke saath)
             shutterPath = `M ${dx} ${dy + dw} L ${dx - dw} ${dy + dw}`;
             arcPath = `M ${dx} ${dy} A ${dw} ${dw} 0 0 0 ${dx - dw} ${dy + dw}`;
           } else {
             shutterPath = `M ${dx} ${dy} L ${dx - dw} ${dy}`;
-            // ✅ sweep 1: arc ka center hinge par rahe (pehle 0 tha → arc galat side bulge karta tha)
             arcPath = `M ${dx} ${dy + dw} A ${dw} ${dw} 0 0 1 ${dx - dw} ${dy}`;
           }
         } else {
@@ -388,15 +565,14 @@ export default function CadFloorPlansView({
           <line x1={wx} y1={wy + wallThick * 0.7} x2={wx + ww} y2={wy + wallThick * 0.7} stroke="#38bdf8" strokeWidth="0.6" />
         </g>
       );
-    } else {
-      return (
-        <g key={keyStr} id="cad-window-symbol">
-          <rect x={wx} y={wy} width={wallThick} height={ww} fill="#020617" stroke="#ffffff" strokeWidth="0.4" />
-          <line x1={wx + wallThick * 0.3} y1={wy} x2={wx + wallThick * 0.3} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
-          <line x1={wx + wallThick * 0.7} y1={wy} x2={wx + wallThick * 0.7} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
-        </g>
-      );
     }
+    return (
+      <g key={keyStr} id="cad-window-symbol">
+        <rect x={wx} y={wy} width={wallThick} height={ww} fill="#020617" stroke="#ffffff" strokeWidth="0.4" />
+        <line x1={wx + wallThick * 0.3} y1={wy} x2={wx + wallThick * 0.3} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
+        <line x1={wx + wallThick * 0.7} y1={wy} x2={wx + wallThick * 0.7} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
+      </g>
+    );
   };
 
   const renderPartitionWalls = (
@@ -410,36 +586,37 @@ export default function CadFloorPlansView({
     const halfWall = wallThick / 2;
     const EDGE_EPS = 0.16;
     const TOUCH_EPS = 0.25;
+    const LINE = 0.32;
+    const OUTLINE = "#ef4444";
+    const FILL = "#020617";
 
-    type Edge = {
-      key: string; side: "TOP" | "BOTTOM" | "LEFT" | "RIGHT";
-      x: number; y: number; len: number; horizontal: boolean;
-      room: any; other?: any;
-    };
+    type Side = "TOP" | "BOTTOM" | "LEFT" | "RIGHT";
+    type Seg = { horizontal: boolean; fixed: number; start: number; end: number; room: any; side: Side; others: any[] };
 
     const isOpenArea = (r: any) => {
       const n = String(r?.name || "").toUpperCase();
       return Boolean(r?.isOpen) || n.includes("OPEN TERRACE") || n === "PASSAGE";
     };
 
-    const findShared = (room: any, side: Edge["side"]) => {
-      return roomList.find((other: any) => {
-        if (other === room) return false;
-        if (side === "TOP") return Math.abs((other.y + other.h) - room.y) <= TOUCH_EPS && Math.min(room.x + room.w, other.x + other.w) - Math.max(room.x, other.x) > 0.12;
-        if (side === "BOTTOM") return Math.abs((room.y + room.h) - other.y) <= TOUCH_EPS && Math.min(room.x + room.w, other.x + other.w) - Math.max(room.x, other.x) > 0.12;
-        if (side === "LEFT") return Math.abs((other.x + other.w) - room.x) <= TOUCH_EPS && Math.min(room.y + room.h, other.y + other.h) - Math.max(room.y, other.y) > 0.12;
-        return Math.abs((room.x + room.w) - other.x) <= TOUCH_EPS && Math.min(room.y + room.h, other.y + other.h) - Math.max(room.y, other.y) > 0.12;
-      });
+    const subtractIntervals = (a: number, b: number, cuts: [number, number][]) => {
+      const sorted = cuts.filter((c) => c[1] > a && c[0] < b).sort((p, q) => p[0] - q[0]);
+      const out: [number, number][] = [];
+      let cur = a;
+      for (const [c0, c1] of sorted) {
+        if (c0 > cur + 0.02) out.push([cur, Math.min(c0, b)]);
+        cur = Math.max(cur, c1);
+      }
+      if (cur < b - 0.02) out.push([cur, b]);
+      return out.filter(([s, e]) => e - s > 0.05);
     };
 
-    const seenShared = new Set<string>();
-    const edges: Edge[] = [];
+    const segs: Seg[] = [];
     const internalAudit: any[] = [];
-    let edgeUid = 0;
+    const sides: Side[] = ["TOP", "BOTTOM", "LEFT", "RIGHT"];
 
     for (const room of roomList) {
-      const candidateSides: Edge["side"][] = ["TOP", "BOTTOM", "LEFT", "RIGHT"];
-      for (const side of candidateSides) {
+      for (const side of sides) {
+        const horizontal = side === "TOP" || side === "BOTTOM";
         const isExterior =
           (side === "TOP" && Math.abs(room.y) <= EDGE_EPS) ||
           (side === "BOTTOM" && Math.abs(room.y + room.h - clearInnerHFt) <= EDGE_EPS) ||
@@ -447,155 +624,124 @@ export default function CadFloorPlansView({
           (side === "RIGHT" && Math.abs(room.x + room.w - clearInnerWFt) <= EDGE_EPS);
         if (isExterior) continue;
 
-        const other = findShared(room, side);
-        if (other && isOpenArea(room) && isOpenArea(other)) continue;
+        const r0 = horizontal ? room.x : room.y;
+        const r1 = r0 + (horizontal ? room.w : room.h);
+        const fixed = side === "TOP" ? room.y : side === "BOTTOM" ? room.y + room.h : side === "LEFT" ? room.x : room.x + room.w;
 
-        let edgeX = room.x, edgeY = room.y;
-        let edgeLen = side === "TOP" || side === "BOTTOM" ? room.w : room.h;
-
-        if (other) {
-          if (side === "TOP" || side === "BOTTOM") {
-            edgeX = Math.max(room.x, other.x);
-            const endX = Math.min(room.x + room.w, other.x + other.w);
-            edgeLen = Math.max(0, endX - edgeX);
-            edgeY = side === "TOP" ? room.y : room.y + room.h;
-          } else {
-            edgeY = Math.max(room.y, other.y);
-            const endY = Math.min(room.y + room.h, other.y + other.h);
-            edgeLen = Math.max(0, endY - edgeY);
-            edgeX = side === "LEFT" ? room.x : room.x + room.w;
-          }
-        } else {
-          if (side === "BOTTOM") edgeY = room.y + room.h;
-          if (side === "RIGHT") edgeX = room.x + room.w;
+        const neighbors: { room: any; lo: number; hi: number }[] = [];
+        for (const other of roomList) {
+          if (other === room) continue;
+          const adjacent =
+            side === "TOP" ? Math.abs(other.y + other.h - room.y) <= TOUCH_EPS :
+            side === "BOTTOM" ? Math.abs(other.y - (room.y + room.h)) <= TOUCH_EPS :
+            side === "LEFT" ? Math.abs(other.x + other.w - room.x) <= TOUCH_EPS :
+            Math.abs(other.x - (room.x + room.w)) <= TOUCH_EPS;
+          if (!adjacent) continue;
+          const lo = Math.max(r0, horizontal ? other.x : other.y);
+          const hi = Math.min(r1, horizontal ? other.x + other.w : other.y + other.h);
+          if (hi - lo > 0.12) neighbors.push({ room: other, lo, hi });
         }
 
-        if (edgeLen < 0.1) continue;
+        const openCuts: [number, number][] = isOpenArea(room)
+          ? neighbors.filter((n) => isOpenArea(n.room)).map((n) => [n.lo, n.hi] as [number, number])
+          : [];
 
-        const sharedKey = other
-          ? [String(room.id ?? roomList.indexOf(room)), String(other.id ?? roomList.indexOf(other))].sort().join("|") + `|${side === "TOP" || side === "BOTTOM" ? "H" : "V"}|${side === "TOP" || side === "BOTTOM" ? edgeY : edgeX}`
-          : `FREE|${room.name}|${side}|${edgeX}|${edgeY}`;
-        if (seenShared.has(sharedKey)) continue;
-        seenShared.add(sharedKey);
-
-        const horizontal = side === "TOP" || side === "BOTTOM";
-        edges.push({ key: `${side}:${edgeX.toFixed(2)}:${edgeY.toFixed(2)}:${edgeLen.toFixed(2)}:#${edgeUid++}`, side, x: edgeX, y: edgeY, len: edgeLen, horizontal, room, other });
-        internalAudit.push({ room: room.name, other: other?.name || "OPEN / UNASSIGNED", side, length: Number(edgeLen.toFixed(2)), openingCount: 0 });
+        subtractIntervals(r0, r1, openCuts).forEach(([s, e]) => {
+          const others = neighbors.filter((n) => n.hi > s + 0.02 && n.lo < e - 0.02).map((n) => n.room);
+          segs.push({ horizontal, fixed, start: s, end: e, room, side, others });
+          internalAudit.push({ room: room.name, other: others[0]?.name || "OPEN / UNASSIGNED", side, length: Number((e - s).toFixed(2)), openingCount: 0 });
+        });
       }
     }
 
-    const getTrimmedSpan = (edge: Edge) => {
-      let start = edge.horizontal ? edge.x : edge.y;
-      let end = start + edge.len;
-      const fixedCoord = edge.horizontal ? edge.y : edge.x;
-      let startConnected = false, endConnected = false;
-
-      if (edge.horizontal) {
-        if (Math.abs(start) <= EDGE_EPS) startConnected = true;
-        if (Math.abs(end - clearInnerWFt) <= EDGE_EPS) endConnected = true;
-      } else {
-        if (Math.abs(start) <= EDGE_EPS) startConnected = true;
-        if (Math.abs(end - clearInnerHFt) <= EDGE_EPS) endConnected = true;
-      }
-
-      edges.forEach((o) => {
-        if (o === edge || o.horizontal === edge.horizontal) return;
-        const oFixed = o.horizontal ? o.y : o.x;
-        const oStart = o.horizontal ? o.x : o.y;
-        const oEnd = oStart + o.len;
-        if (oFixed <= fixedCoord + TOUCH_EPS && oFixed >= fixedCoord - TOUCH_EPS) {
-          if (oStart <= start + TOUCH_EPS && oEnd >= start - TOUCH_EPS) { if (Math.abs(oStart - start) <= TOUCH_EPS) startConnected = true; }
-          if (oStart <= end + TOUCH_EPS && oEnd >= end - TOUCH_EPS) { if (Math.abs(oEnd - end) <= TOUCH_EPS) endConnected = true; }
+    const endKind = (s: Seg, atStart: boolean): "BOUNDARY" | "PERP" | "COLLINEAR" | "FREE" => {
+      const pos = atStart ? s.start : s.end;
+      const lim = s.horizontal ? clearInnerWFt : clearInnerHFt;
+      if (pos <= EDGE_EPS || pos >= lim - EDGE_EPS) return "BOUNDARY";
+      for (const o of segs) {
+        if (o === s) continue;
+        if (o.horizontal !== s.horizontal) {
+          if (Math.abs(o.fixed - pos) <= TOUCH_EPS && s.fixed >= o.start - TOUCH_EPS && s.fixed <= o.end + TOUCH_EPS) return "PERP";
         }
-      });
-
-      return { start, end, len: Math.max(0, end - start), startConnected, endConnected };
+      }
+      for (const o of segs) {
+        if (o === s || o.horizontal !== s.horizontal) continue;
+        if (Math.abs(o.fixed - s.fixed) <= TOUCH_EPS && (Math.abs(o.start - pos) <= TOUCH_EPS || Math.abs(o.end - pos) <= TOUCH_EPS)) return "COLLINEAR";
+      }
+      return "FREE";
     };
 
     const getGlobalOpening = (room: any, opening: any, wall: string) => {
-      const start = Number(opening?.offsetFeet || 0);
-      const span = Math.max(0, Number(opening?.widthFeet ?? opening?.lengthFeet ?? 0));
+      const wallLen = wall === "TOP" || wall === "BOTTOM" ? room.w : room.h;
+      const rs = resolveOpeningSpan(opening, wallLen);
+      const start = rs.offsetFeet;
+      const span = Math.max(0, rs.widthFeet);
       if (wall === "TOP" || wall === "BOTTOM") return { start: room.x + start, end: room.x + start + span };
       return { start: room.y + start, end: room.y + start + span };
     };
 
-    const openingsForEdge = (edge: Edge, trimmedStart: number, trimmedEnd: number) => {
-      const result: { start: number; end: number; source: string }[] = [];
+    const openingsForSeg = (seg: Seg) => {
+      const result: [number, number][] = [];
       const add = (room: any, wall: string) => {
         if (!room) return;
         const all = [...(Array.isArray(room.doors) ? room.doors : []), ...(Array.isArray(room.windows) ? room.windows : [])];
         all.filter((o: any) => o.wall === wall).forEach((o: any) => {
           const g = getGlobalOpening(room, o, wall);
-          const a = Math.max(trimmedStart, g.start);
-          const b = Math.min(trimmedEnd, g.end);
-          if (b > a + 0.01) result.push({ start: a, end: b, source: o.id || "opening" });
+          const a = Math.max(seg.start, g.start);
+          const b = Math.min(seg.end, g.end);
+          if (b > a + 0.01) result.push([a, b]);
         });
       };
-      add(edge.room, edge.side);
-      if (edge.other) {
-        const opposite: Record<string, string> = { TOP: "BOTTOM", BOTTOM: "TOP", LEFT: "RIGHT", RIGHT: "LEFT" };
-        add(edge.other, opposite[edge.side]);
-      }
-      result.sort((a, b) => a.start - b.start);
-      const merged: { start: number; end: number; source: string }[] = [];
+      const opposite: Record<string, string> = { TOP: "BOTTOM", BOTTOM: "TOP", LEFT: "RIGHT", RIGHT: "LEFT" };
+      add(seg.room, seg.side);
+      seg.others.forEach((o) => add(o, opposite[seg.side]));
+      result.sort((a, b) => a[0] - b[0]);
+      const merged: [number, number][] = [];
       for (const o of result) {
         const last = merged[merged.length - 1];
-        if (last && o.start <= last.end + 0.02) last.end = Math.max(last.end, o.end);
-        else merged.push({ ...o });
+        if (last && o[0] <= last[1] + 0.02) last[1] = Math.max(last[1], o[1]);
+        else merged.push([o[0], o[1]]);
       }
       return merged;
     };
 
-    const pieces: React.ReactElement[] = [];
-    let pieceUid = 0;
+    type Rect = { x: number; y: number; w: number; h: number };
+    const rects: Rect[] = [];
+    const extOf = (k: string) => (k === "PERP" ? halfWall : k === "BOUNDARY" ? LINE : k === "COLLINEAR" ? LINE / 2 : 0);
 
-    const drawHorizontal = (edge: Edge) => {
-      const trimmed = getTrimmedSpan(edge);
-      if (trimmed.len <= 0.05) return;
-      const openings = openingsForEdge(edge, trimmed.start, trimmed.end);
-      const startX = trimmed.start, endX = trimmed.end;
-      const y1 = originY + edge.y * scale - halfWall;
-      const y2 = originY + edge.y * scale + halfWall;
-
-      if (!trimmed.startConnected) pieces.push(<line key={`cap-h-start-${edge.key}-${pieceUid++}`} x1={originX + startX * scale} y1={y1} x2={originX + startX * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" />);
-
-      let cursor = startX;
-      openings.forEach((o, idx) => {
-        const a = Math.max(startX, o.start), b = Math.min(endX, o.end);
-        if (a > cursor + 0.02) pieces.push(<React.Fragment key={`ph-${edge.key}-${idx}-${pieceUid++}`}><line x1={originX + cursor * scale} y1={y1} x2={originX + a * scale} y2={y1} stroke="#ef4444" strokeWidth="0.32" /><line x1={originX + cursor * scale} y1={y2} x2={originX + a * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-        pieces.push(<React.Fragment key={`jamb-h-${edge.key}-${idx}-${pieceUid++}`}><line x1={originX + a * scale} y1={y1} x2={originX + a * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" /><line x1={originX + b * scale} y1={y1} x2={originX + b * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-        cursor = Math.max(cursor, b);
+    segs.forEach((s) => {
+      const extS = extOf(endKind(s, true));
+      const extE = extOf(endKind(s, false));
+      const openings = openingsForSeg(s);
+      subtractIntervals(s.start, s.end, openings).forEach(([a, b]) => {
+        const eA = Math.abs(a - s.start) < 0.02 ? extS : 0;
+        const eB = Math.abs(b - s.end) < 0.02 ? extE : 0;
+        if (s.horizontal) {
+          const x0 = originX + a * scale - eA;
+          const x1 = originX + b * scale + eB;
+          rects.push({ x: x0, y: originY + s.fixed * scale - halfWall, w: x1 - x0, h: wallThick });
+        } else {
+          const y0 = originY + a * scale - eA;
+          const y1 = originY + b * scale + eB;
+          rects.push({ x: originX + s.fixed * scale - halfWall, y: y0, w: wallThick, h: y1 - y0 });
+        }
       });
+    });
 
-      if (cursor < endX - 0.02) pieces.push(<React.Fragment key={`phe-${edge.key}-${pieceUid++}`}><line x1={originX + cursor * scale} y1={y1} x2={originX + endX * scale} y2={y1} stroke="#ef4444" strokeWidth="0.32" /><line x1={originX + cursor * scale} y1={y2} x2={originX + endX * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-      if (!trimmed.endConnected) pieces.push(<line key={`cap-h-end-${edge.key}-${pieceUid++}`} x1={originX + endX * scale} y1={y1} x2={originX + endX * scale} y2={y2} stroke="#ef4444" strokeWidth="0.32" />);
+    return {
+      node: (
+        <g id="architectural-4inch-partition-walls">
+          <g fill="none" stroke={OUTLINE} strokeWidth={LINE * 2} strokeLinejoin="miter">
+            {rects.map((r, i) => <rect key={`wo-${i}`} x={r.x} y={r.y} width={r.w} height={r.h} />)}
+          </g>
+          <g fill={FILL} stroke="none">
+            {rects.map((r, i) => <rect key={`wf-${i}`} x={r.x} y={r.y} width={r.w} height={r.h} />)}
+          </g>
+        </g>
+      ),
+      audit: internalAudit,
+      edgeCount: segs.length,
     };
-
-    const drawVertical = (edge: Edge) => {
-      const trimmed = getTrimmedSpan(edge);
-      if (trimmed.len <= 0.05) return;
-      const openings = openingsForEdge(edge, trimmed.start, trimmed.end);
-      const startY = trimmed.start, endY = trimmed.end;
-      const x1 = originX + edge.x * scale - halfWall;
-      const x2 = originX + edge.x * scale + halfWall;
-
-      if (!trimmed.startConnected) pieces.push(<line key={`cap-v-start-${edge.key}-${pieceUid++}`} x1={x1} y1={originY + startY * scale} x2={x2} y2={originY + startY * scale} stroke="#ef4444" strokeWidth="0.32" />);
-
-      let cursor = startY;
-      openings.forEach((o, idx) => {
-        const a = Math.max(startY, o.start), b = Math.min(endY, o.end);
-        if (a > cursor + 0.02) pieces.push(<React.Fragment key={`pv-${edge.key}-${idx}-${pieceUid++}`}><line x1={x1} y1={originY + cursor * scale} x2={x1} y2={originY + a * scale} stroke="#ef4444" strokeWidth="0.32" /><line x1={x2} y1={originY + cursor * scale} x2={x2} y2={originY + a * scale} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-        pieces.push(<React.Fragment key={`jamb-v-${edge.key}-${idx}-${pieceUid++}`}><line x1={x1} y1={originY + a * scale} x2={x2} y2={originY + a * scale} stroke="#ef4444" strokeWidth="0.32" /><line x1={x1} y1={originY + b * scale} x2={x2} y2={originY + b * scale} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-        cursor = Math.max(cursor, b);
-      });
-
-      if (cursor < endY - 0.02) pieces.push(<React.Fragment key={`pve-${edge.key}-${pieceUid++}`}><line x1={x1} y1={originY + cursor * scale} x2={x1} y2={originY + endY * scale} stroke="#ef4444" strokeWidth="0.32" /><line x1={x2} y1={originY + cursor * scale} x2={x2} y2={originY + endY * scale} stroke="#ef4444" strokeWidth="0.32" /></React.Fragment>);
-      if (!trimmed.endConnected) pieces.push(<line key={`cap-v-end-${edge.key}-${pieceUid++}`} x1={x1} y1={originY + endY * scale} x2={x2} y2={originY + endY * scale} stroke="#ef4444" strokeWidth="0.32" />);
-    };
-
-    edges.forEach((edge) => { if (edge.horizontal) drawHorizontal(edge); else drawVertical(edge); });
-
-    return { node: <g id="architectural-4inch-partition-walls">{pieces}</g>, audit: internalAudit, edgeCount: edges.length };
   };
 
   const renderOpeningCuts = (rm: any, rx: number, ry: number, rw: number, rh: number) => {
@@ -605,8 +751,11 @@ export default function CadFloorPlansView({
     return (
       <g id="opening-cuts">
         {openings.map((o: any, index: number) => {
-          const span = Math.max(0, Number(o.widthFeet ?? o.lengthFeet ?? 0)) * scale;
-          const off = Math.max(0, Number(o.offsetFeet || 0)) * scale;
+          const wallLenFt = (o.wall === "TOP" || o.wall === "BOTTOM") ? rw / scale : rh / scale;
+          const rs = resolveOpeningSpan(o, wallLenFt);
+          const inset = 0.35;
+          const span = Math.max(0, rs.widthFeet * scale - 2 * inset);
+          const off = Math.max(0, rs.offsetFeet * scale) + inset;
           if (o.wall === "TOP") return <rect key={`cut-t-${index}`} x={rx + off} y={ry - cutDepth / 2} width={span} height={cutDepth} fill="#020617" />;
           if (o.wall === "BOTTOM") return <rect key={`cut-b-${index}`} x={rx + off} y={ry + rh - cutDepth / 2} width={span} height={cutDepth} fill="#020617" />;
           if (o.wall === "LEFT") return <rect key={`cut-l-${index}`} x={rx - cutDepth / 2} y={ry + off} width={cutDepth} height={span} fill="#020617" />;
@@ -621,13 +770,16 @@ export default function CadFloorPlansView({
     innerX: number, innerY: number, outerX: number, outerY: number,
     outerW: number, outerH: number, outerWallThicknessFt: number,
   ) => {
+    void outerW; void outerH;
     const cuts: React.ReactElement[] = [];
     const bg = "#020617";
     const extend = Math.max(0.35, outerWallThicknessFt * scale + 1);
     const pushOpening = (room: any, o: any) => {
       const wall = String(o.wall || "").toUpperCase();
-      const spanFt = Math.max(0, Number(o.widthFeet ?? o.lengthFeet ?? 0));
-      const offFt = Math.max(0, Number(o.offsetFeet || 0));
+      const wallLenFt = (wall === "TOP" || wall === "BOTTOM") ? room.w : room.h;
+      const rs = resolveOpeningSpan(o, wallLenFt);
+      const spanFt = Math.max(0, rs.widthFeet);
+      const offFt = Math.max(0, rs.offsetFeet);
       if (!spanFt) return;
       if (wall === "BOTTOM" && Math.abs(room.y + room.h - clearInnerHFt) <= 0.2) {
         cuts.push(<rect key={`ext-bottom-${room.id}-${o.id}`} x={innerX + (room.x + offFt) * scale} y={innerY + clearInnerHFt * scale - extend / 2} width={spanFt * scale} height={outerWallThicknessFt * scale + extend} fill={bg} />);
@@ -646,7 +798,7 @@ export default function CadFloorPlansView({
   };
 
   const getFitLabel = (name: string, rwFt: number) => {
-    let text = getSmartLabel(name.toUpperCase(), rwFt);
+    const text = getSmartLabel(name.toUpperCase(), rwFt);
     const maxChars = Math.max(5, Math.floor(rwFt * 2.2));
     if (text.length <= maxChars) return [text];
     const words = text.split(/\s+/);
@@ -687,21 +839,11 @@ export default function CadFloorPlansView({
         const floorInfo: any = getFloorInfo(floorName);
         const isTowerFloor = floorName.toUpperCase().includes("TOWER") || floorName.toUpperCase().includes("MUMTY");
 
-        // ====================================================================
-        // ✅ DYNAMIC WALL THICKNESS — Plot width ≤ 15 ft → 4", > 15 ft → 8"
-        // ====================================================================
         const plotWidthForWallFt = Number(floorInfo?.width) || 10;
-        const WALL_THICKNESS_SMALL_FT = 4 / 12;  // 0.333 ft
-        const WALL_THICKNESS_LARGE_FT = 8 / 12;  // 0.667 ft
-        const WALL_THICKNESS_BREAKPOINT_FT = 15;
+        void plotWidthForWallFt;
 
-        const dynamicWallThicknessFt = plotWidthForWallFt > WALL_THICKNESS_BREAKPOINT_FT
-          ? WALL_THICKNESS_LARGE_FT
-          : WALL_THICKNESS_SMALL_FT;
-
-        const outerWallThicknessFt = floorInfo?.outerWallThickness || dynamicWallThicknessFt;
+        const outerWallThicknessFt = 4 / 12;
         const outerWallPx = outerWallThicknessFt * scale;
-
         const i0 = { x: p0.x + outerWallPx, y: p0.y + outerWallPx };
         const i1 = { x: p1.x - outerWallPx, y: p1.y + outerWallPx };
         const i2 = { x: p2.x - outerWallPx, y: p2.y - outerWallPx };
@@ -711,7 +853,6 @@ export default function CadFloorPlansView({
         const clearInnerW = Math.abs(i1.x - i0.x);
         const clearInnerH = Math.abs(i3.y - i0.y);
 
-        // ✅ Same dynamic wall thickness — carpet area nikalne ke liye
         const EXTERNAL_WALL_THICKNESS_FT = outerWallThicknessFt;
 
         const sbInfo = floorInfo?.setbacks || {};
@@ -726,7 +867,10 @@ export default function CadFloorPlansView({
         const clearWidthFromParent = Number(floorInfo?.clearWidth);
         const clearLengthFromParent = Number(floorInfo?.clearLength);
 
-        // ✅ Carpet area (rooms already isme fit hain)
+        void sLeftInfo; void sRightInfo; void sFrontInfo; void sRearInfo;
+        void plotWInfo; void plotLInfo;
+        void EXTERNAL_WALL_THICKNESS_FT;
+
         const cadRenderWidthFt = clearWidthFromParent > 0
           ? clearWidthFromParent
           : (plotWInfo - (sLeftInfo + sRightInfo) - (EXTERNAL_WALL_THICKNESS_FT * 2));
@@ -737,20 +881,6 @@ export default function CadFloorPlansView({
 
         const clearInnerWFt = Math.max(3.5, cadRenderWidthFt);
         const clearInnerHFt = Math.max(6, cadRenderLengthFt);
-
-        console.log(`[CAD WALL THICKNESS] ${floorName} →`, {
-          plotWidth: plotWidthForWallFt,
-          wallThicknessInches: (outerWallThicknessFt * 12).toFixed(0) + '"',
-          rule: plotWidthForWallFt > 15 ? '8" (width > 15 ft)' : '4" (width ≤ 15 ft)',
-        });
-
-        console.log(`[CAD CARPET AREA] ${floorName} →`, {
-          plotW: plotWInfo, plotL: plotLInfo,
-          setbacks: { sLeftInfo, sRightInfo, sFrontInfo, sRearInfo },
-          wallDeduction: { W: EXTERNAL_WALL_THICKNESS_FT * 2, L: EXTERNAL_WALL_THICKNESS_FT * 2 },
-          clearWidthFromParent, clearLengthFromParent,
-          finalCarpetW: clearInnerWFt, finalCarpetH: clearInnerHFt,
-        });
 
         const tCenterX = translatedPoints.reduce((sum, p) => sum + p.x, 0) / translatedPoints.length;
         const tCenterY = translatedPoints.reduce((sum, p) => sum + p.y, 0) / translatedPoints.length;
@@ -764,15 +894,29 @@ export default function CadFloorPlansView({
           M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z
         `;
 
-        const dynamicFloorRooms = floorRooms[floorName];
+        const getFloorRoomsFor = (name: string) => {
+          if (!floorRooms) return null;
+          if (floorRooms[name]) return floorRooms[name];
+          const cleanKey = name.trim().toLowerCase().replace(/\s+/g, '_');
+          const foundKey = Object.keys(floorRooms).find(
+            (k) => k.trim().toLowerCase() === name.trim().toLowerCase() ||
+                   k.trim().toLowerCase().replace(/\s+/g, '_') === cleanKey
+          );
+          return foundKey ? floorRooms[foundKey] : null;
+        };
+
+        const dynamicFloorRooms = getFloorRoomsFor(floorName);
         const generatedFromFloorData = floorInfo?.rooms;
-        const roomEntries = Array.isArray(generatedFromFloorData)
-          ? generatedFromFloorData
-          : Array.isArray(dynamicFloorRooms)
-            ? dynamicFloorRooms
-            : dynamicFloorRooms
-              ? Object.values(dynamicFloorRooms)
-              : [];
+
+        const roomsFromDynamic = dynamicFloorRooms
+          ? (Array.isArray(dynamicFloorRooms)
+              ? dynamicFloorRooms
+              : Object.values(dynamicFloorRooms))
+          : [];
+
+        const roomEntries = roomsFromDynamic.length > 0
+          ? roomsFromDynamic
+          : (Array.isArray(generatedFromFloorData) ? generatedFromFloorData : []);
 
         const rawRooms: FloorRoom[] = roomEntries.length > 0
           ? roomEntries.map((r: any) => ({
@@ -786,7 +930,7 @@ export default function CadFloorPlansView({
             }))
           : [];
 
-        const roomList = rawRooms;
+        const roomList = normalizeRoomList(rawRooms, clearInnerWFt, clearInnerHFt);
 
         const debugKey = `${floorName}-${roomList.length}-${roomList.map(r => r.name).join(',')}`;
         if (typeof console !== 'undefined' && !cadStairDebugCache.has(debugKey)) {
@@ -840,6 +984,9 @@ export default function CadFloorPlansView({
           }
         }
 
+        void cadValidationCache;
+        void cadDiagnosticCache;
+
         const clipId = `floor-inner-clip-${index}`;
 
         return (
@@ -864,7 +1011,6 @@ export default function CadFloorPlansView({
 
                 const isStaircase = rm.type === "stairs" || rm.name?.toUpperCase().includes("STAIR");
                 const isDuct = rm.type === "duct" || rm.name?.toUpperCase().includes("DUCT") || rm.name?.toUpperCase().includes("OTS") || rm.name?.toUpperCase().includes("SHAFT");
-                const isBottomZone = ((rm.y || 0) + (rm.h || 0)) >= clearInnerHFt * 0.65;
 
                 if (isStaircase) {
                   if (isTowerFloor) {
@@ -876,7 +1022,7 @@ export default function CadFloorPlansView({
                     };
                     return (
                       <g key={`tower-stairs-${index}-${rIdx}`}>
-                        {renderEngineStaircase(rx, ry, rw, rh, stairConfig, isBottomZone)}
+                        {renderEngineStaircase(rx, ry, rw, rh, stairConfig)}
                       </g>
                     );
                   }
@@ -897,8 +1043,9 @@ export default function CadFloorPlansView({
                 }
 
                 const rectFill = isDuct ? "url(#wallHatch)" : String(rm.name || "").toUpperCase() === "PASSAGE" ? "none" : "#020617";
-                const rectStroke = hasOverlap ? "#ff0000" : "none";
-                const rectStrokeWidth = hasOverlap ? 2 : 0;
+                void hasOverlap;
+                const rectStroke = "none";
+                const rectStrokeWidth = 0;
 
                 return (
                   <g key={`room-${index}-${rIdx}`}>
@@ -926,8 +1073,7 @@ export default function CadFloorPlansView({
                             {
                               staircaseType: embeddedStair.staircaseType,
                               staircaseSpec: embeddedStair.staircaseSpec,
-                            },
-                            isBottomZone
+                            }
                           );
                         })()}
                       </g>
@@ -956,33 +1102,82 @@ export default function CadFloorPlansView({
                       </g>
                     )}
 
-                    {!(String(rm.name || "").toUpperCase() === "PASSAGE" && (rm as any).pinkGuideLines) && (
-                    <g clipPath={`url(#room-label-clip-${index}-${rIdx})`}>
-                      {getFitLabel(rm.name || "ROOM", rm.w || 0).map((line, lineIdx) => {
-                        const safeFontSize = Math.max(1.8, Math.min(rw * 0.18, rh * 0.22, 3.8 * (scale / 5.5)));
-                        const lineCount = getFitLabel(rm.name || "ROOM", rm.w || 0).length;
-                        const yOffset = lineCount > 1 ? 0.32 + lineIdx * 0.16 : 0.4;
-                        return (
-                          <text key={`title-${lineIdx}`} x={rx + rw / 2} y={ry + rh * yOffset} fill={isDuct ? "#94a3b8" : "#ffffff"} fontSize={safeFontSize} fontWeight="bold" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "1.0px" }}>
-                            {line}
-                          </text>
-                        );
-                      })}
+                    {!(String(rm.name || "").toUpperCase() === "PASSAGE" && (rm as any).pinkGuideLines) && (() => {
+                      const selfBox: Box = { x: rx, y: ry, w: rw, h: rh };
+                      const obstacles: Box[] = [];
+                      const hit = (a: Box, b: Box) =>
+                        Math.min(a.x + a.w, b.x + b.w) > Math.max(a.x, b.x) &&
+                        Math.min(a.y + a.h, b.y + b.h) > Math.max(a.y, b.y);
 
-                      {(() => {
-                        const dimText = `${formatDim(rw, scale, measurementUnit)} x ${formatDim(rh, scale, measurementUnit)}`;
-                        const lineCount = getFitLabel(rm.name || "ROOM", rm.w || 0).length;
-                        const yPos = lineCount > 1 ? 0.76 : 0.68;
-                        const safeDimFontSize = Math.max(1.4, Math.min(rw * 0.14, rh * 0.16, 3.0 * (scale / 5.5)));
-                        if (rw < 4 || rh < 4) return null;
-                        return (
-                          <text x={rx + rw / 2} y={ry + rh * yPos} fill="#38bdf8" fontSize={safeDimFontSize} fontWeight="600" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "0.8px" }}>
-                            {dimText}
-                          </text>
-                        );
-                      })()}
-                    </g>
-                    )}
+                      for (const other of roomList as any[]) {
+                        if (other === rm) continue;
+                        const on = String(other.name || "").toUpperCase();
+                        if (on.includes("STAIR")) continue;
+                        if ((rm as any).subZoneOf === other.id || (rm as any).attachedTo === other.id) continue;
+                        const ob: Box = {
+                          x: i0.x + (other.x || 0) * scale, y: i0.y + (other.y || 0) * scale,
+                          w: (other.w || 0) * scale, h: (other.h || 0) * scale,
+                        };
+                        if (!hit(selfBox, ob)) continue;
+                        const covers = ob.x <= rx + 0.1 && ob.y <= ry + 0.1 && ob.x + ob.w >= rx + rw - 0.1 && ob.y + ob.h >= ry + rh - 0.1;
+                        if (covers && ob.w * ob.h > rw * rh + 1) continue;
+                        obstacles.push(ob);
+                      }
+
+                      if (isLivingRoom && embeddedStair && (embeddedStair.w || 0) > 0 && (embeddedStair.h || 0) > 0) {
+                        const esRelX = embeddedStair.relX !== undefined ? embeddedStair.relX : (embeddedStair.x || 0);
+                        const esRelY = embeddedStair.relY !== undefined ? embeddedStair.relY : (embeddedStair.y || 0);
+                        obstacles.push({
+                          x: rx + esRelX * scale - 1, y: ry + esRelY * scale - 1,
+                          w: (embeddedStair.w || 0) * scale + 2, h: (embeddedStair.h || 0) * scale + 2,
+                        });
+                      }
+
+                      for (const other of roomList as any[]) {
+                        const ob: Box = {
+                          x: i0.x + (other.x || 0) * scale, y: i0.y + (other.y || 0) * scale,
+                          w: (other.w || 0) * scale, h: (other.h || 0) * scale,
+                        };
+                        for (const d of (Array.isArray(other.doors) ? other.doors : [])) {
+                          if ((d as any).renderSymbol === false) continue;
+                          const sw = doorSwingBox(d as any, ob, scale);
+                          if (hit(selfBox, sw)) obstacles.push(sw);
+                        }
+                      }
+
+                      const fullName = String(rm.name || "ROOM").toUpperCase();
+                      const shortName = getSmartLabel(fullName, 0);
+                      const dimText = rw >= 4 && rh >= 4
+                        ? `${formatDim(rw, scale, measurementUnit)} x ${formatDim(rh, scale, measurementUnit)}`
+                        : undefined;
+
+                      const lp = placeRoomLabel({
+                        room: selfBox,
+                        obstacles,
+                        nameVariants: buildNameVariants(fullName, shortName),
+                        dimText,
+                        pad: Math.max(1.5, scale * 0.3),
+                        maxFont: 3.8 * (scale / 5.5),
+                        minFont: 1.8,
+                        minDimFont: 1.4,
+                      });
+
+                      return (
+                        <g clipPath={`url(#room-label-clip-${index}-${rIdx})`}>
+                          <g transform={lp.rotate ? `rotate(${lp.rotate} ${lp.cx} ${lp.cy})` : undefined}>
+                            {lp.lines.map((ln, lineIdx) => ln.kind === "name" ? (
+                              <text key={`title-${lineIdx}`} x={ln.x} y={ln.y} fill={isDuct ? "#94a3b8" : "#ffffff"} fontSize={ln.fontSize} fontWeight="bold" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "1.0px" }}>
+                                {ln.text}
+                              </text>
+                            ) : (
+                              <text key={`dim-${lineIdx}`} x={ln.x} y={ln.y} fill="#38bdf8" fontSize={ln.fontSize} fontWeight="600" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "0.8px" }}>
+                                {ln.text}
+                              </text>
+                            ))}
+                          </g>
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })}
@@ -1003,26 +1198,9 @@ export default function CadFloorPlansView({
                       return (
                         <React.Fragment key={`openings-${index}-${rIdx}`}>
                           {renderOpeningCuts(rm, rx, ry, rw, rh)}
-                         {rm.doors?.map((door: PlacedDoor, dIdx: number) => {
-  console.log('[DOOR DATA]', {
-    room: rm.name,
-    doorId: (door as any).id,
-    wall: door.wall,
-    offsetFeet: door.offsetFeet,
-    widthFeet: door.widthFeet,
-    renderSymbol: (door as any).renderSymbol,
-    sharedOpeningId: (door as any).sharedOpeningId,
-  });
-
-  if ((door as any).renderSymbol === false) {
-    console.log('[DOOR SKIP] renderSymbol false:', (door as any).id);
-    return null;
-  }
+                          {rm.doors?.map((door: PlacedDoor, dIdx: number) => {
                             if ((door as any).renderSymbol === false) return null;
 
-                            // ============================================================
-                            // ✅ FIX #1: SHARED DOORS kabhi block nahi honge
-                            // ============================================================
                             const doorIdStr = String((door as any).id || '');
                             const doorSharedIdStr = String((door as any).sharedOpeningId || '');
                             const isSharedDoor =
@@ -1064,13 +1242,11 @@ export default function CadFloorPlansView({
                               doorBBoxH = doorSpanPx;
                             }
 
-                            // ✅ Shared doors NEVER blocked
                             if (isSharedDoor) {
                               return renderCadDoorSymbol(door, rx, ry, rw, rh, `door-${index}-${rIdx}-${dIdx}`);
                             }
 
                             let isBlocked = false;
-                            let blockedByRoom: string | null = null;
                             for (const other of roomList) {
                               if (other === rm) continue;
 
@@ -1095,23 +1271,11 @@ export default function CadFloorPlansView({
 
                               if (overlapRatio > 0.5) {
                                 isBlocked = true;
-                                blockedByRoom = other.name;
                                 break;
                               }
                             }
 
-                            console.log('[DOOR CHECK]', {
-                              room: rm.name,
-                              doorId: (door as any).id,
-                              wall: door.wall,
-                              isSharedDoor,
-                              isBlocked,
-                              blockedByRoom,
-                            });
-
-                            if (isBlocked) {
-                              return null;
-                            }
+                            if (isBlocked) return null;
 
                             return renderCadDoorSymbol(door, rx, ry, rw, rh, `door-${index}-${rIdx}-${dIdx}`);
                           })}
@@ -1135,12 +1299,14 @@ export default function CadFloorPlansView({
               {floorName}
             </text>
 
-            <g id="engine-validation-badge" transform={`translate(${p0.x}, ${p0.y - (10 * scale)})`}>
-              <rect x="0" y="0" width={plotWidthPx} height={6 * scale} fill={validationReport.isValid ? "#064e3b" : "#7f1d1d"} rx="2" />
-              <text x={plotWidthPx / 2} y={3 * scale} fill="#ffffff" fontSize={2.8 * scale} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
-                {validationReport.isValid ? "✓ PLAN VALIDATED BY ENGINE" : `⚠ INVALID PLAN (${validationReport.errors.length} ERRORS)`}
-              </text>
-            </g>
+            {showValidationBanner && (
+              <g id="engine-validation-badge" transform={`translate(${p0.x}, ${p0.y - (10 * scale)})`}>
+                <rect x="0" y="0" width={plotWidthPx} height={6 * scale} fill={validationReport.isValid ? "#064e3b" : "#7f1d1d"} rx="2" />
+                <text x={plotWidthPx / 2} y={3 * scale} fill="#ffffff" fontSize={2.8 * scale} fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+                  {validationReport.isValid ? "✓ PLAN VALIDATED BY ENGINE" : `⚠ INVALID PLAN (${validationReport.errors.length} ERRORS)`}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}

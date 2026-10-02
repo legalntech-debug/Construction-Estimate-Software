@@ -77,7 +77,6 @@ export default function WalletLedgerPage() {
   const [refundRequests, setRefundRequests] = useState<RefundRequest[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   
-  // Default set to 'ALL' for All-Time view across all months
   const [selectedMonth, setSelectedMonth] = useState<string>('ALL');
   const [showDateDropdown, setShowDateDropdown] = useState<boolean>(false);
   const [fromDate, setFromDate] = useState<string>('');
@@ -99,6 +98,7 @@ export default function WalletLedgerPage() {
   const [filterCredit, setFilterCredit] = useState('');
 
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const channelRef = useRef<any>(null); // 🆕 Track active channel
 
   const supabaseClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -109,84 +109,100 @@ export default function WalletLedgerPage() {
     fetchInitialData();
   }, []);
 
-  // Real-time subscription setup for live updates (Global for Admin, Filtered for Users)
+  /* ============================================================
+     🆕 REALTIME SUBSCRIPTION — FIXED
+     
+     Critical Fixes:
+     1. Dependency array mein `profile` object nahi, sirf `profile?.id`
+     2. Single `return` statement (duplicate cleanup removed)
+     3. Channel reference stored in ref to prevent stale closures
+     4. Debounce timer properly cleaned
+     ============================================================ */
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const userType = profile?.user_type?.trim().toLowerCase();
     const userRole = profile?.role?.trim().toLowerCase();
-    const isAdminUser = userType === 'admin' || userType === 'administrator' || userType === 'founder' || userRole === 'admin';
+
+    const isAdminUser =
+      userType === 'admin' ||
+      userType === 'administrator' ||
+      userType === 'founder' ||
+      userRole === 'admin';
 
     if (!isAdminUser && !selectedUserId) return;
 
-    const channel = supabaseClient
-      .channel('ledger-realtime-changes')
-      .on(
-        'postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'wallet_transactions', 
-          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
-        }, 
-        () => { 
-          fetchLedgerData(); 
-        }
-      )
-      .on(
-        'postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'wallet_recharges', 
-          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
-        }, 
-        () => { 
-          fetchLedgerData(); 
-        }
-      )
-      .on(
-        'postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'estimates', 
-          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
-        }, 
-        () => { 
-          fetchLedgerData(); 
-        }
-      )
-      .on(
-        'postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'service_records', 
-          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
-        }, 
-        () => { 
-          fetchLedgerData(); 
-        }
-      )
-      .on(
-        'postgres_changes', 
-        { 
-          event: '*', 
-          schema: 'public', 
-          table: 'partner_settlements', 
-          filter: isAdminUser ? undefined : `user_id=eq.${selectedUserId}` 
-        }, 
-        () => { 
-          fetchLedgerData(); 
-        }
-      )
-      .subscribe();
+    // Debounce setup
+    let debounceTimer: NodeJS.Timeout | null = null;
 
-    return () => {
-      supabaseClient.removeChannel(channel);
+    const debouncedFetch = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('🔄 [Realtime] Ledger refresh triggered');
+        fetchLedgerData();
+      }, 500);
     };
-  }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate, profile]);
+
+    const userFilter = isAdminUser ? undefined : `user_id=eq.${selectedUserId}`;
+    const channelName = `ledger-realtime-${selectedUserId || 'admin'}`;
+
+    // 🆕 Cleanup previous channel if exists
+    if (channelRef.current) {
+      supabaseClient.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    const channel = supabaseClient
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'wallet_transactions', filter: userFilter },
+        (p) => { console.log('📊 wallet_transactions:', p.eventType); debouncedFetch(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'wallet_recharges', filter: userFilter },
+        (p) => { console.log('📊 wallet_recharges:', p.eventType); debouncedFetch(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'estimates', filter: userFilter },
+        (p) => { console.log('📊 estimates:', p.eventType); debouncedFetch(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'service_records', filter: userFilter },
+        (p) => { console.log('📊 service_records:', p.eventType); debouncedFetch(); }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'wallet_refund_requests', filter: userFilter },
+        (p) => { console.log('📊 wallet_refund_requests:', p.eventType); debouncedFetch(); }
+      )
+      .subscribe((status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ [Realtime] Ledger subscription connected');
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ [Realtime] Channel error:', err);
+        } else if (status === 'TIMED_OUT') {
+          console.warn('⚠️ [Realtime] Subscription timed out');
+        } else if (status === 'CLOSED') {
+          console.log('🔌 [Realtime] Channel closed');
+        }
+      });
+
+    channelRef.current = channel;
+
+    // 🆕 SINGLE cleanup return (fixed duplicate return bug)
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (channelRef.current) {
+        supabaseClient.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      console.log('🧹 [Realtime] Ledger subscription cleaned up');
+    };
+  }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate, profile?.id]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -359,7 +375,6 @@ export default function WalletLedgerPage() {
       setTargetProfile(profile);
     }
 
-    // Build query filters based on selectedMonth or custom date range
     let startDate = '';
     let endDate = '';
 
@@ -392,21 +407,36 @@ export default function WalletLedgerPage() {
     }
     const { data: estimateTx } = await estimateQuery;
 
-    // 4. FETCH PARTNER SETTLEMENTS & AUTO ADJUSTMENTS
-    let partnerSettlementQuery = supabaseClient.from('partner_settlements').select('*').eq('user_id', selectedUserId);
-    if (startDate && endDate) {
-      partnerSettlementQuery = partnerSettlementQuery.gte('created_at', startDate).lte('created_at', endDate);
-    }
-    const { data: partnerSettlements } = await partnerSettlementQuery;
+    // 4. Fetch Partner Payouts (safe — table exists)
+    let partnerSettlements: any[] = [];
+    let partnerTx: any[] = [];
 
-    // 5. FETCH PARTNER LEDGER ADJUSTMENTS
-    let partnerQuery = supabaseClient.from('partner_ledger').select('*').or(`user_id.eq.${selectedUserId},partner_id.eq.${selectedUserId}`);
-    if (startDate && endDate) {
-      partnerQuery = partnerQuery.gte('created_at', startDate).lte('created_at', endDate);
+    try {
+      let partnerPayoutQuery = supabaseClient
+        .from('partner_payouts')
+        .select('*')
+        .eq('user_id', selectedUserId);
+      
+      if (startDate && endDate) {
+        partnerPayoutQuery = partnerPayoutQuery
+          .gte('created_at', startDate)
+          .lte('created_at', endDate);
+      }
+      
+      const { data, error } = await partnerPayoutQuery;
+      if (!error && data) {
+        partnerSettlements = data.filter((p: any) => 
+          p.type === 'CREDIT' || (p.amount_paid && !p.type)
+        );
+        partnerTx = data.filter((p: any) => 
+          p.type === 'DEBIT' || p.adjusted_amount
+        );
+      }
+    } catch (e) {
+      console.warn('Partner payouts fetch skipped:', e);
     }
-    const { data: partnerTx } = await partnerQuery;
 
-    // 6. Fetch Service Records / Deed Drafting Data
+    // 5. Fetch Service Records / Deed Drafting Data
     let serviceQuery = supabaseClient.from('service_records').select('*').eq('user_id', selectedUserId);
     if (startDate && endDate) {
       serviceQuery = serviceQuery.gte('created_at', startDate).lte('created_at', endDate);
@@ -415,6 +445,7 @@ export default function WalletLedgerPage() {
 
     let combinedTx: Transaction[] = [];
 
+    // Process wallet_transactions
     if (walletTx) {
       walletTx.forEach((w: any) => {
         combinedTx.push({
@@ -432,6 +463,7 @@ export default function WalletLedgerPage() {
       });
     }
 
+    // Process wallet_recharges (approved only)
     if (rechargeTx) {
       rechargeTx.forEach((r: any) => {
         const statusUpper = (r.status || '').toUpperCase();
@@ -456,9 +488,21 @@ export default function WalletLedgerPage() {
       });
     }
 
+    // Process estimates (DEBIT)
     if (estimateTx) {
       estimateTx.forEach((e: any) => {
-        const fee = Number(e.user_payment || e.fee_standard || 0);
+        // ✅ user_payment priority for estimates
+        const fee = Number(
+          e.user_payment ||
+          e.fee_standard ||
+          e.amount ||
+          e.total_amount ||
+          0
+        );
+
+        // Skip zero-amount entries
+        if (fee <= 0) return;
+
         combinedTx.push({
           id: e.ref_no || e.id,
           created_at: e.created_at,
@@ -474,11 +518,23 @@ export default function WalletLedgerPage() {
       });
     }
 
+    // Process service_records (DEBIT) — ✅ gateway_fee priority
     if (serviceRecordsTx) {
       serviceRecordsTx.forEach((s: any) => {
-        const fee = Number(s.user_payment || s.amount || s.total_amount || 0);
-        
-        // Extract buyer name from form_snapshot JSON if customer_name is missing/empty
+        const fee = Number(
+          s.gateway_fee ||
+          s.user_payment ||
+          s.user_service_fee ||
+          s.fee_standard ||
+          s.amount ||
+          s.total_amount ||
+          0
+        );
+
+        // Skip zero-amount entries
+        if (fee <= 0) return;
+
+        // Extract buyer name from form_snapshot if needed
         let resolvedCustomerName = s.customer_name;
         if (!resolvedCustomerName || resolvedCustomerName.trim() === '' || resolvedCustomerName === s.client_name) {
           try {
@@ -508,8 +564,8 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // PROCESS PARTNER SETTLEMENTS (AUTO-RECOVERY / AUTO-ADJUSTMENT)
-    if (partnerSettlements) {
+    // Process partner settlements (CREDIT)
+    if (partnerSettlements && partnerSettlements.length > 0) {
       partnerSettlements.forEach((ps: any) => {
         const exists = combinedTx.some(t => t.id === ps.id || (ps.utr_no && t.ref_no === ps.utr_no));
         if (!exists) {
@@ -529,8 +585,8 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // PROCESS PARTNER LEDGER
-    if (partnerTx) {
+    // Process partner ledger adjustments (CREDIT/DEBIT)
+    if (partnerTx && partnerTx.length > 0) {
       partnerTx.forEach((pt: any) => {
         const exists = combinedTx.some(t => t.id === pt.id || (pt.ref_no && t.ref_no === pt.ref_no));
         if (!exists) {
@@ -660,7 +716,6 @@ export default function WalletLedgerPage() {
     setShowRefundModal(true);
   };
 
-  // ✅ UPDATED FILTER LOGIC: Null-safe & Trimmed
   const filteredTransactions = transactions.filter(tx => {
     const qRef = filterRef.trim().toLowerCase();
     const qCustomer = filterCustomer.trim().toLowerCase();

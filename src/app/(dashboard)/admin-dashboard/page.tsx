@@ -23,7 +23,7 @@ import UserManagementRBAC from './components/UserManagementRBAC';
 /* ============================================================
    ✅ Centralized amount resolver
    - service_records (Drafting/Map) => gateway_fee priority
-   - estimates                     => user_payment priority (unchanged)
+   - estimates                     => user_payment priority
    ============================================================ */
 function resolveAmount(tx: any): number {
   const isService =
@@ -223,7 +223,30 @@ export default function AdminDashboardPage(props: {
         supabase.rpc('get_profiles_with_estimates_count'),
         supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false }),
         supabase.from('admin_incomes').select('*').order('created_at', { ascending: false }),
-        supabase.from('wallet_refund_requests').select('*').order('created_at', { ascending: false }),
+        supabase.from('wallet_refund_requests').select(`
+          id,
+          user_id,
+          user_name,
+          user_email,
+          user_mobile,
+          user_code,
+          wallet_balance_at_request,
+          amount,
+          bank_details,
+          status,
+          utr_no,
+          approved_by,
+          approved_at,
+          processed_by,
+          rejection_reason,
+          transaction_ref,
+          payment_mode,
+          whatsapp_sent_at,
+          whatsapp_sent_count,
+          admin_remark,
+          created_at,
+          updated_at
+        `).order('created_at', { ascending: false }),
         supabase.from('estimates').select('*').order('created_at', { ascending: false }),
         supabase.from('service_records').select('*').or('payment_status.eq.paid,razorpay_payment_id.not.is.null').order('created_at', { ascending: false })
       ]);
@@ -251,6 +274,12 @@ export default function AdminDashboardPage(props: {
 
       setRechargeRequests(rechargesDataRes.data || []);
       setIncomes(incomesDataRes.data || []);
+
+      /* ============================================================
+         ✅ SIMPLIFIED: Refund data ab wallet_refund_requests table
+         mein hi hai (user_name, user_mobile, user_code, etc.) — 
+         Manual JOIN ki zaroorat nahi.
+         ============================================================ */
       setRefundRequests(refundsDataRes.data || []);
 
       const estimatesData = estimatesRes.data || [];
@@ -260,38 +289,54 @@ export default function AdminDashboardPage(props: {
       setServiceRecordsList(serviceData);
 
       /* ============================================================
-         ✅ COMBINED GATEWAY TRANSACTIONS
-         - Estimates  → user_payment priority (unchanged)
-         - Services   → gateway_fee priority (FIXED)
-         - source_table tag for later resolution
+         ✅ COMBINED GATEWAY TRANSACTIONS — FINAL FIX
+         
+         Estimates (estimates table):
+           - ref_no → item.ref_no (PK, not item.id)
+           - Amount → item.user_payment (priority)
+           - Customer → item.customer_name || item.client_name
+         
+         Services (service_records table):
+           - ref_no → item.ref_no (PK, not item.id)
+           - Amount → item.gateway_fee (priority) 
+           - Customer → item.customer_name || form_snapshot.buyers[0].name
          ============================================================ */
       const combinedGatewayTransactions = [
-        /* ---------- ESTIMATES (untouched) ---------- */
+        /* ---------- ESTIMATES ---------- */
         ...estimatesData.map((item: any) => {
-          const refNo = item.reference_no || item.estimate_no || item.id || '';
+          const refNo = item.ref_no || item.reference_no || item.estimate_no || item.id || '';
           let inferredType = 'Estimate';
           if (refNo.includes('LnT')) {
             inferredType = 'Construction Estimate';
           } else if (refNo.includes('FY') || refNo.includes('D0')) {
             inferredType = 'Estimate Type';
           }
+          const caseType = item.estimate_type || item.case_type || inferredType;
+          const customerName = item.customer_name || item.client_name || 'N/A';
+          const userPaymentAmount = Number(
+            item.user_payment ?? item.amount ?? item.total_amount ?? 0
+          );
 
           return {
             ...item,
-            source_table: 'estimates',                        // ✅ tag
-            case_type: item.estimate_type || item.case_type || inferredType, 
+            source_table: 'estimates',
+            case_type: caseType,
             reference_no: refNo,
-            customer_name: item.client_name || item.customer_name || 'N/A',
-            amount: Number(item.user_payment ?? item.amount ?? item.total_amount ?? 0),
+            ref_no: refNo,
+            customer_name: customerName,
+            client_name: item.client_name,
+            amount: userPaymentAmount,
+            resolved_amount: userPaymentAmount,
             created_at: item.created_at,
-            payment_status: item.payment_status || 'paid'
+            payment_status: item.payment_status || 'paid',
+            razorpay_payment_id: item.razorpay_payment_id || 'N/A',
           };
         }),
 
-        /* ---------- SERVICE RECORDS (Drafting / Map) — FIXED ---------- */
+        /* ---------- SERVICE RECORDS ---------- */
         ...serviceData.map((item: any) => {
-          // ✅ Amount priority for service_records: gateway_fee first
-          const resolvedAmount = Number(
+          const refNo = item.ref_no || item.reference_no || item.razorpay_payment_id || item.id || '';
+          const gatewayAmount = Number(
             item.gateway_fee ??
             item.user_payment ??
             item.user_service_fee ??
@@ -299,33 +344,41 @@ export default function AdminDashboardPage(props: {
             item.amount ??
             0
           );
+          const caseType = item.service_type || item.case_type || (item.deed_type ? `DEED - ${item.deed_type}` : 'DRAFTING & MAP');
 
-          // ✅ Extract buyer name from form_snapshot if customer_name missing
-          let extractedName = item.customer_name;
-          if (!extractedName && item.form_snapshot) {
+          let customerName = item.customer_name;
+          if (!customerName && item.form_snapshot) {
             try {
               const snapshot = typeof item.form_snapshot === 'string'
                 ? JSON.parse(item.form_snapshot)
                 : item.form_snapshot;
+              
               if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
-                extractedName = snapshot.buyers[0]?.name;
+                customerName = snapshot.buyers[0]?.name;
+              } else if (snapshot?.clientName) {
+                customerName = snapshot.clientName;
               }
             } catch (e) {}
           }
+          customerName = customerName || item.client_name || 'N/A';
 
           return {
             ...item,
-            source_table: 'service_records',                  // ✅ tag
-            case_type: item.service_type || item.case_type || (item.deed_type ? `DEED - ${item.deed_type}` : 'Drafting & Map'),
-            reference_no: item.reference_no || item.ref_no || item.razorpay_payment_id || item.id,
-            customer_name: extractedName || item.client_name || 'N/A',
-            amount: resolvedAmount,                           // ✅ fixed
+            source_table: 'service_records',
+            case_type: caseType,
+            reference_no: refNo,
+            ref_no: refNo,
+            customer_name: customerName,
+            client_name: item.client_name,
+            amount: gatewayAmount,
+            resolved_amount: gatewayAmount,
             user_payment: Number(item.user_payment || 0),
             user_service_fee: Number(item.user_service_fee || 0),
-            gateway_fee: Number(item.gateway_fee || 0),
+            gateway_fee: gatewayAmount,
             fee_standard: Number(item.fee_standard || 0),
             created_at: item.created_at,
-            payment_status: item.payment_status || 'paid'
+            payment_status: item.payment_status || 'paid',
+            razorpay_payment_id: item.razorpay_payment_id || 'N/A',
           };
         })
       ].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
@@ -405,7 +458,7 @@ export default function AdminDashboardPage(props: {
         `"${tx.customer_name || 'N/A'}"`,
         `"${tx.case_type || 'N/A'}"`,
         tx.created_at ? new Date(tx.created_at).toLocaleString() : 'N/A',
-        resolveAmount(tx),                                    // ✅ fixed
+        resolveAmount(tx),
         tx.payment_status || 'paid'
       ].join(",");
       csvContent += row + "\r\n";
@@ -1380,7 +1433,7 @@ export default function AdminDashboardPage(props: {
                         const caseType = `"${(est.case_type || est.estimate_type || 'N/A').replace(/"/g, '""')}"`;
                         const paymentModeVal = est.razorpay_payment_id || est.payment_id || est.payment_mode || 'WALLET DEDUCTION';
                         const paymentMode = `"${paymentModeVal.replace(/"/g, '""')}"`;
-                        const amount = resolveAmount(est);   // ✅ service-aware
+                        const amount = resolveAmount(est);
 
                         const row = [refNo, dateTime, customerName, caseType, paymentMode, amount].join(",");
                         csvContent += row + "\r\n";
@@ -1453,7 +1506,7 @@ export default function AdminDashboardPage(props: {
                               )}
                             </td>
                             <td className="p-3 text-right font-black text-emerald-600">
-                              ₹ {resolveAmount(est).toLocaleString('en-IN')}   {/* ✅ service-aware */}
+                              ₹ {resolveAmount(est).toLocaleString('en-IN')}
                             </td>
                           </tr>
                         ))}
@@ -1676,12 +1729,12 @@ export default function AdminDashboardPage(props: {
 
         {/* --- GATEWAY OPERATIONS WIDGET --- */}
         {isSectionVisible('GATEWAY_OPERATIONS') && (
-  <AdminRazorpayLiveWidget 
-    transactions={gatewayTxns}                                // ✅ MERGED data (estimates + service_records)
-    estimates={estimatesList}
-    serviceRecords={serviceRecordsList}
-  />
-)}
+          <AdminRazorpayLiveWidget 
+            transactions={gatewayTxns}
+            estimates={estimatesList}
+            serviceRecords={serviceRecordsList}
+          />
+        )}
 
       </div>
     </>

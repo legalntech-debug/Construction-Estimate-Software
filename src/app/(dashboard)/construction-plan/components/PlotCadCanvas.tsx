@@ -26,7 +26,7 @@ export default function PlotCadCanvas({
   return (
     <div
       ref={cadContainerRef}
-      className="col-span-9 w-full h-full bg-[#121212] relative overflow-hidden cursor-crosshair flex items-center justify-center select-none"
+      className="col-span-9 w-full h-full bg-white relative overflow-hidden cursor-crosshair flex items-center justify-center select-none"
       onWheel={(e) => {
         // Wheel event ko yahan rokne ke bajaye zoom handle karne dein
         const delta = e.deltaY < 0 ? 0.1 : -0.1;
@@ -54,7 +54,7 @@ export default function PlotCadCanvas({
             <path
               d={`M ${20 * (cadZoom || 1)} 0 L 0 0 0 ${20 * (cadZoom || 1)}`}
               fill="none"
-              stroke="#222222"
+              stroke="#e0e0e0"
               strokeWidth="0.5"
             />
           </pattern>
@@ -69,7 +69,7 @@ export default function PlotCadCanvas({
             markerHeight="7"
             orient="auto-start-reverse"
           >
-            <path d="M 0 2 L 10 5 L 0 8 z" fill="#ffffff" />
+            <path d="M 0 2 L 10 5 L 0 8 z" fill="#000000" />
           </marker>
         </defs>
 

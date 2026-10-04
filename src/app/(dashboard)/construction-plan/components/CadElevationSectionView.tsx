@@ -1,6 +1,13 @@
 import React from "react";
 import { formatDim, renderTopWidthDim, renderHeightDim, renderEarthSymbol } from "./CadDimUtils";
 
+// 🎨 LIGHT THEME COLORS (White background + Black lines)
+const LINE_COLOR = "#000000";         // Primary line color (was #ffffff / #00aaff)
+const LABEL_BG = "#ffffff";           // Label background (was #000000)
+const LABEL_TEXT = "#000000";         // Label text (was #00aaff / #ffffff)
+const ACCENT_COLOR = "#1e40af";       // Accent (was #059669 green → dark blue)
+const WARN_COLOR = "#dc2626";         // Warning (was #2563eb)
+
 interface CadElevationSectionViewProps {
   elevationStartX: number;
   sectionStartX: number;
@@ -109,22 +116,15 @@ export default function CadElevationSectionView({
 
   const BALCONY_H = 1.2 * 3.28084 * scale;
 
-  // Section line position (plan-local ft)
   const planWidthFt = baseBuiltUpWidth / scale;
   const sectionX_plan = planWidthFt - sectionLineX;
 
-  // ============================================================
-  // Helper: rooms list from floorRooms
-  // ============================================================
   const getFloorRoomsList = (floorName: string): any[] => {
     const data = floorRooms?.[floorName] || {};
     if (Array.isArray(data)) return data;
     return Object.values(data);
   };
 
-  // ============================================================
-  // Compute floor top Y dynamically
-  // ============================================================
   const getFloorTopY = (floorIndex: number): number => {
     let y = 0;
     for (let i = 0; i < floorIndex; i++) {
@@ -140,7 +140,7 @@ export default function CadElevationSectionView({
   };
 
   // ============================================================
-  // DOOR symbol — SIMPLE RECTANGLE (no swing arc, no diagonal)
+  // DOOR symbol
   // ============================================================
   const renderSectionDoor = (
     x: number, y: number, w: number, h: number, keyStr: string
@@ -153,7 +153,7 @@ export default function CadElevationSectionView({
           width={w}
           height={h}
           fill="none"
-          stroke="#ffffff"
+          stroke={LINE_COLOR}
           strokeWidth="0.8"
           vectorEffect="non-scaling-stroke"
         />
@@ -162,7 +162,7 @@ export default function CadElevationSectionView({
           y1={y + h / 2}
           x2={x + w}
           y2={y + h / 2}
-          stroke="#ffffff"
+          stroke={LINE_COLOR}
           strokeWidth="0.4"
           vectorEffect="non-scaling-stroke"
         />
@@ -171,7 +171,7 @@ export default function CadElevationSectionView({
   };
 
   // ============================================================
-  // WINDOW symbol — B&W architectural style
+  // WINDOW symbol
   // ============================================================
   const renderSectionWindow = (
     x: number, y: number, w: number, h: number, keyStr: string
@@ -184,19 +184,19 @@ export default function CadElevationSectionView({
           width={w}
           height={h}
           fill="none"
-          stroke="#ffffff"
+          stroke={LINE_COLOR}
           strokeWidth="0.6"
           vectorEffect="non-scaling-stroke"
         />
-        <line x1={x + w * 0.25} y1={y} x2={x + w * 0.25} y2={y + h} stroke="#ffffff" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-        <line x1={x + w * 0.75} y1={y} x2={x + w * 0.75} y2={y + h} stroke="#ffffff" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
-        <line x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke="#ffffff" strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+        <line x1={x + w * 0.25} y1={y} x2={x + w * 0.25} y2={y + h} stroke={LINE_COLOR} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+        <line x1={x + w * 0.75} y1={y} x2={x + w * 0.75} y2={y + h} stroke={LINE_COLOR} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
+        <line x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke={LINE_COLOR} strokeWidth="0.4" vectorEffect="non-scaling-stroke" />
       </g>
     );
   };
 
   // ============================================================
-  // STAIRCASE symbol — B&W zigzag from actual spec
+  // STAIRCASE symbol
   // ============================================================
   const renderSectionStaircase = (
     x: number, y: number, w: number, h: number, spec: any, keyStr: string
@@ -217,7 +217,7 @@ export default function CadElevationSectionView({
           key={`step-${i}`}
           d={`M ${sx} ${sy + stepH} L ${sx} ${sy} L ${sx + stepW} ${sy}`}
           fill="none"
-          stroke="#ffffff"
+          stroke={LINE_COLOR}
           strokeWidth="0.5"
           vectorEffect="non-scaling-stroke"
         />
@@ -226,12 +226,12 @@ export default function CadElevationSectionView({
 
     return (
       <g key={keyStr}>
-        <rect x={x} y={y} width={w} height={h} fill="none" stroke="#ffffff" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+        <rect x={x} y={y} width={w} height={h} fill="none" stroke={LINE_COLOR} strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
         {stepPaths}
-        <line x1={x + w / 2} y1={y + h - 3} x2={x + w / 2} y2={y + 3} stroke="#ffffff" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
-        <polygon points={`${x + w / 2},${y + 2} ${x + w / 2 - 1.5},${y + 5} ${x + w / 2 + 1.5},${y + 5}`} fill="#ffffff" />
+        <line x1={x + w / 2} y1={y + h - 3} x2={x + w / 2} y2={y + 3} stroke={LINE_COLOR} strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+        <polygon points={`${x + w / 2},${y + 2} ${x + w / 2 - 1.5},${y + 5} ${x + w / 2 + 1.5},${y + 5}`} fill={LINE_COLOR} />
         {riserCount && h > 40 && (
-          <text x={x + w / 2} y={y + h / 2} fill="#ffffff" fontSize="3.5" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+          <text x={x + w / 2} y={y + h / 2} fill={LINE_COLOR} fontSize="3.5" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
             {riserCount} R @ {riserInches.toFixed(1)}"
           </text>
         )}
@@ -240,13 +240,12 @@ export default function CadElevationSectionView({
   };
 
   // ============================================================
-  // SECTION ROOMS — B&W, actual data
+  // SECTION ROOMS
   // ============================================================
   const renderSectionRoomsForFloor = (floorName: string, floorTopY: number, floorHeightPx: number): React.ReactNode => {
     const rooms = getFloorRoomsList(floorName);
     if (!rooms.length) return null;
 
-    // Filter rooms whose X-range covers section line
     const intersectingRooms = rooms.filter((r: any) => {
       const rx = Number(r.x ?? 0);
       const rw = Number(r.w ?? 0);
@@ -255,7 +254,6 @@ export default function CadElevationSectionView({
 
     if (!intersectingRooms.length) return null;
 
-    // Sort by plan-Y (depth direction)
     const sorted = [...intersectingRooms].sort((a, b) => Number(a.y || 0) - Number(b.y || 0));
 
     return (
@@ -267,7 +265,6 @@ export default function CadElevationSectionView({
           const roomName = String(r.name || 'ROOM').toUpperCase();
           const isStair = roomName.includes('STAIR') || r.type === 'stairs';
 
-          // Room's plan-Y range → section X position
           const sectionX = elevationStartX + ry * scale;
           const sectionW = rh * scale;
           const sectionY = floorTopY;
@@ -279,19 +276,17 @@ export default function CadElevationSectionView({
 
           return (
             <g key={`section-room-${floorName}-${idx}`}>
-              {/* Room outline — B&W */}
               <rect
                 x={sectionX}
                 y={sectionY}
                 width={sectionW}
                 height={sectionH}
                 fill="none"
-                stroke="#ffffff"
+                stroke={LINE_COLOR}
                 strokeWidth="0.6"
                 vectorEffect="non-scaling-stroke"
               />
 
-              {/* Staircase inside stair room */}
               {isStair && stairSpec && sectionW > 10 && (
                 renderSectionStaircase(
                   sectionX + 2,
@@ -303,7 +298,6 @@ export default function CadElevationSectionView({
                 )
               )}
 
-              {/* DOORS — actual data, clamped to room bounds */}
               {roomDoors.map((d: any, dIdx: number) => {
                 const dw = Math.max(1, Number(d.widthFeet || 3) * scale);
                 const off = Math.max(0, Number(d.offsetFeet || 0) * scale);
@@ -311,7 +305,6 @@ export default function CadElevationSectionView({
                 const doorH = Math.min(doorHeightFt * scale, sectionH);
 
                 if (d.wall === 'TOP' || d.wall === 'BOTTOM') {
-                  // Clamp door X within room
                   const maxX = Math.max(0, sectionW - dw);
                   const clampedOff = Math.min(off, maxX);
                   const doorX = sectionX + clampedOff;
@@ -320,7 +313,6 @@ export default function CadElevationSectionView({
                 }
 
                 if (d.wall === 'LEFT' || d.wall === 'RIGHT') {
-                  // Clamp door Y within room
                   const maxY = Math.max(0, sectionH - doorH);
                   const clampedOff = Math.min(off, maxY);
                   const doorY = sectionY + clampedOff;
@@ -331,7 +323,6 @@ export default function CadElevationSectionView({
                 return null;
               })}
 
-              {/* WINDOWS — actual data, clamped to room bounds */}
               {roomWindows.map((w: any, wIdx: number) => {
                 const ww = Math.max(1, Number(w.lengthFeet || 3) * scale);
                 const off = Math.max(0, Number(w.offsetFeet || 0) * scale);
@@ -357,12 +348,11 @@ export default function CadElevationSectionView({
                 return null;
               })}
 
-              {/* Room label — B&W */}
               {sectionW > 15 && (
                 <text
                   x={sectionX + sectionW / 2}
                   y={sectionY + sectionH / 2 - 5}
-                  fill="#ffffff"
+                  fill={LINE_COLOR}
                   fontSize="4"
                   fontWeight="normal"
                   textAnchor="middle"
@@ -372,12 +362,11 @@ export default function CadElevationSectionView({
                 </text>
               )}
 
-              {/* Room dims — actual */}
               {sectionW > 25 && (
                 <text
                   x={sectionX + sectionW / 2}
                   y={sectionY + sectionH / 2 + 4}
-                  fill="#ffffff"
+                  fill={LINE_COLOR}
                   fontSize="3.5"
                   textAnchor="middle"
                   dominantBaseline="middle"
@@ -400,7 +389,7 @@ export default function CadElevationSectionView({
       <g className="elevation-view">
         {renderTopWidthDim(elevationStartX, baseBuiltUpWidth, -elevationHeight, formatDim(baseBuiltUpWidth, scale, measurementUnit), scale)}
 
-        <rect x={elevationStartX} y={-elevationHeight} width={baseBuiltUpWidth} height={elevationHeight} stroke="#00aaff" strokeWidth="0.6" fill="none" />
+        <rect x={elevationStartX} y={-elevationHeight} width={baseBuiltUpWidth} height={elevationHeight} stroke={LINE_COLOR} strokeWidth="0.6" fill="none" />
 
         {renderBuildingStructure(elevationStartX, baseBuiltUpWidth, widthColumnCount, false, true)}
 
@@ -428,8 +417,8 @@ export default function CadElevationSectionView({
             <g key={`elev-features-${index}`}>
               {!isGround && hasBalcony && (
                 <g transform={`translate(${elevationStartX}, ${floorTopY})`}>
-                  <rect x={WALL_THICKNESS} y={FLOOR_H - BALCONY_H} width={baseBuiltUpWidth - (2 * WALL_THICKNESS)} height={BALCONY_H} fill="none" stroke="#059669" strokeWidth="0.8" />
-                  <text x={baseBuiltUpWidth / 2} y={FLOOR_H - BALCONY_H / 2} fill="#059669" fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
+                  <rect x={WALL_THICKNESS} y={FLOOR_H - BALCONY_H} width={baseBuiltUpWidth - (2 * WALL_THICKNESS)} height={BALCONY_H} fill="none" stroke={ACCENT_COLOR} strokeWidth="0.8" />
+                  <text x={baseBuiltUpWidth / 2} y={FLOOR_H - BALCONY_H / 2} fill={ACCENT_COLOR} fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
                     BALCONY (1.2M HEIGHT)
                   </text>
                 </g>
@@ -437,8 +426,8 @@ export default function CadElevationSectionView({
 
               {isGround && (
                 <g>
-                  <rect x={gateXOffset - gateW / 2} y={-gateH} width={gateW} height={gateH} fill="none" stroke="#2563eb" strokeWidth="1" strokeDasharray="3 2" />
-                  <text x={gateXOffset} y={-gateH / 2} fill="#2563eb" fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
+                  <rect x={gateXOffset - gateW / 2} y={-gateH} width={gateW} height={gateH} fill="none" stroke={ACCENT_COLOR} strokeWidth="1" strokeDasharray="3 2" />
+                  <text x={gateXOffset} y={-gateH / 2} fill={ACCENT_COLOR} fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
                     GATE ({(gateW / scale).toFixed(1)}&apos;×{(gateH / scale).toFixed(1)}&apos;)
                   </text>
                   <g transform={`translate(${gateXOffset}, 0)`}>
@@ -447,10 +436,10 @@ export default function CadElevationSectionView({
                       const stepH = PLINTH_H / stairTreadCount;
                       const stepY = (stepIdx + 1) * stepH;
                       return (
-                        <rect key={stepIdx} x={-stepW / 2} y={stepY - stepH} width={stepW} height={stepH} fill="#cbd5e1" stroke="#0f172a" strokeWidth="0.4" />
+                        <rect key={stepIdx} x={-stepW / 2} y={stepY - stepH} width={stepW} height={stepH} fill="#e5e7eb" stroke={LINE_COLOR} strokeWidth="0.4" />
                       );
                     })}
-                    <text x="0" y={PLINTH_H + 6} fill="#0f172a" fontSize="4" fontWeight="700" textAnchor="middle">
+                    <text x="0" y={PLINTH_H + 6} fill={LINE_COLOR} fontSize="4" fontWeight="700" textAnchor="middle">
                       STAIRS (RISE 6&quot;, TREAD 1&apos;)
                     </text>
                   </g>
@@ -460,46 +449,45 @@ export default function CadElevationSectionView({
           );
         })}
 
-        <line x1={elevationStartX - PLINTH_OFFSET - 25} y1={0} x2={elevationStartX + baseBuiltUpWidth + PLINTH_OFFSET + 25} y2={0} stroke="#00aaff" strokeWidth="0.6" strokeDasharray="4" />
-        <text x={elevationStartX + baseBuiltUpWidth / 2 + 110} y={2} fill="#00aaff" fontSize="7.5" fontWeight="bold" textAnchor="middle">PLINTH LEVEL</text>
+        <line x1={elevationStartX - PLINTH_OFFSET - 25} y1={0} x2={elevationStartX + baseBuiltUpWidth + PLINTH_OFFSET + 25} y2={0} stroke={LINE_COLOR} strokeWidth="0.6" strokeDasharray="4" />
+        <text x={elevationStartX + baseBuiltUpWidth / 2 + 110} y={2} fill={LINE_COLOR} fontSize="7.5" fontWeight="bold" textAnchor="middle">PLINTH LEVEL</text>
 
-        <line x1={elevationStartX - 25} y1={PLINTH_H} x2={elevationStartX + baseBuiltUpWidth + 25} y2={PLINTH_H} stroke="#00aaff" strokeWidth="0.6" />
+        <line x1={elevationStartX - 25} y1={PLINTH_H} x2={elevationStartX + baseBuiltUpWidth + 25} y2={PLINTH_H} stroke={LINE_COLOR} strokeWidth="0.6" />
         {renderEarthSymbol(elevationStartX - 25, elevationStartX, PLINTH_H, scale)}
         {renderEarthSymbol(elevationStartX + baseBuiltUpWidth, elevationStartX + baseBuiltUpWidth + 25, PLINTH_H, scale)}
 
-        <text x={elevationStartX + baseBuiltUpWidth / 2 + 130} y={PLINTH_H + 4} fill="#00aaff" fontSize="7.5" fontWeight="bold" textAnchor="middle">GROUND LEVEL</text>
+        <text x={elevationStartX + baseBuiltUpWidth / 2 + 130} y={PLINTH_H + 4} fill={LINE_COLOR} fontSize="7.5" fontWeight="bold" textAnchor="middle">GROUND LEVEL</text>
 
         {hasBasement && (
           <g>
-            <rect x={elevationStartX} y={PLINTH_H} width={baseBuiltUpWidth} height={BASEMENT_H} stroke="#00aaff" strokeWidth="0.5" fill="none" />
-            {renderHeightDim(elevationStartX, PLINTH_H, PLINTH_H + BASEMENT_H, formatDim(BASEMENT_H, scale, measurementUnit), 'left', '#00aaff', scale)}
-            <line x1={elevationStartX + WALL_THICKNESS} y1={PLINTH_H + BASEMENT_H - (3 * scale)} x2={elevationStartX + baseBuiltUpWidth - WALL_THICKNESS} y2={PLINTH_H + BASEMENT_H - (3 * scale)} stroke="#00aaff" strokeWidth="0.4" strokeDasharray="2" />
-            <line x1={elevationStartX + baseBuiltUpWidth} y1={PLINTH_H + BASEMENT_H / 2} x2={elevationStartX + baseBuiltUpWidth + 6 * scale} y2={PLINTH_H + BASEMENT_H / 2} stroke="#00aaff" strokeWidth="0.5" strokeDasharray="2" />
-            <rect x={elevationStartX + baseBuiltUpWidth + 6 * scale} y={PLINTH_H + BASEMENT_H / 2 - 7.5} width={95} height={15} fill="#000000" fillOpacity="0.92" stroke="#00aaff" strokeWidth="0.5" rx="2" />
-            <text x={elevationStartX + baseBuiltUpWidth + 10 * scale + 35} y={PLINTH_H + BASEMENT_H / 2} fill="#00aaff" fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+            <rect x={elevationStartX} y={PLINTH_H} width={baseBuiltUpWidth} height={BASEMENT_H} stroke={LINE_COLOR} strokeWidth="0.5" fill="none" />
+            {renderHeightDim(elevationStartX, PLINTH_H, PLINTH_H + BASEMENT_H, formatDim(BASEMENT_H, scale, measurementUnit), 'left', LINE_COLOR, scale)}
+            <line x1={elevationStartX + WALL_THICKNESS} y1={PLINTH_H + BASEMENT_H - (3 * scale)} x2={elevationStartX + baseBuiltUpWidth - WALL_THICKNESS} y2={PLINTH_H + BASEMENT_H - (3 * scale)} stroke={LINE_COLOR} strokeWidth="0.4" strokeDasharray="2" />
+            <line x1={elevationStartX + baseBuiltUpWidth} y1={PLINTH_H + BASEMENT_H / 2} x2={elevationStartX + baseBuiltUpWidth + 6 * scale} y2={PLINTH_H + BASEMENT_H / 2} stroke={LINE_COLOR} strokeWidth="0.5" strokeDasharray="2" />
+            <rect x={elevationStartX + baseBuiltUpWidth + 6 * scale} y={PLINTH_H + BASEMENT_H / 2 - 7.5} width={95} height={15} fill={LABEL_BG} stroke={LINE_COLOR} strokeWidth="0.5" rx="2" />
+            <text x={elevationStartX + baseBuiltUpWidth + 10 * scale + 35} y={PLINTH_H + BASEMENT_H / 2} fill={LABEL_TEXT} fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
               BASEMENT ({formatDim(BASEMENT_H, scale, measurementUnit)})
             </text>
           </g>
         )}
 
-        <text x={elevationStartX + baseBuiltUpWidth / 2} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill="#00aaff" fontSize="10" fontWeight="bold" textAnchor="middle">FRONT ELEVATION</text>
+        <text x={elevationStartX + baseBuiltUpWidth / 2} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill={LINE_COLOR} fontSize="10" fontWeight="bold" textAnchor="middle">FRONT ELEVATION</text>
       </g>
 
       {/* ============================================================ */}
-      {/* 2. SECTION VIEW — B&W, actual data                          */}
+      {/* 2. SECTION VIEW                                             */}
       {/* ============================================================ */}
       <g className="section-view" transform={`translate(${sectionStartX - elevationStartX}, 0)`}>
         {renderTopWidthDim(elevationStartX, baseBuiltUpHeight, -sectionHeight, formatDim(baseBuiltUpHeight, scale, measurementUnit), scale)}
 
-        <text x={elevationStartX + (baseBuiltUpHeight / 2)} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill="#00aaff" fontSize="10" fontWeight="bold" textAnchor="middle">
+        <text x={elevationStartX + (baseBuiltUpHeight / 2)} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill={LINE_COLOR} fontSize="10" fontWeight="bold" textAnchor="middle">
           SECTION VIEW (RIGHT SIDE FROM {sectionLineX} FT)
         </text>
 
-        <rect x={elevationStartX} y={-sectionHeight} width={baseBuiltUpHeight} height={sectionHeight} stroke="#00aaff" strokeWidth="0.5" fill="none" />
+        <rect x={elevationStartX} y={-sectionHeight} width={baseBuiltUpHeight} height={sectionHeight} stroke={LINE_COLOR} strokeWidth="0.5" fill="none" />
 
         {renderBuildingStructure(elevationStartX, baseBuiltUpHeight, depthColumnCount, true, false)}
 
-        {/* ACTUAL rooms in section */}
         {processedFloors.map((floor, floorIdx) => {
           const isTower = floor.toUpperCase().includes("TOWER");
           if (isTower) return null;
@@ -518,9 +506,9 @@ export default function CadElevationSectionView({
 
         {frontMos > 0 && (
           <g className="front-boundary-wall">
-            <rect x={elevationStartX - frontMosPx} y={PLINTH_H - bwHeight} width={bwThickness} height={bwHeight} fill="url(#wallHatch)" stroke="#00aaff" strokeWidth="0.5" />
-            {renderHeightDim(elevationStartX - frontMosPx, PLINTH_H - bwHeight, PLINTH_H, formatDim(bwHeight, scale, measurementUnit), 'left', '#00aaff', scale)}
-            <text x={elevationStartX - frontMosPx + 2} y={PLINTH_H - bwHeight - 3} fill="#00aaff" fontSize="5.5" fontWeight="bold">
+            <rect x={elevationStartX - frontMosPx} y={PLINTH_H - bwHeight} width={bwThickness} height={bwHeight} fill="url(#wallHatch)" stroke={LINE_COLOR} strokeWidth="0.5" />
+            {renderHeightDim(elevationStartX - frontMosPx, PLINTH_H - bwHeight, PLINTH_H, formatDim(bwHeight, scale, measurementUnit), 'left', LINE_COLOR, scale)}
+            <text x={elevationStartX - frontMosPx + 2} y={PLINTH_H - bwHeight - 3} fill={LINE_COLOR} fontSize="5.5" fontWeight="bold">
               FRONT BOUNDARY WALL ({formatDim(bwHeight, scale, measurementUnit)})
             </text>
           </g>
@@ -528,24 +516,24 @@ export default function CadElevationSectionView({
 
         {backMos > 0 && (
           <g className="back-boundary-wall">
-            <rect x={elevationStartX + baseBuiltUpHeight + backMosPx - bwThickness} y={PLINTH_H - bwHeight} width={bwThickness} height={bwHeight} fill="url(#wallHatch)" stroke="#00aaff" strokeWidth="0.5" />
-            {renderHeightDim(elevationStartX + baseBuiltUpHeight + backMosPx, PLINTH_H - bwHeight, PLINTH_H, formatDim(bwHeight, scale, measurementUnit), 'right', '#00aaff', scale)}
-            <text x={elevationStartX + baseBuiltUpHeight + backMosPx - bwThickness - 30} y={PLINTH_H - bwHeight - 3} fill="#00aaff" fontSize="5.5" fontWeight="bold">
+            <rect x={elevationStartX + baseBuiltUpHeight + backMosPx - bwThickness} y={PLINTH_H - bwHeight} width={bwThickness} height={bwHeight} fill="url(#wallHatch)" stroke={LINE_COLOR} strokeWidth="0.5" />
+            {renderHeightDim(elevationStartX + baseBuiltUpHeight + backMosPx, PLINTH_H - bwHeight, PLINTH_H, formatDim(bwHeight, scale, measurementUnit), 'right', LINE_COLOR, scale)}
+            <text x={elevationStartX + baseBuiltUpHeight + backMosPx - bwThickness - 30} y={PLINTH_H - bwHeight - 3} fill={LINE_COLOR} fontSize="5.5" fontWeight="bold">
               REAR BOUNDARY WALL ({formatDim(bwHeight, scale, measurementUnit)})
             </text>
           </g>
         )}
 
-        <line x1={elevationStartX} y1={0} x2={elevationStartX + baseBuiltUpHeight} y2={0} stroke="#00aaff" strokeWidth="0.6" strokeDasharray="4" />
+        <line x1={elevationStartX} y1={0} x2={elevationStartX + baseBuiltUpHeight} y2={0} stroke={LINE_COLOR} strokeWidth="0.6" strokeDasharray="4" />
 
-        <line x1={sectionGroundStartX - 15} y1={PLINTH_H} x2={sectionGroundEndX + 15} y2={PLINTH_H} stroke="#00aaff" strokeWidth="0.6" />
+        <line x1={sectionGroundStartX - 15} y1={PLINTH_H} x2={sectionGroundEndX + 15} y2={PLINTH_H} stroke={LINE_COLOR} strokeWidth="0.6" />
         {renderEarthSymbol(sectionGroundStartX - 15, sectionGroundStartX, PLINTH_H, scale)}
         {renderEarthSymbol(sectionGroundEndX, sectionGroundEndX + 15, PLINTH_H, scale)}
 
         {hasBasement && (
           <g>
-            <rect x={elevationStartX} y={PLINTH_H} width={baseBuiltUpHeight} height={BASEMENT_H} stroke="#00aaff" strokeWidth="0.5" fill="none" />
-            <line x1={elevationStartX + WALL_THICKNESS} y1={PLINTH_H + BASEMENT_H - (3 * scale)} x2={elevationStartX + baseBuiltUpHeight - WALL_THICKNESS} y2={PLINTH_H + BASEMENT_H - (3 * scale)} stroke="#00aaff" strokeWidth="0.4" strokeDasharray="2" />
+            <rect x={elevationStartX} y={PLINTH_H} width={baseBuiltUpHeight} height={BASEMENT_H} stroke={LINE_COLOR} strokeWidth="0.5" fill="none" />
+            <line x1={elevationStartX + WALL_THICKNESS} y1={PLINTH_H + BASEMENT_H - (3 * scale)} x2={elevationStartX + baseBuiltUpHeight - WALL_THICKNESS} y2={PLINTH_H + BASEMENT_H - (3 * scale)} stroke={LINE_COLOR} strokeWidth="0.4" strokeDasharray="2" />
           </g>
         )}
       </g>

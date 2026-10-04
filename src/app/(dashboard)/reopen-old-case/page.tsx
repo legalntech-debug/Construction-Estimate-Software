@@ -5,6 +5,9 @@ import { supabase } from "@/lib/supabase";
 import { FolderOpen, History, RotateCcw, Search } from "lucide-react";
 import HistoryModal from "../../components/HistoryModal";
 
+// ✅ NEW: Construction Plan reopen handler (separate utility)
+import { handleConstructionPlanReopen } from "./components/handleConstructionPlanReopen";
+
 export default function ReopenOldCase() {
   const [cases, setCases] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -61,16 +64,15 @@ export default function ReopenOldCase() {
         if (!srvError) serviceData = srv || [];
       }
 
-      // Normalize service_records (deed drafts)
+      // Normalize service_records (deed drafts + construction plans)
       const normalizedServiceData = serviceData.map((item) => {
-        // Buyer का नाम निकालने के लिए form_snapshot चेक करें
         const buyerName = item.form_snapshot?.buyers?.[0]?.name || item.customer_name || "Valued Client";
         return {
           id: item.id,
           ref_no: item.ref_no,
           created_date: item.created_at || item.created_date,
-          customer_name: buyerName, // 👈 यहाँ Buyer का नाम दिखेगा
-          client_name: item.client_name, // 👈 यहाँ बैंक/क्लाइंट का नाम दिखेगा (जैसे ICICI HFC)
+          customer_name: buyerName,
+          client_name: item.client_name,
           representative: item.representative,
           case_type: item.case_type || "DEED_DRAFT",
           fee: item.user_payment || item.fee_standard || 0,
@@ -78,7 +80,21 @@ export default function ReopenOldCase() {
           plot_area: item.plot_area,
           property_type: item.property_type,
           form_snapshot: item.form_snapshot,
-          isDeedDraft: true
+          isDeedDraft: true,
+          // ✅ Extra fields for construction plan reopen
+          state_name: item.state_name,
+          city_district: item.city_district,
+          deed_type: item.deed_type,
+          output_language: item.output_language,
+          boundary_north: item.boundary_north,
+          boundary_south: item.boundary_south,
+          boundary_east: item.boundary_east,
+          boundary_west: item.boundary_west,
+          road_side: item.road_side,
+          floor_details: item.floor_details,
+          fee_mode: item.fee_mode,
+          gateway_fee: item.gateway_fee,
+          user_payment: item.user_payment,
         };
       });
 
@@ -94,13 +110,26 @@ export default function ReopenOldCase() {
   }, []);
 
   const handleReopen = (record: any) => {
-    // 1. Deed Draft Reopen Logic
-    if (record.isDeedDraft || (record.case_type || "").toUpperCase().includes("DEED")) {
+    const caseTypeUpper = (record.case_type || "").toUpperCase();
+
+    // ============================================================
+    // ✅ NEW: CONSTRUCTION_PLAN — delegate to separate utility
+    // ============================================================
+    if (
+      caseTypeUpper.includes("CONSTRUCTION_PLAN") ||
+      caseTypeUpper === "CONSTRUCTION PLAN"
+    ) {
+      handleConstructionPlanReopen({ record, router });
+      return;
+    }
+
+    // ============================================================
+    // 1. Deed Draft Reopen Logic (UNTOUCHED)
+    // ============================================================
+    if (record.isDeedDraft || caseTypeUpper.includes("DEED")) {
       if (record.form_snapshot) {
-        // फॉर्म स्नैपशॉट को सीधे लोकल स्टोरेज में सेट करें ताकि इनपुट फील्ड्स भर जाएँ
         localStorage.setItem("deedDraftData", JSON.stringify(record.form_snapshot));
       } else {
-        // यदि स्नैपशॉट नहीं है, तो बेसिक रिकॉर्ड डेटा से स्ट्रक्चर बनाकर भेजें
         const fallbackData = {
           refNo: record.ref_no,
           clientName: record.client_name,
@@ -118,7 +147,9 @@ export default function ReopenOldCase() {
       return;
     }
 
-    // 2. Existing Estimate Reopen Logic
+    // ============================================================
+    // 2. Existing Estimate Reopen Logic (UNTOUCHED)
+    // ============================================================
     const isPaidAlready = (record.status || "").toUpperCase() === "RECEIVED";
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const validId = uuidRegex.test(record.id) ? record.id : null;
@@ -133,7 +164,7 @@ export default function ReopenOldCase() {
       total_value: record.fee,
       property_address: record.property_address || "",
       plot_area: record.plot_area || "",
-      property_type: record.property_type || "HOUSE", 
+      property_type: record.property_type || "HOUSE",
       floor_details: typeof record.floor_details === 'string' ? JSON.parse(record.floor_details || '{}') : record.floor_details,
       rate_per_sqft: record.rate_per_sqft,
       isAlreadyPaid: isPaidAlready,
@@ -172,7 +203,7 @@ export default function ReopenOldCase() {
       dateStr.includes(query)
     );
   });
-  
+
   return (
     <div className="p-4 md:p-6 bg-slate-50 min-h-screen pb-24">
       {/* Header */}
@@ -197,7 +228,7 @@ export default function ReopenOldCase() {
           className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-sm focus:outline-none focus:border-blue-900 transition-all"
         />
         {searchQuery && (
-          <button 
+          <button
             onClick={() => setSearchQuery("")}
             className="absolute inset-y-0 right-0 pr-3 flex items-center text-[10px] font-bold text-slate-400 hover:text-slate-600"
           >
@@ -205,7 +236,7 @@ export default function ReopenOldCase() {
           </button>
         )}
       </div>
-      
+
       {/* MOBILE VIEW (CARDS) */}
       <div className="block md:hidden space-y-3">
         {filteredCases.length === 0 ? (
@@ -290,22 +321,22 @@ export default function ReopenOldCase() {
                   <td className="p-4 text-center">{row.client_name || "N/A"}</td>
                   <td className="p-4 text-center">{row.representative || "N/A"}</td>
                   <td className="p-4 text-center">{row.case_type}</td>
-                  
+
                   <td className="p-2 text-center relative">
-                    <button 
+                    <button
                       onClick={() => setActiveMenuId(activeMenuId === row.id ? null : row.id)}
                       className="bg-blue-950 text-white px-4 py-1.5 rounded-full text-[9px] font-bold uppercase hover:bg-slate-800 transition-all flex items-center gap-1 mx-auto"
                     >
                       Action ▼
                     </button>
-                    
+
                     {activeMenuId === row.id && (
                       <div className="absolute right-0 mt-2 w-36 bg-white border border-slate-200 shadow-2xl rounded-lg z-[9999] overflow-hidden">
                         <button onClick={() => handleReopen(row)} className="flex items-center gap-2 w-full px-4 py-2 hover:bg-slate-50 text-left text-[10px] font-bold text-slate-700 border-b">
                           <RotateCcw size={12} /> REOPEN CASE
                         </button>
-                        <button 
-                          onClick={() => { setShowHistory(row.ref_no); setActiveMenuId(null); }} 
+                        <button
+                          onClick={() => { setShowHistory(row.ref_no); setActiveMenuId(null); }}
                           className="flex items-center gap-2 w-full px-4 py-2 hover:bg-slate-50 text-left text-[10px] font-bold text-slate-700"
                         >
                           <History size={12} /> HISTORY

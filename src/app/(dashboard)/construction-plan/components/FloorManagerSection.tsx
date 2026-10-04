@@ -283,17 +283,24 @@ export function getAutoRoomsForFloor(
 
   console.log(`[getAutoRoomsForFloor] floor=${floorName}, W=${W}, L=${L}, isGround=${isGround}`);
 
+  // ✅ Area rule: walls ke 4" (0.67 ft) wapas jodkar gross plot area (15x40 = 600 exact)
+  const ruleArea = Math.round((W + 0.67) * (L + 0.67));
+  const ruleWidth = W + 0.67;
+
   if (isGround) {
     const rooms: string[] = [];
     rooms.push("parking");
-    rooms.push("kitchen");
+    // 1000+ sq.ft: Kitchen cum Dining, warna Kitchen
+    rooms.push(ruleArea > 1000 ? "kitchen_cum_dining" : "kitchen");
     rooms.push("living_room_with_stair");
     rooms.push("common_bathroom");
 
-    if (W <= 14) {
-      rooms.push("master_bedroom");
-      rooms.push("attached_bathroom");
+    if (ruleArea <= 600) {
+      // 380 - 600 sq.ft: Parking, Kitchen, Living + Stair, Common Toilet, sirf BEDROOM (attached toilet nahi)
+      rooms.push("bedroom");
     } else {
+      // 600 - 1000: MASTER BEDROOM + bada attached toilet
+      // 1000 - 1500: 1 bedroom (master) + attached toilet (+ mandatory duct catalog se)
       rooms.push("master_bedroom", "attached_bathroom");
     }
 
@@ -302,7 +309,13 @@ export function getAutoRoomsForFloor(
 
      const rooms: string[] = [];
 
-  if (W >= 12) {
+  if (ruleWidth > 23) {
+    // 23 ft se zyada chaudi: 4 master bedroom, har ek ke saath attached toilet (front row 2 + rear row 2)
+    rooms.push("master_bedroom", "attached_bathroom", "master_bedroom", "attached_bathroom");
+    rooms.push("staircase");
+    rooms.push("master_bedroom", "attached_bathroom", "master_bedroom", "attached_bathroom");
+  } else if (W >= 12) {
+    // 23 ft ya kam: 2 master bedroom with attached toilet
     rooms.push("master_bedroom");
     rooms.push("attached_bathroom");
     rooms.push("staircase");
@@ -336,7 +349,7 @@ export const ROOM_CATALOG = [
   { key: "parking", label: "PARKING", defaultWidth: 9, defaultLength: 8, minWidth: 4, minLength: 7, defaultArea: 72, minArea: 28, category: "Ground" },
   { key: "parking_with_stair", label: "PARKING WITH STAIRCASE", defaultWidth: 6, defaultLength: 7, minWidth: 6, minLength: 7, defaultArea: 42, minArea: 42, category: "Ground" },
   { key: "staircase", label: "STAIRCASE", defaultWidth: 6.5, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 65, minArea: 48, category: "Core" },
-  { key: "living_room_with_stair", label: "LIVING ROOM + STAIR (U-SHAPE)", defaultWidth: 10, defaultLength: 16, minWidth: 10, minLength: 12, defaultArea: 160, minArea: 120, category: "Living" },
+  { key: "living_room_with_stair", label: "LIVING ROOM + STAIR (AUTO U/C SHAPE)", defaultWidth: 10, defaultLength: 16, minWidth: 10, minLength: 12, defaultArea: 160, minArea: 120, category: "Living" },
   { key: "living_room", label: "LIVING ROOM / FAMILY LOUNGE", defaultWidth: 12, defaultLength: 10, minWidth: 10, minLength: 9, defaultArea: 120, minArea: 90, category: "Living" },
   { key: "hall", label: "MAIN HALL / PASSAGE (6' WIDE)", defaultWidth: 10, defaultLength: 10, minWidth: 6, minLength: 8, defaultArea: 100, minArea: 48, category: "Living" },
   { key: "kitchen", label: "KITCHEN (GROUND FLOOR)", defaultWidth: 6, defaultLength: 8, minWidth: 5, minLength: 5, defaultArea: 48, minArea: 25, category: "Kitchen" },
@@ -362,8 +375,8 @@ export const ROOM_CATALOG = [
 ];
 
 const MUTUALLY_EXCLUSIVE: Array<{ primary: string; blocked: string; note: string }> = [
-  { primary: "living_room_with_stair", blocked: "staircase", note: "STAIRCASE is already embedded inside LIVING ROOM + STAIR (U-SHAPE)." },
-  { primary: "living_room_with_stair", blocked: "living_room", note: "LIVING ROOM is already part of LIVING ROOM + STAIR (U-SHAPE)." },
+  { primary: "living_room_with_stair", blocked: "staircase", note: "STAIRCASE is already embedded inside LIVING ROOM + STAIR (AUTO U/C SHAPE)." },
+  { primary: "living_room_with_stair", blocked: "living_room", note: "LIVING ROOM is already part of LIVING ROOM + STAIR (AUTO U/C SHAPE)." },
   { primary: "living_room_with_stair", blocked: "parking_with_stair", note: "Only one staircase configuration is allowed per floor." },
   { primary: "parking_with_stair", blocked: "staircase", note: "STAIRCASE is already embedded inside PARKING WITH STAIRCASE." },
   { primary: "parking_with_stair", blocked: "living_room_with_stair", note: "Only one staircase configuration is allowed per floor." },
@@ -789,9 +802,10 @@ export default function FloorManagerSection({
       });
 
       const isGroundFloor = floor.toUpperCase().includes("GROUND");
-      const bedroomCount = (targetCounts["bedroom"] || 0) + (targetCounts["master_bedroom"] || 0);
+      // 4 master (2 columns x 2 rows) me stack me sirf 2 rows aati hain
+      const bedroomCount = Math.min(2, (targetCounts["bedroom"] || 0) + (targetCounts["master_bedroom"] || 0));
       const stackOrder = isGroundFloor
-        ? ["parking", "common_bathroom", "living_room_with_stair", "master_bedroom", "attached_bathroom"]
+        ? ["parking", "common_bathroom", "living_room_with_stair", targetCounts["master_bedroom"] ? "master_bedroom" : "bedroom", "attached_bathroom"]
         : (bedroomCount >= 2
             ? [
                 targetCounts["master_bedroom"] ? "master_bedroom" : "bedroom",

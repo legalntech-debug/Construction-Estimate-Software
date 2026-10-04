@@ -23,7 +23,7 @@ export const stateWisePricing: Record<string, ServicePrices> = {
   // 2. Maharashtra
   "MAHARASHTRA": {
     estimate: 500,
-    map: 700,
+    map: 1,
     drafting: 500,
     constructionCertificate: 500,
     completionCertificate: 1500,

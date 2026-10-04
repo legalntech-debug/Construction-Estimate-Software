@@ -98,7 +98,7 @@ export default function WalletLedgerPage() {
   const [filterCredit, setFilterCredit] = useState('');
 
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const channelRef = useRef<any>(null); // 🆕 Track active channel
+  const channelRef = useRef<any>(null);
 
   const supabaseClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -109,15 +109,6 @@ export default function WalletLedgerPage() {
     fetchInitialData();
   }, []);
 
-  /* ============================================================
-     🆕 REALTIME SUBSCRIPTION — FIXED
-     
-     Critical Fixes:
-     1. Dependency array mein `profile` object nahi, sirf `profile?.id`
-     2. Single `return` statement (duplicate cleanup removed)
-     3. Channel reference stored in ref to prevent stale closures
-     4. Debounce timer properly cleaned
-     ============================================================ */
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -132,7 +123,6 @@ export default function WalletLedgerPage() {
 
     if (!isAdminUser && !selectedUserId) return;
 
-    // Debounce setup
     let debounceTimer: NodeJS.Timeout | null = null;
 
     const debouncedFetch = () => {
@@ -146,7 +136,6 @@ export default function WalletLedgerPage() {
     const userFilter = isAdminUser ? undefined : `user_id=eq.${selectedUserId}`;
     const channelName = `ledger-realtime-${selectedUserId || 'admin'}`;
 
-    // 🆕 Cleanup previous channel if exists
     if (channelRef.current) {
       supabaseClient.removeChannel(channelRef.current);
       channelRef.current = null;
@@ -193,7 +182,6 @@ export default function WalletLedgerPage() {
 
     channelRef.current = channel;
 
-    // 🆕 SINGLE cleanup return (fixed duplicate return bug)
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       if (channelRef.current) {
@@ -386,28 +374,24 @@ export default function WalletLedgerPage() {
       endDate = `${selectedMonth}-31T23:59:59`;
     }
 
-    // 1. Fetch Wallet Transactions
     let walletQuery = supabaseClient.from('wallet_transactions').select('*').eq('user_id', selectedUserId);
     if (startDate && endDate) {
       walletQuery = walletQuery.gte('created_at', startDate).lte('created_at', endDate);
     }
     const { data: walletTx } = await walletQuery;
 
-    // 2. Fetch Wallet Recharges
     let rechargeQuery = supabaseClient.from('wallet_recharges').select('*').eq('user_id', selectedUserId).or('status.eq.APPROVED,status.eq.approved');
     if (startDate && endDate) {
       rechargeQuery = rechargeQuery.gte('created_at', startDate).lte('created_at', endDate);
     }
     const { data: rechargeTx } = await rechargeQuery;
 
-    // 3. Fetch Estimates / Plan Usage
     let estimateQuery = supabaseClient.from('estimates').select('*').eq('user_id', selectedUserId);
     if (startDate && endDate) {
       estimateQuery = estimateQuery.gte('created_at', startDate).lte('created_at', endDate);
     }
     const { data: estimateTx } = await estimateQuery;
 
-    // 4. Fetch Partner Payouts (safe — table exists)
     let partnerSettlements: any[] = [];
     let partnerTx: any[] = [];
 
@@ -436,7 +420,6 @@ export default function WalletLedgerPage() {
       console.warn('Partner payouts fetch skipped:', e);
     }
 
-    // 5. Fetch Service Records / Deed Drafting Data
     let serviceQuery = supabaseClient.from('service_records').select('*').eq('user_id', selectedUserId);
     if (startDate && endDate) {
       serviceQuery = serviceQuery.gte('created_at', startDate).lte('created_at', endDate);
@@ -445,7 +428,6 @@ export default function WalletLedgerPage() {
 
     let combinedTx: Transaction[] = [];
 
-    // Process wallet_transactions
     if (walletTx) {
       walletTx.forEach((w: any) => {
         combinedTx.push({
@@ -463,7 +445,6 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // Process wallet_recharges (approved only)
     if (rechargeTx) {
       rechargeTx.forEach((r: any) => {
         const statusUpper = (r.status || '').toUpperCase();
@@ -488,10 +469,8 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // Process estimates (DEBIT)
     if (estimateTx) {
       estimateTx.forEach((e: any) => {
-        // ✅ user_payment priority for estimates
         const fee = Number(
           e.user_payment ||
           e.fee_standard ||
@@ -500,7 +479,6 @@ export default function WalletLedgerPage() {
           0
         );
 
-        // Skip zero-amount entries
         if (fee <= 0) return;
 
         combinedTx.push({
@@ -518,7 +496,6 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // Process service_records (DEBIT) — ✅ gateway_fee priority
     if (serviceRecordsTx) {
       serviceRecordsTx.forEach((s: any) => {
         const fee = Number(
@@ -531,10 +508,8 @@ export default function WalletLedgerPage() {
           0
         );
 
-        // Skip zero-amount entries
         if (fee <= 0) return;
 
-        // Extract buyer name from form_snapshot if needed
         let resolvedCustomerName = s.customer_name;
         if (!resolvedCustomerName || resolvedCustomerName.trim() === '' || resolvedCustomerName === s.client_name) {
           try {
@@ -564,7 +539,6 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // Process partner settlements (CREDIT)
     if (partnerSettlements && partnerSettlements.length > 0) {
       partnerSettlements.forEach((ps: any) => {
         const exists = combinedTx.some(t => t.id === ps.id || (ps.utr_no && t.ref_no === ps.utr_no));
@@ -585,7 +559,6 @@ export default function WalletLedgerPage() {
       });
     }
 
-    // Process partner ledger adjustments (CREDIT/DEBIT)
     if (partnerTx && partnerTx.length > 0) {
       partnerTx.forEach((pt: any) => {
         const exists = combinedTx.some(t => t.id === pt.id || (pt.ref_no && t.ref_no === pt.ref_no));
@@ -769,7 +742,7 @@ export default function WalletLedgerPage() {
   if (!isAuthenticated) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center p-4 font-sans bg-slate-50">
-        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md w-full border border-slate-200 text-center">
+        <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl max-w-md w-full border border-slate-200 text-center">
           <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 ${isLockedOut ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-900'}`}>
             {isLockedOut ? <AlertTriangle size={24} /> : <Lock size={24} />}
           </div>
@@ -826,7 +799,7 @@ export default function WalletLedgerPage() {
   }
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto bg-slate-50 min-h-screen text-black font-sans relative select-none" style={{ WebkitUserSelect: 'none' }}>
+    <div className="p-3 sm:p-6 lg:p-8 max-w-[1400px] mx-auto bg-slate-50 min-h-screen text-black font-sans relative select-none" style={{ WebkitUserSelect: 'none' }}>
       
       <style jsx global>{`
         @media print {
@@ -887,28 +860,30 @@ export default function WalletLedgerPage() {
         }
       `}</style>
 
-      {/* Header & Controls */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 gap-4 bg-white p-6 rounded-xl shadow-sm border border-slate-200 print:hidden">
+      {/* Header & Controls — 🔥 MOBILE FIXED */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 sm:mb-6 gap-3 sm:gap-4 bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 print:hidden">
         <div>
-          <h1 className="text-2xl font-black text-slate-900 tracking-wide uppercase">Wallet & Account Ledger</h1>
-          <p className="text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, partner adjustments, and platform usage logs with real-time live sync.</p>
+          <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-wide uppercase">Wallet & Account Ledger</h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-1">Complete digital transaction statement combining secure gateway approvals, recharges, partner adjustments, and platform usage logs with real-time live sync.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full lg:w-auto">
           
-          <div className="relative">
+          <div className="relative w-full sm:w-auto">
             <div 
               onClick={() => setShowDateDropdown(!showDateDropdown)}
-              className="flex items-center gap-2 bg-slate-100 px-3 py-2 rounded-lg border border-slate-300 cursor-pointer hover:bg-slate-200 transition"
+              className="flex items-center justify-between gap-2 bg-slate-100 px-3 py-2 rounded-lg border border-slate-300 cursor-pointer hover:bg-slate-200 transition"
             >
-              <Calendar size={18} className="text-slate-600" />
-              <span className="text-sm font-semibold text-slate-800">
-                {fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All Months (All-Time)' : selectedMonth)}
-              </span>
-              <ChevronDown size={14} className="text-slate-500" />
+              <div className="flex items-center gap-2 min-w-0">
+                <Calendar size={16} className="text-slate-600 shrink-0" />
+                <span className="text-xs sm:text-sm font-semibold text-slate-800 truncate">
+                  {fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All Months' : selectedMonth)}
+                </span>
+              </div>
+              <ChevronDown size={14} className="text-slate-500 shrink-0" />
             </div>
 
             {showDateDropdown && (
-              <div className="absolute right-0 mt-2 bg-white border border-slate-300 shadow-xl rounded-xl p-4 z-50 w-72 space-y-3">
+              <div className="absolute right-0 mt-2 bg-white border border-slate-300 shadow-xl rounded-xl p-4 z-50 w-[calc(100vw-2rem)] sm:w-72 space-y-3">
                 <div className="flex justify-between items-center border-b pb-2">
                   <span className="text-xs font-bold uppercase text-slate-700">Filter By Date / Month</span>
                   <button onClick={() => setShowDateDropdown(false)} className="text-slate-400 hover:text-slate-600 font-bold text-xs">✕</button>
@@ -940,7 +915,7 @@ export default function WalletLedgerPage() {
                 <div className="border-t pt-2">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Custom Date Range</label>
                   <div className="flex gap-2">
-                    <div>
+                    <div className="flex-1">
                       <span className="text-[9px] text-slate-400 block">From</span>
                       <input 
                         type="date"
@@ -949,7 +924,7 @@ export default function WalletLedgerPage() {
                         className="w-full bg-slate-100 text-xs p-1.5 rounded border border-slate-300 outline-none cursor-pointer font-medium"
                       />
                     </div>
-                    <div>
+                    <div className="flex-1">
                       <span className="text-[9px] text-slate-400 block">To</span>
                       <input 
                         type="date"
@@ -973,7 +948,7 @@ export default function WalletLedgerPage() {
           </div>
 
           {!isAdmin && (
-            <div className="relative group">
+            <div className="relative group w-full sm:w-auto">
               <button 
                 onClick={() => {
                   if (isWalletNegative) {
@@ -982,32 +957,32 @@ export default function WalletLedgerPage() {
                     setShowOtpModal(true);
                   }
                 }}
-                className={`px-4 py-2 rounded-lg text-sm font-bold transition shadow whitespace-nowrap flex items-center gap-2 ${
+                className={`w-full sm:w-auto px-4 py-2 rounded-lg text-xs sm:text-sm font-bold transition shadow whitespace-nowrap flex items-center justify-center gap-2 ${
                   isWalletNegative 
                     ? 'bg-slate-300 text-slate-600 cursor-not-allowed' 
                     : 'bg-emerald-600 text-white hover:bg-emerald-700'
                 }`}
               >
-                {isWalletNegative && <Lock size={14} />} Request Unutilized Balance Refund
+                {isWalletNegative && <Lock size={14} />} Request Refund
               </button>
             </div>
           )}
 
           <button 
             onClick={() => window.print()}
-            className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition shadow whitespace-nowrap print:hidden"
+            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-xs sm:text-sm font-bold hover:bg-slate-800 transition shadow whitespace-nowrap print:hidden"
           >
-            <Printer size={16} /> Print Statement
+            <Printer size={16} /> Print
           </button>
         </div>
       </div>
 
-      {/* ADMIN PANEL */}
+      {/* ADMIN PANEL — 🔥 MOBILE FIXED */}
       {isAdmin && (
-        <div className="bg-gradient-to-r from-blue-900 to-slate-900 p-6 rounded-xl shadow-md text-white mb-6 print:hidden">
+        <div className="bg-gradient-to-r from-blue-900 to-slate-900 p-4 sm:p-6 rounded-xl shadow-md text-white mb-4 sm:mb-6 print:hidden">
           <div className="flex items-center gap-2 mb-3">
-            <Search size={20} className="text-blue-400" />
-            <h2 className="text-base font-black uppercase tracking-wider">Advanced Admin Passbook & Issue Resolver Panel</h2>
+            <Search size={18} className="text-blue-400" />
+            <h2 className="text-sm sm:text-base font-black uppercase tracking-wider">Advanced Admin Passbook Panel</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
             <div>
@@ -1061,7 +1036,7 @@ export default function WalletLedgerPage() {
 
             <div className="md:col-span-2">
               <label className="block text-[10px] uppercase font-bold text-slate-300 mb-1">Search Name/Code & Select User</label>
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input 
                   type="text"
                   placeholder="Type Name, Code or Mobile..."
@@ -1078,12 +1053,12 @@ export default function WalletLedgerPage() {
                       if (found) setSelectedUserId(found.id);
                     }
                   }}
-                  className="w-1/2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white outline-none"
+                  className="w-full sm:w-1/2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white outline-none"
                 />
                 <select 
                   value={selectedUserId} 
                   onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="w-1/2 bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg border border-blue-600 outline-none cursor-pointer"
+                  className="w-full sm:w-1/2 bg-blue-800 text-white text-xs font-bold px-3 py-2 rounded-lg border border-blue-600 outline-none cursor-pointer"
                 >
                   {filteredUsersList.map((usr) => (
                     <option key={usr.id} value={usr.id}>
@@ -1097,8 +1072,7 @@ export default function WalletLedgerPage() {
         </div>
       )}
 
-      {/* Printable Section wrapper */}
-      <div className="printable-ledger-section space-y-6">
+      <div className="printable-ledger-section space-y-4 sm:space-y-6">
         
         <div>
           <CustomerProfileCard 
@@ -1108,54 +1082,54 @@ export default function WalletLedgerPage() {
           />
         </div>
 
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6 print:grid-cols-3">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Current Wallet Balance</p>
-              <h2 className={`text-3xl font-black mt-2 ${isWalletNegative ? 'text-rose-600' : 'text-emerald-600'}`}>
+        {/* Summary Cards — 🔥 MOBILE FIXED: grid-cols-1 on mobile */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 mb-4 sm:mb-6 print:grid-cols-3">
+          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Current Wallet Balance</p>
+              <h2 className={`text-xl sm:text-3xl font-black mt-1 sm:mt-2 ${isWalletNegative ? 'text-rose-600' : 'text-emerald-600'}`}>
                 {isWalletNegative ? `- ₹ ${Math.abs(targetProfile?.wallet_balance ?? 0).toFixed(2)}` : `₹ ${(targetProfile?.wallet_balance ?? 0).toFixed(2)}`}
               </h2>
             </div>
-            <div className={`p-4 rounded-full print:hidden ${isWalletNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-              <Wallet size={28} />
+            <div className={`p-3 sm:p-4 rounded-full print:hidden shrink-0 ${isWalletNegative ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+              <Wallet size={22} />
             </div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Credited (Filtered)</p>
-              <h2 className="text-3xl font-black text-blue-600 mt-2">+ ₹ {totalCredit.toFixed(2)}</h2>
+          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Total Credited (Filtered)</p>
+              <h2 className="text-xl sm:text-3xl font-black text-blue-600 mt-1 sm:mt-2">+ ₹ {totalCredit.toFixed(2)}</h2>
             </div>
-            <div className="p-4 bg-blue-50 text-blue-600 rounded-full print:hidden"><ArrowDownCircle size={28} /></div>
+            <div className="p-3 sm:p-4 bg-blue-50 text-blue-600 rounded-full print:hidden shrink-0"><ArrowDownCircle size={22} /></div>
           </div>
 
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
-            <div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Debited (Filtered)</p>
-              <h2 className="text-3xl font-black text-rose-600 mt-2">- ₹ {totalDebit.toFixed(2)}</h2>
+          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Total Debited (Filtered)</p>
+              <h2 className="text-xl sm:text-3xl font-black text-rose-600 mt-1 sm:mt-2">- ₹ {totalDebit.toFixed(2)}</h2>
             </div>
-            <div className="p-4 bg-rose-50 text-rose-600 rounded-full print:hidden"><ArrowUpCircle size={28} /></div>
+            <div className="p-3 sm:p-4 bg-rose-50 text-rose-600 rounded-full print:hidden shrink-0"><ArrowUpCircle size={22} /></div>
           </div>
         </div>
 
-        {/* Ledger Table */}
+        {/* Ledger Table — 🔥 MOBILE FIXED: horizontal scroll */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 font-bold text-sm uppercase tracking-wide text-slate-700 flex justify-between items-center">
-            <span>Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All Months (All-Time)' : selectedMonth)})</span>
-            <span className="text-xs text-slate-500 font-normal"> Passbook (Live Sync Active) </span>
+          <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 font-bold text-xs sm:text-sm uppercase tracking-wide text-slate-700 flex flex-col sm:flex-row justify-between sm:items-center gap-1 sm:gap-2">
+            <span className="truncate">Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All-Time' : selectedMonth)})</span>
+            <span className="text-[10px] sm:text-xs text-slate-500 font-normal">Passbook (Live Sync)</span>
           </div>
 
           {loading ? (
-            <div className="p-12 text-center text-slate-500 font-medium">Loading ledger records...</div>
+            <div className="p-8 sm:p-12 text-center text-slate-500 font-medium">Loading ledger records...</div>
           ) : filteredTransactions.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 font-semibold">No transaction records found for this period.</div>
+            <div className="p-8 sm:p-12 text-center text-slate-500 font-semibold">No transaction records found for this period.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
+              <table className="w-full text-left border-collapse text-xs sm:text-sm min-w-[720px]">
                 <thead>
-                  <tr className="border-b border-slate-200 bg-slate-900 text-white font-bold uppercase text-[10pt]">
-                    <th className="p-3 w-16">Sr.</th>
+                  <tr className="border-b border-slate-200 bg-slate-900 text-white font-bold uppercase text-[9pt] sm:text-[10pt]">
+                    <th className="p-2 sm:p-3 w-12 sm:w-16">Sr.</th>
                     <th className="p-2">
                       <span className="print:hidden">
                         <input 
@@ -1169,7 +1143,7 @@ export default function WalletLedgerPage() {
                       </span>
                       <span className="hidden print:inline">Ref No.</span>
                     </th>
-                    <th className="p-3 w-28">Date</th>
+                    <th className="p-2 sm:p-3 w-24 sm:w-28">Date</th>
                     <th className="p-2">
                       <span className="print:hidden">
                         <input 
@@ -1209,7 +1183,7 @@ export default function WalletLedgerPage() {
                       </span>
                       <span className="hidden print:inline">Payment Mode</span>
                     </th>
-                    <th className="p-2 text-right w-32">
+                    <th className="p-2 text-right w-24 sm:w-32">
                       <span className="print:hidden">
                         <input 
                           type="text" 
@@ -1222,15 +1196,15 @@ export default function WalletLedgerPage() {
                       </span>
                       <span className="hidden print:inline">Credit (+)</span>
                     </th>
-                    <th className="p-3 text-right w-28">Debit (-)</th>
-                    <th className="p-3 text-right w-36">Current Balance</th>
+                    <th className="p-2 sm:p-3 text-right w-24 sm:w-28">Debit (-)</th>
+                    <th className="p-2 sm:p-3 text-right w-28 sm:w-36">Balance</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 text-[10pt]">
+                <tbody className="divide-y divide-slate-100 text-[9pt] sm:text-[10pt]">
                   {filteredTransactions.map((tx, index) => (
                     <tr key={tx.id || index} className="hover:bg-slate-50 transition">
-                      <td className="p-3 font-bold text-slate-500">{index + 1}</td>
-                      <td className="p-3 text-xs">
+                      <td className="p-2 sm:p-3 font-bold text-slate-500">{index + 1}</td>
+                      <td className="p-2 sm:p-3 text-xs">
                         <div className="font-mono text-blue-600 font-bold">
                           {tx.ref_no || 'N/A'}
                         </div>
@@ -1240,13 +1214,13 @@ export default function WalletLedgerPage() {
                           </div>
                         )}
                       </td>
-                      <td className="p-3 text-slate-600 whitespace-nowrap">{new Date(tx.created_at).toLocaleDateString()}</td>
-                      <td className="p-3 font-medium text-slate-900 uppercase">{tx.customer_name || 'N/A'}</td>
-                      <td className="p-3 text-slate-700 uppercase">{tx.case_type || 'N/A'}</td>
-                      <td className="p-3 font-semibold text-slate-800">{tx.payment_mode || 'N/A'}</td>
-                      <td className="p-3 text-right font-black text-blue-600">{tx.type === 'CREDIT' ? `₹ ${tx.amount}` : '-'}</td>
-                      <td className="p-3 text-right font-black text-rose-600">{tx.type === 'DEBIT' ? `₹ ${tx.amount}` : '-'}</td>
-                      <td className={`p-3 text-right font-bold ${tx.balance_after < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                      <td className="p-2 sm:p-3 text-slate-600 whitespace-nowrap">{new Date(tx.created_at).toLocaleDateString()}</td>
+                      <td className="p-2 sm:p-3 font-medium text-slate-900 uppercase">{tx.customer_name || 'N/A'}</td>
+                      <td className="p-2 sm:p-3 text-slate-700 uppercase">{tx.case_type || 'N/A'}</td>
+                      <td className="p-2 sm:p-3 font-semibold text-slate-800">{tx.payment_mode || 'N/A'}</td>
+                      <td className="p-2 sm:p-3 text-right font-black text-blue-600">{tx.type === 'CREDIT' ? `₹ ${tx.amount}` : '-'}</td>
+                      <td className="p-2 sm:p-3 text-right font-black text-rose-600">{tx.type === 'DEBIT' ? `₹ ${tx.amount}` : '-'}</td>
+                      <td className={`p-2 sm:p-3 text-right font-bold ${tx.balance_after < 0 ? 'text-rose-600' : 'text-slate-900'}`}>
                         {tx.balance_after < 0 ? `- ₹ ${Math.abs(tx.balance_after).toFixed(2)}` : `₹ ${tx.balance_after?.toFixed(2)}`}
                       </td>
                     </tr>
@@ -1259,21 +1233,21 @@ export default function WalletLedgerPage() {
 
       </div>
 
-      {/* OTP Verification Modal */}
+      {/* OTP Verification Modal — 🔥 MOBILE FIXED */}
       {showOtpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 print:hidden">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4 print:hidden">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl relative">
             <button onClick={() => { setShowOtpModal(false); setOtpStep(1); setEnteredOtp(''); }} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
               <X size={20} />
             </button>
-            <h3 className="text-lg font-black text-slate-900 uppercase mb-1">Security Verification</h3>
+            <h3 className="text-base sm:text-lg font-black text-slate-900 uppercase mb-1">Security Verification</h3>
             <p className="text-xs text-slate-500 mb-4">Secure verification via email OTP to process refund request.</p>
 
             {otpError && <div className="bg-red-100 text-red-700 text-xs p-2.5 rounded mb-3 font-semibold uppercase">{otpError}</div>}
 
             {otpStep === 1 ? (
               <div className="space-y-4">
-                <p className="text-xs text-slate-700">An OTP will be sent to your registered email: <b className="text-blue-900">{profile?.email}</b></p>
+                <p className="text-xs text-slate-700">An OTP will be sent to your registered email: <b className="text-blue-900 break-all">{profile?.email}</b></p>
                 <button onClick={handleSendOtp} disabled={otpLoading} className="w-full bg-blue-900 hover:bg-blue-800 text-white py-2.5 rounded font-bold transition uppercase text-sm">
                   {otpLoading ? 'SENDING OTP...' : 'SEND OTP'}
                 </button>

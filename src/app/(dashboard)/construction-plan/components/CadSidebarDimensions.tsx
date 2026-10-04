@@ -1,5 +1,7 @@
 import React from "react";
 import { PlotDimensions } from "../engine/planningTypes";
+import CadSectionControls from "./CadSectionControls";
+import { SectionCutDef, ElevationSide } from "../engine/sectionEngine";
 
 interface CadSidebarDimensionsProps {
   editModeToggle: "PLOT" | "MOS";
@@ -41,6 +43,10 @@ interface CadSidebarDimensionsProps {
   handleSouthRoadChange?: (val: number) => void;
   handleEastRoadChange?: (val: number) => void;
   handleWestRoadChange?: (val: number) => void;
+  sectionCuts?: SectionCutDef[];
+  setSectionCuts?: (cuts: SectionCutDef[]) => void;
+  elevationSides?: ElevationSide[];
+  setElevationSides?: (sides: ElevationSide[]) => void;
 }
 
 export default function CadSidebarDimensions({
@@ -83,6 +89,10 @@ export default function CadSidebarDimensions({
   handleSouthRoadChange,
   handleEastRoadChange,
   handleWestRoadChange,
+  sectionCuts,
+  setSectionCuts,
+  elevationSides,
+  setElevationSides,
 }: CadSidebarDimensionsProps) {
   return (
     <div className="col-span-3 border-l border-black bg-gray-100 p-2.5 overflow-y-auto flex flex-col space-y-2">
@@ -94,7 +104,7 @@ export default function CadSidebarDimensions({
             type="button"
             onClick={() => setEditModeToggle("PLOT")}
             className={`px-1.5 py-0.5 text-[8px] font-black cursor-pointer ${
-              editModeToggle === "PLOT" ? "bg-blue-700 text-white" : "bg-white text-black hover:bg-gray-100"
+              editModeToggle === "PLOT" ? "bg-black text-white" : "bg-white text-black hover:bg-gray-100"
             }`}
           >
             PLOT
@@ -350,6 +360,16 @@ export default function CadSidebarDimensions({
 
         </div>
       </div>
+
+      {/* SECTION CUTS + ELEVATION SIDES (drive plan cut-lines, section views and elevations) */}
+      {sectionCuts && setSectionCuts && elevationSides && setElevationSides && (
+        <CadSectionControls
+          cuts={sectionCuts}
+          onCutsChange={setSectionCuts}
+          elevationSides={elevationSides}
+          onElevationSidesChange={setElevationSides}
+        />
+      )}
     </div>
   );
 }

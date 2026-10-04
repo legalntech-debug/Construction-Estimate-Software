@@ -744,114 +744,114 @@ export default function CadModalView({
                       </defs>
 
                       <polygon
-                        points={builtUpPoints.map(p => `${p.x},${p.y}`).join(" ")}
-                        fill="none"
-                        stroke={isFullPlot ? "transparent" : "red"}
-                        strokeWidth="1"
-                        vectorEffect="non-scaling-stroke"
-                        strokeDasharray="4 2"
-                      />
+  points={builtUpPoints.map(p => `${p.x},${p.y}`).join(" ")}
+  fill="none"
+  stroke={isFullPlot ? "transparent" : "#000000"}
+  strokeWidth="1"
+  vectorEffect="non-scaling-stroke"
+  strokeDasharray="4 2"
+/>
 
                       <g clipPath="url(#builtUpClip)">
-                        {hatchLines.map((line, idx) => (
-                          <line
-                            key={idx}
-                            x1={line.x1}
-                            y1={line.y1}
-                            x2={line.x2}
-                            y2={line.y2}
-                            stroke="#666666"
-                            strokeWidth="0.5"
-                            opacity="0.6"
-                          />
-                        ))}
-                      </g>
+  {hatchLines.map((line, idx) => (
+    <line
+      key={idx}
+      x1={line.x1}
+      y1={line.y1}
+      x2={line.x2}
+      y2={line.y2}
+      stroke="#cccccc"
+      strokeWidth="0.5"
+      opacity="1"
+    />
+  ))}
+</g>
 
                       {!isFullPlot && (
                         <>
                           {mosBVal > 0 && (() => {
-                            const dimX = pTopLeft.x - 5.5; 
-                            const midY = (pTopLeft.y + bTopLeft.y) / 2;
-                            const labelText = `${mosBVal}'`;
-                            const mosTextCenterX = (bTopLeft.x + bTopRight.x) / 2;
-                            const mosTextCenterY = (pTopLeft.y + bTopLeft.y) / 2;
-                            return (
-                              <g>
-                                <line x1={dimX} y1={pTopLeft.y} x2={dimX} y2={bTopLeft.y} stroke="red" strokeWidth="1" />
-                                <polygon points={`${dimX},${pTopLeft.y} ${dimX - 3},${pTopLeft.y + 6} ${dimX + 3},${pTopLeft.y + 6}`} fill="red" />
-                                <polygon points={`${dimX},${bTopLeft.y} ${dimX - 3},${bTopLeft.y - 6} ${dimX + 3},${bTopLeft.y - 6}`} fill="red" />
-                                <text x={dimX - 10} y={midY} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
-                                  {labelText}
-                                </text>
-                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
-                                  REAR MOS
-                                </text>
-                              </g>
-                            );
-                          })()}
+  const dimX = pTopLeft.x - 5.5; 
+  const midY = (pTopLeft.y + bTopLeft.y) / 2;
+  const labelText = `${mosBVal}'`;
+  const mosTextCenterX = (bTopLeft.x + bTopRight.x) / 2;
+  const mosTextCenterY = (pTopLeft.y + bTopLeft.y) / 2;
+  return (
+    <g>
+      <line x1={dimX} y1={pTopLeft.y} x2={dimX} y2={bTopLeft.y} stroke="#000000" strokeWidth="1" />
+      <polygon points={`${dimX},${pTopLeft.y} ${dimX - 3},${pTopLeft.y + 6} ${dimX + 3},${pTopLeft.y + 6}`} fill="#000000" />
+      <polygon points={`${dimX},${bTopLeft.y} ${dimX - 3},${bTopLeft.y - 6} ${dimX + 3},${bTopLeft.y - 6}`} fill="#000000" />
+      <text x={dimX - 10} y={midY} fill="#000000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
+        {labelText}
+      </text>
+      <text x={mosTextCenterX} y={mosTextCenterY} fill="#000000" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+        REAR MOS
+      </text>
+    </g>
+  );
+})()}
 
                           {mosAVal > 0 && (() => {
-                            const dimX = pBottomLeft.x - 5.5; 
-                            const midY = (pBottomLeft.y + bBottomLeft.y) / 2;
-                            const labelText = `${mosAVal}'`;
-                            const mosTextCenterX = (bBottomLeft.x + bBottomRight.x) / 2;
-                            const mosTextCenterY = (pBottomLeft.y + bBottomLeft.y) / 2;
-                            return (
-                              <g>
-                                <line x1={dimX} y1={pBottomLeft.y} x2={dimX} y2={bBottomLeft.y} stroke="red" strokeWidth="1" />
-                                <polygon points={`${dimX},${pBottomLeft.y} ${dimX - 3},${pBottomLeft.y - 6} ${dimX + 3},${pBottomLeft.y - 6}`} fill="red" />
-                                <polygon points={`${dimX},${bBottomLeft.y} ${dimX - 3},${bBottomLeft.y + 6} ${dimX + 3},${bBottomLeft.y + 6}`} fill="red" />
-                                <text x={dimX - 10} y={midY} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
-                                  {labelText}
-                                </text>
-                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
-                                  FRONT MOS
-                                </text>
-                              </g>
-                            );
-                          })()}
+  const dimX = pBottomLeft.x - 5.5; 
+  const midY = (pBottomLeft.y + bBottomLeft.y) / 2;
+  const labelText = `${mosAVal}'`;
+  const mosTextCenterX = (bBottomLeft.x + bBottomRight.x) / 2;
+  const mosTextCenterY = (pBottomLeft.y + bBottomLeft.y) / 2;
+  return (
+    <g>
+      <line x1={dimX} y1={pBottomLeft.y} x2={dimX} y2={bBottomLeft.y} stroke="#000000" strokeWidth="1" />
+      <polygon points={`${dimX},${pBottomLeft.y} ${dimX - 3},${pBottomLeft.y - 6} ${dimX + 3},${pBottomLeft.y - 6}`} fill="#000000" />
+      <polygon points={`${dimX},${bBottomLeft.y} ${dimX - 3},${bBottomLeft.y + 6} ${dimX + 3},${bBottomLeft.y + 6}`} fill="#000000" />
+      <text x={dimX - 10} y={midY} fill="#000000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dimX - 10}, ${midY})`}>
+        {labelText}
+      </text>
+      <text x={mosTextCenterX} y={mosTextCenterY} fill="#000000" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+        FRONT MOS
+      </text>
+    </g>
+  );
+})()}
 
                           {mosCVal > 0 && (() => {
-                            const dimY = pTopLeft.y - 5.5; 
-                            const midX = (pTopLeft.x + bTopLeft.x) / 2;
-                            const labelText = `${mosCVal}'`;
-                            const mosTextCenterX = (pTopLeft.x + bTopLeft.x) / 2;
-                            const mosTextCenterY = (bTopLeft.y + bBottomLeft.y) / 2;
-                            return (
-                              <g>
-                                <line x1={pTopLeft.x} y1={dimY} x2={bTopLeft.x} y2={dimY} stroke="red" strokeWidth="1" />
-                                <polygon points={`${pTopLeft.x},${dimY} ${pTopLeft.x + 6},${dimY - 3} ${pTopLeft.x + 6},${dimY + 3}`} fill="red" />
-                                <polygon points={`${bTopLeft.x},${dimY} ${bTopLeft.x - 6},${dimY - 3} ${bTopLeft.x - 6},${dimY + 3}`} fill="red" />
-                                <text x={midX} y={dimY - 8} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
-                                  {labelText}
-                                </text>
-                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
-                                  LEFT MOS
-                                </text>
-                              </g>
-                            );
-                          })()}
+  const dimY = pTopLeft.y - 5.5; 
+  const midX = (pTopLeft.x + bTopLeft.x) / 2;
+  const labelText = `${mosCVal}'`;
+  const mosTextCenterX = (pTopLeft.x + bTopLeft.x) / 2;
+  const mosTextCenterY = (bTopLeft.y + bBottomLeft.y) / 2;
+  return (
+    <g>
+      <line x1={pTopLeft.x} y1={dimY} x2={bTopLeft.x} y2={dimY} stroke="#000000" strokeWidth="1" />
+      <polygon points={`${pTopLeft.x},${dimY} ${pTopLeft.x + 6},${dimY - 3} ${pTopLeft.x + 6},${dimY + 3}`} fill="#000000" />
+      <polygon points={`${bTopLeft.x},${dimY} ${bTopLeft.x - 6},${dimY - 3} ${bTopLeft.x - 6},${dimY + 3}`} fill="#000000" />
+      <text x={midX} y={dimY - 8} fill="#000000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+        {labelText}
+      </text>
+      <text x={mosTextCenterX} y={mosTextCenterY} fill="#000000" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
+        LEFT MOS
+      </text>
+    </g>
+  );
+})()}
 
                           {mosDVal > 0 && (() => {
-                            const dimY = pTopRight.y - 5.5; 
-                            const midX = (pTopRight.x + bTopRight.x) / 2;
-                            const labelText = `${mosDVal}'`;
-                            const mosTextCenterX = (pTopRight.x + bTopRight.x) / 2;
-                            const mosTextCenterY = (bTopRight.y + bBottomRight.y) / 2;
-                            return (
-                              <g>
-                                <line x1={pTopRight.x} y1={dimY} x2={bTopRight.x} y2={dimY} stroke="red" strokeWidth="1" />
-                                <polygon points={`${pTopRight.x},${dimY} ${pTopRight.x + 6},${dimY - 3} ${pTopRight.x + 6},${dimY + 3}`} fill="red" />
-                                <polygon points={`${bTopRight.x},${dimY} ${bTopRight.x - 6},${dimY - 3} ${bTopRight.x - 6},${dimY + 3}`} fill="red" />
-                                <text x={midX} y={dimY - 8} fill="red" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
-                                  {labelText}
-                                </text>
-                                <text x={mosTextCenterX} y={mosTextCenterY} fill="red" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
-                                  RIGHT MOS
-                                </text>
-                              </g>
-                            );
-                          })()}
+  const dimY = pTopRight.y - 5.5; 
+  const midX = (pTopRight.x + bTopRight.x) / 2;
+  const labelText = `${mosDVal}'`;
+  const mosTextCenterX = (pTopRight.x + bTopRight.x) / 2;
+  const mosTextCenterY = (bTopRight.y + bBottomRight.y) / 2;
+  return (
+    <g>
+      <line x1={pTopRight.x} y1={dimY} x2={bTopRight.x} y2={dimY} stroke="#000000" strokeWidth="1" />
+      <polygon points={`${pTopRight.x},${dimY} ${pTopRight.x + 6},${dimY - 3} ${pTopRight.x + 6},${dimY + 3}`} fill="#000000" />
+      <polygon points={`${bTopRight.x},${dimY} ${bTopRight.x - 6},${dimY - 3} ${bTopRight.x - 6},${dimY + 3}`} fill="#000000" />
+      <text x={midX} y={dimY - 8} fill="#000000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">
+        {labelText}
+      </text>
+      <text x={mosTextCenterX} y={mosTextCenterY} fill="#000000" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${mosTextCenterX}, ${mosTextCenterY})`}>
+        RIGHT MOS
+      </text>
+    </g>
+  );
+})()}
                         </>
                       )}
                     </g>
@@ -906,16 +906,16 @@ export default function CadModalView({
                       return (
                         <g transform={`translate(${builtUpCenterX}, ${builtUpCenterY})`}>
                           <text 
-                            x="0" 
-                            y="1" 
-                            textAnchor="middle" 
-                            dominantBaseline="middle"
-                            fill="#ffffff" 
-                            transform={`rotate(${textRotation})`}
-                            style={{ fontWeight: "900", fontSize: "7.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#000000", strokeWidth: "3px" }}
-                          >
-                            PROPOSED SITE
-                          </text>
+  x="0" 
+  y="1" 
+  textAnchor="middle" 
+  dominantBaseline="middle"
+  fill="#000000" 
+  transform={`rotate(${textRotation})`}
+  style={{ fontWeight: "900", fontSize: "7.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#ffffff", strokeWidth: "3px" }}
+>
+  PROPOSED SITE
+</text>
                         </g>
                       );
                     })()}
@@ -924,9 +924,9 @@ export default function CadModalView({
               })()}
 
               {cadObjects?.map((obj) => {
-                const isSelected = selectedCadObjectIds?.includes(obj.id);
-                const strokeColor = isSelected ? "red" : "#ffffff";
-                const strokeW = 1;
+  const isSelected = selectedCadObjectIds?.includes(obj.id);
+  const strokeColor = isSelected ? "red" : "#000000";
+  const strokeW = 1;
 
                 if (obj.type === "LINE" && obj.points?.length >= 2) {
                   return (

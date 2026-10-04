@@ -1,0 +1,72 @@
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 4mm;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    /* ❌ overflow: hidden HATAO — isse extra pages allow karo */
+    overflow: visible !important;
+    /* ❌ height: 100% HATAO — dynamic height allow karo */
+    height: auto !important;
+    width: 100% !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #main-cad-canvas, #main-cad-canvas *,
+  #main-sidebar, #main-sidebar * {
+    visibility: visible !important;
+  }
+
+  /* Parent container — height auto karo */
+  .max-w-\[1600px\] {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: auto !important;      /* ✅ dynamic height */
+    margin: 0 !important;
+    padding: 2mm !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  #main-cad-canvas {
+    position: relative !important;  /* ✅ absolute ki jagah relative */
+    left: 0 !important;
+    top: 0 !important;
+    width: 70% !important;
+    height: auto !important;        /* ✅ height auto */
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: visible !important;
+  }
+
+  /* SVG — height auto, width full */
+  #main-cad-canvas svg {
+    width: 100% !important;
+    height: auto !important;        /* ✅ auto height */
+    max-height: none !important;    /* ✅ max-height hataya */
+    display: block !important;
+  }
+
+  #main-sidebar {
+    position: relative !important;
+    right: 0 !important;
+    top: 0 !important;
+    width: 28% !important;
+    height: auto !important;        /* ✅ auto height */
+    font-size: 9px !important;
+    padding: 4px !important;
+    overflow: visible !important;
+  }
+
+  button {
+    display: none !important;
+  }
+}

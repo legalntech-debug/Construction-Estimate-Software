@@ -1,5 +1,11 @@
 import React from "react";
 
+// 🎨 LIGHT THEME COLORS
+const DIM_COLOR = "#000000";       // Dimension line color (was yellow / #00aaff)
+const DIM_TEXT_STROKE = "#ffffff"; // Text outline stroke (was #000000)
+const LABEL_BG = "#ffffff";        // Label background (was #000000)
+const LABEL_TEXT = "#000000";      // Label text (was #00aaff)
+
 export const formatDim = (valPx: number, scale: number, measurementUnit?: "FEET" | "METERS") => {
   const valFeet = valPx / scale;
   if (measurementUnit === "METERS") {
@@ -41,17 +47,17 @@ export const renderSideDim = (
 
   return (
     <g>
-      <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke="yellow" strokeWidth="0.4" strokeDasharray="2" />
-      <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke="yellow" strokeWidth="0.4" strokeDasharray="2" />
+      <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke={DIM_COLOR} strokeWidth="0.4" strokeDasharray="2" />
+      <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke={DIM_COLOR} strokeWidth="0.4" strokeDasharray="2" />
 
       <g transform={`translate(${midX + perpX * dist}, ${midY + perpY * dist}) rotate(${angle})`}>
-        <polygon points={`${-L / 2},0 ${-L / 2 + 5},-2.5 ${-L / 2 + 5},2.5`} fill="yellow" />
-        <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="yellow" strokeWidth="0.8" />
-        <polygon points={`${L / 2},0 ${L / 2 - 5},-2.5 ${L / 2 - 5},2.5`} fill="yellow" />
-        <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke="yellow" strokeWidth="0.8" />
+        <polygon points={`${-L / 2},0 ${-L / 2 + 5},-2.5 ${-L / 2 + 5},2.5`} fill={DIM_COLOR} />
+        <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke={DIM_COLOR} strokeWidth="0.8" />
+        <polygon points={`${L / 2},0 ${L / 2 - 5},-2.5 ${L / 2 - 5},2.5`} fill={DIM_COLOR} />
+        <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke={DIM_COLOR} strokeWidth="0.8" />
         <text 
-          x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="yellow" 
-          style={{ fontSize: "9px", fontWeight: "bold", paintOrder: "stroke", stroke: "#000000", strokeWidth: "3px" }}
+          x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill={DIM_COLOR} 
+          style={{ fontSize: "9px", fontWeight: "bold", paintOrder: "stroke", stroke: DIM_TEXT_STROKE, strokeWidth: "3px" }}
         >
           {formatDim(L, scale, measurementUnit)}
         </text>
@@ -64,13 +70,13 @@ export const renderTopWidthDim = (startX: number, width: number, yLevel: number,
   const dimY = yLevel - 2 * scale; 
   return (
     <g>
-      <line x1={startX} y1={yLevel} x2={startX} y2={dimY - 4} stroke="#00aaff" strokeWidth="0.4" strokeDasharray="2" />
-      <line x1={startX + width} y1={yLevel} x2={startX + width} y2={dimY - 4} stroke="#00aaff" strokeWidth="0.4" strokeDasharray="2" />
-      <line x1={startX} y1={dimY} x2={startX + width} y2={dimY} stroke="#00aaff" strokeWidth="0.6" />
-      <polygon points={`${startX},${dimY} ${startX + 4},${dimY - 2} ${startX + 4},${dimY + 2}`} fill="#00aaff" />
-      <polygon points={`${startX + width},${dimY} ${startX + width - 4},${dimY - 2} ${startX + width - 4},${dimY + 2}`} fill="#00aaff" />
-      <rect x={startX + width / 2 - 30} y={dimY - 8} width="64" height="16" fill="#000000" opacity="0.85" />
-      <text x={startX + width / 2} y={dimY} fill="#00aaff" fontSize="7.5" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
+      <line x1={startX} y1={yLevel} x2={startX} y2={dimY - 4} stroke={DIM_COLOR} strokeWidth="0.4" strokeDasharray="2" />
+      <line x1={startX + width} y1={yLevel} x2={startX + width} y2={dimY - 4} stroke={DIM_COLOR} strokeWidth="0.4" strokeDasharray="2" />
+      <line x1={startX} y1={dimY} x2={startX + width} y2={dimY} stroke={DIM_COLOR} strokeWidth="0.6" />
+      <polygon points={`${startX},${dimY} ${startX + 4},${dimY - 2} ${startX + 4},${dimY + 2}`} fill={DIM_COLOR} />
+      <polygon points={`${startX + width},${dimY} ${startX + width - 4},${dimY - 2} ${startX + width - 4},${dimY + 2}`} fill={DIM_COLOR} />
+      <rect x={startX + width / 2 - 30} y={dimY - 8} width="64" height="16" fill={LABEL_BG} stroke={DIM_COLOR} strokeWidth="0.3" />
+      <text x={startX + width / 2} y={dimY} fill={LABEL_TEXT} fontSize="7.5" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
         {label}
       </text>
     </g>
@@ -83,7 +89,7 @@ export const renderHeightDim = (
   yBottom: number, 
   label: string, 
   direction: 'left' | 'right' = 'left', 
-  color: string = '#00aaff',
+  color: string = DIM_COLOR,
   scale: number
 ) => {
   const midY = (yTop + yBottom) / 2;
@@ -108,7 +114,7 @@ export const renderHeightDim = (
             fontSize: "7.5px", 
             fontWeight: "bold",
             paintOrder: "stroke", 
-            stroke: "#000000", 
+            stroke: DIM_TEXT_STROKE, 
             strokeWidth: "2.5px"
           }}
         >
@@ -131,5 +137,5 @@ export const renderEarthSymbol = (startX: number, endX: number, y: number, scale
     d += ` L ${curX} ${y + (down ? depth : 0)}`;
     down = !down;
   }
-  return <path d={d} stroke="#00aaff" strokeWidth="0.4" fill="none" />;
+  return <path d={d} stroke={DIM_COLOR} strokeWidth="0.4" fill="none" />;
 };

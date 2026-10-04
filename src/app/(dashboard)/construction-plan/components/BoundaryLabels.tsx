@@ -23,6 +23,12 @@ interface BoundaryLabelsProps {
   measurementUnit?: "FEET" | "METERS";
 }
 
+// 🎨 LIGHT THEME COLORS
+const LINE_COLOR = "#000000";       // Lines/arrows (was white)
+const TEXT_COLOR = "#000000";       // Text color (was white)
+const COMPASS_BG = "#ffffff";       // Compass background (was #121212)
+const COMPASS_ACCENT = "#1e40af";   // Compass accent (was #2c7ac9)
+
 export default function BoundaryLabels({
   topBoundary,
   bottomBoundary,
@@ -80,7 +86,6 @@ export default function BoundaryLabels({
   const currentRoadHeight = roadWidth * scale;
   const siteLayoutYOffset = 115 + (currentRoadHeight - (15 * scale));
 
-  // --- DYNAMIC BOUNDARY TEXT & COMPASS ROTATION (PLOT DIMENSIONS REMAIN FIXED) ---
   const opt = (roadFacingOption || "").toUpperCase();
   
   const allDirs = ["NORTH", "SOUTH", "EAST", "WEST"];
@@ -98,8 +103,6 @@ export default function BoundaryLabels({
     mainRoad = foundDirs[0].dir;
   }
 
-  // Assuming standard inputs passed to props:
-  // top = North, bottom = South, left = West, right = East
   const bNorth = topBoundary;
   const bSouth = bottomBoundary;
   const bWest = leftBoundary;
@@ -170,15 +173,15 @@ export default function BoundaryLabels({
 
     return (
       <g>
-        <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
-        <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke="white" strokeWidth="1" strokeDasharray="2" />
+        <line x1={p1.x} y1={p1.y} x2={ext1_end.x} y2={ext1_end.y} stroke={LINE_COLOR} strokeWidth="1" strokeDasharray="2" />
+        <line x1={p2.x} y1={p2.y} x2={ext2_end.x} y2={ext2_end.y} stroke={LINE_COLOR} strokeWidth="1" strokeDasharray="2" />
 
         <text 
           x={textPosX} 
           y={textPosY} 
           textAnchor="middle" 
           dominantBaseline="middle" 
-          fill="white" 
+          fill={TEXT_COLOR} 
           transform={`rotate(${angle}, ${textPosX}, ${textPosY})`} 
           style={{ fontSize: "14px", fontWeight: "900" }}
         >
@@ -188,13 +191,13 @@ export default function BoundaryLabels({
         </text>
 
         <g transform={`translate(${midX + perpX * dist}, ${midY + perpY * dist}) rotate(${angle})`}>
-          <polygon points={`${-L / 2},0 ${-L / 2 + 7},-3.5 ${-L / 2 + 7},3.5`} fill="white" />
-          <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke="white" strokeWidth="1" />
+          <polygon points={`${-L / 2},0 ${-L / 2 + 7},-3.5 ${-L / 2 + 7},3.5`} fill={LINE_COLOR} />
+          <line x1={-L / 2} y1="0" x2={-boxHalfWidth} y2="0" stroke={LINE_COLOR} strokeWidth="1" />
 
-          <polygon points={`${L / 2},0 ${L / 2 - 7},-3.5 ${L / 2 - 7},3.5`} fill="white" />
-          <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke="white" strokeWidth="1" />
+          <polygon points={`${L / 2},0 ${L / 2 - 7},-3.5 ${L / 2 - 7},3.5`} fill={LINE_COLOR} />
+          <line x1={boxHalfWidth} y1="0" x2={L / 2} y2="0" stroke={LINE_COLOR} strokeWidth="1" />
 
-          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "12px", fontWeight: "bold" }}>
+          <text x="0" y="1" textAnchor="middle" dominantBaseline="middle" fill={TEXT_COLOR} style={{ fontSize: "12px", fontWeight: "bold" }}>
             {formatDim(dimVal)}
           </text>
         </g>
@@ -204,19 +207,17 @@ export default function BoundaryLabels({
 
   return (
     <g style={{ fontSize: "14px", fontWeight: "bold", fontFamily: "sans-serif" }}>
-      {/* PLOT DIMENSIONS STRICTLY FIXED TO THEIR PHYSICAL SIDES (Width remains Width, Length remains Length) */}
-      {renderSideDimension(pTopLeft, pTopRight, activeTopBoundary, dimB)}         {/* Top = Width (Side B) */}
-      {renderSideDimension(pBottomLeft, pBottomRight, activeBottomBoundary, dimA)}   {/* Bottom = Width (Side A) */}
-      {renderSideDimension(pTopRight, pBottomRight, activeRightBoundary, dimD)}     {/* Right = Length (Side D) */}
-      {renderSideDimension(pTopLeft, pBottomLeft, activeLeftBoundary, dimC)}       {/* Left = Length (Side C) */}
+      {renderSideDimension(pTopLeft, pTopRight, activeTopBoundary, dimB)}
+      {renderSideDimension(pBottomLeft, pBottomRight, activeBottomBoundary, dimA)}
+      {renderSideDimension(pTopRight, pBottomRight, activeRightBoundary, dimD)}
+      {renderSideDimension(pTopLeft, pBottomLeft, activeLeftBoundary, dimC)}
 
       <g transform={`translate(${pBottomLeft.x - 120}, ${pBottomLeft.y + siteLayoutYOffset})`}>
-        <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill="white" style={{ fontSize: "18px", fontWeight: "bold" }}>
+        <text x="70" y="2" textAnchor="middle" dominantBaseline="middle" fill={TEXT_COLOR} style={{ fontSize: "18px", fontWeight: "bold" }}>
           SITE LAYOUT
         </text>
       </g>
 
-      {/* COMPASS (DYNAMICALLY ROTATED BASED ON MAIN ROAD / FACING OPTION) */}
       {(() => {
         const isFourSide = opt.includes("4 SIDE");
         const isThreeSide = opt.includes("3 SIDE");
@@ -233,10 +234,10 @@ export default function BoundaryLabels({
 
         return (
           <g transform={`translate(${maxX + 120 + extraRightOffset}, ${pTopRight.y + 30}) rotate(${compassRotation})`}>
-            <circle cx="0" cy="0" r="28" fill="#121212" stroke="white" strokeWidth="1.2" />
-            <polygon points="0,-22 -22,11 0,5" fill="white" />
-            <polygon points="0,-22 22,11 0,5" fill="#2c7ac9" stroke="white" strokeWidth="0.8" />
-            <text x="0" y="-39" textAnchor="middle" dominantBaseline="middle" fill="white" transform={`rotate(${-compassRotation}, 0, -39)`} style={{ fontSize: "22px", fontWeight: "bold" }}>
+            <circle cx="0" cy="0" r="28" fill={COMPASS_BG} stroke={LINE_COLOR} strokeWidth="1.2" />
+            <polygon points="0,-22 -22,11 0,5" fill={LINE_COLOR} />
+            <polygon points="0,-22 22,11 0,5" fill={COMPASS_ACCENT} stroke={LINE_COLOR} strokeWidth="0.8" />
+            <text x="0" y="-39" textAnchor="middle" dominantBaseline="middle" fill={TEXT_COLOR} transform={`rotate(${-compassRotation}, 0, -39)`} style={{ fontSize: "22px", fontWeight: "bold" }}>
               N
             </text>
           </g>

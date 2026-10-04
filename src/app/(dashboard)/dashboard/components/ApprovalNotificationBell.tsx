@@ -120,11 +120,6 @@ export default function ApprovalNotificationBell() {
     setLoading(false);
   };
 
-  /* ============================================================
-     🆕 WHATSAPP CONFIRMATION FUNCTION (For Pending Users)
-     - Direct user se approval confirmation lene ke liye
-     - Pre-filled welcome / verification message
-     ============================================================ */
   const handleWhatsAppUser = (user: any) => {
     if (!user) {
       alert('User data not available.');
@@ -139,7 +134,6 @@ export default function ApprovalNotificationBell() {
       return;
     }
 
-    // Auto-prepend India country code if 10-digit number
     const whatsappNumber = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
 
     const userName = user.full_name || 'User';
@@ -195,7 +189,6 @@ _DRC Software Engine — Account Verification Team_`;
 
     window.open(whatsappUrl, '_blank');
 
-    // 🆕 Track WhatsApp contact
     try {
       const trackKey = `wa_approval_sent_${user.id}`;
       localStorage.setItem(trackKey, new Date().toISOString());
@@ -205,9 +198,6 @@ _DRC Software Engine — Account Verification Team_`;
     }
   };
 
-  /* ============================================================
-     🆕 OPEN PROFILE MODAL
-     ============================================================ */
   const handleOpenProfile = (user: any) => {
     setSelectedUser(user);
     setIsProfileModalOpen(true);
@@ -244,129 +234,141 @@ _DRC Software Engine — Account Verification Team_`;
         </button>
 
         {isOpen && (
-          <div className="absolute right-0 mt-3 w-[380px] sm:w-[440px] bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden max-h-[80vh] flex flex-col">
-            <div className="p-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white flex justify-between items-center">
-              <div>
-                <h3 className="font-black text-xs uppercase tracking-wide">
-                  ⏳ Pending User Approvals
-                </h3>
-                <p className="text-[10px] text-amber-100 mt-0.5">
-                  Logged in as: <span className="font-bold text-white">{currentUserRole}</span>
-                </p>
-              </div>
-              <span className="px-2.5 py-1 bg-white/20 rounded-xl text-xs font-black">
-                {badgeCount}
-              </span>
-            </div>
+          <>
+            {/* 🔥 MOBILE BACKDROP - only visible on small screens */}
+            <div 
+              className="fixed inset-0 bg-black/40 z-[60] sm:hidden" 
+              onClick={() => setIsOpen(false)}
+            />
 
-            <div className="overflow-y-auto flex-1 bg-slate-50/30">
-              {requests.length === 0 ? (
-                <div className="p-8 text-center text-slate-400 text-xs">
-                  ✅ No pending approvals. All caught up!
+            {/* 🔥 DROPDOWN - fixed & centered on mobile, absolute on desktop */}
+            <div className="
+              fixed top-20 left-1/2 -translate-x-1/2 w-[calc(100vw-1.5rem)] max-w-[440px]
+              sm:absolute sm:right-0 sm:left-auto sm:translate-x-0 sm:top-auto sm:mt-3 sm:w-[440px]
+              bg-white shadow-2xl rounded-2xl border border-slate-100 z-[70]
+              overflow-hidden max-h-[80vh] flex flex-col
+            ">
+              <div className="p-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-white flex justify-between items-center">
+                <div className="min-w-0 pr-2">
+                  <h3 className="font-black text-xs uppercase tracking-wide truncate">
+                    ⏳ Pending User Approvals
+                  </h3>
+                  <p className="text-[10px] text-amber-100 mt-0.5 truncate">
+                    Logged in as: <span className="font-bold text-white">{currentUserRole}</span>
+                  </p>
                 </div>
-              ) : (
-                requests.map((req) => (
-                  <div key={req.id} className="p-3.5 border-b border-slate-100 hover:bg-white transition">
-                    <div className="flex items-start gap-2">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-black shrink-0">
-                        {(req.full_name || 'U')[0].toUpperCase()}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-slate-900 text-xs truncate">{req.full_name || 'Unknown'}</p>
-                        <p className="text-[10px] text-slate-500 truncate">{req.email}</p>
+                <span className="px-2.5 py-1 bg-white/20 rounded-xl text-xs font-black shrink-0">
+                  {badgeCount}
+                </span>
+              </div>
 
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[9px] font-bold rounded-md uppercase">
-                            {req.user_type || 'USER'}
-                          </span>
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-md">
-                            📍 {req.city}, {req.state}
-                          </span>
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-md">
-                            📞 {req.mobile || 'N/A'}
-                          </span>
-                          {req.partner_id && (
-                            <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded-md">
-                              🔗 Ref: {req.partner_id}
+              <div className="overflow-y-auto flex-1 bg-slate-50/30">
+                {requests.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400 text-xs">
+                    ✅ No pending approvals. All caught up!
+                  </div>
+                ) : (
+                  requests.map((req) => (
+                    <div key={req.id} className="p-3.5 border-b border-slate-100 hover:bg-white transition">
+                      <div className="flex items-start gap-2">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 text-xs font-black shrink-0">
+                          {(req.full_name || 'U')[0].toUpperCase()}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-bold text-slate-900 text-xs truncate">{req.full_name || 'Unknown'}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{req.email}</p>
+
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[9px] font-bold rounded-md uppercase">
+                              {req.user_type || 'USER'}
                             </span>
-                          )}
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-md">
+                              📍 {req.city}, {req.state}
+                            </span>
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-md">
+                              📞 {req.mobile || 'N/A'}
+                            </span>
+                            {req.partner_id && (
+                              <span className="px-2 py-0.5 bg-amber-50 text-amber-700 text-[9px] font-bold rounded-md">
+                                🔗 Ref: {req.partner_id}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={() => handleApprove(req.id, req.email)}
-                        disabled={loading}
-                        className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer"
-                      >
-                        ✅ Approve
-                      </button>
-                      <button
-                        onClick={() => handleReject(req.id, req.email)}
-                        disabled={loading}
-                        className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer"
-                      >
-                        ❌ Reject
-                      </button>
-                    </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleApprove(req.id, req.email)}
+                          disabled={loading}
+                          className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer"
+                        >
+                          ✅ Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(req.id, req.email)}
+                          disabled={loading}
+                          className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer"
+                        >
+                          ❌ Reject
+                        </button>
+                      </div>
 
-                    {/* 🆕 NEW BUTTONS: WhatsApp + View Profile */}
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={() => handleWhatsAppUser(req)}
-                        disabled={!req.mobile}
-                        className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1 ${
-                          req.mobile
-                            ? 'bg-green-600 hover:bg-green-700 text-white'
-                            : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                        }`}
-                        title={req.mobile ? `WhatsApp ${req.mobile}` : 'Mobile not available'}
-                      >
-                        💬 WhatsApp
-                      </button>
-                      <button
-                        onClick={() => handleOpenProfile(req)}
-                        className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
-                      >
-                        👤 View Profile
-                      </button>
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => handleWhatsAppUser(req)}
+                          disabled={!req.mobile}
+                          className={`flex-1 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1 ${
+                            req.mobile
+                              ? 'bg-green-600 hover:bg-green-700 text-white'
+                              : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          }`}
+                          title={req.mobile ? `WhatsApp ${req.mobile}` : 'Mobile not available'}
+                        >
+                          💬 WhatsApp
+                        </button>
+                        <button
+                          onClick={() => handleOpenProfile(req)}
+                          className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          👤 View Profile
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ))
+                )}
+              </div>
+
+              {requests.length > 0 && (
+                <div className="p-2.5 bg-slate-50 border-t border-slate-100 text-center">
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    🔴 Live updates enabled
+                  </p>
+                </div>
               )}
             </div>
-
-            {requests.length > 0 && (
-              <div className="p-2.5 bg-slate-50 border-t border-slate-100 text-center">
-                <p className="text-[10px] text-slate-500 font-medium">
-                  🔴 Live updates enabled
-                </p>
-              </div>
-            )}
-          </div>
+          </>
         )}
       </div>
 
-      {/* 🆕 USER PROFILE MODAL (For Pending Approvals) */}
+      {/* 🆕 USER PROFILE MODAL */}
       {isProfileModalOpen && selectedUser && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
-            <div className="p-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white flex justify-between items-center">
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white flex justify-between items-center">
               <div>
-                <h3 className="text-base font-black tracking-tight">👤 Pending User Details</h3>
-                <p className="text-[11px] text-indigo-100 mt-0.5">Review full details before approval</p>
+                <h3 className="text-sm sm:text-base font-black tracking-tight">👤 Pending User Details</h3>
+                <p className="text-[10px] sm:text-[11px] text-indigo-100 mt-0.5">Review full details before approval</p>
               </div>
               <button 
                 onClick={() => setIsProfileModalOpen(false)}
-                className="h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white font-bold transition text-xs"
+                className="h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white font-bold transition text-xs shrink-0"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
-              {/* Status Banner */}
+            <div className="p-4 sm:p-6 space-y-4 max-h-[75vh] overflow-y-auto">
               <div className="bg-amber-50 border-2 border-amber-300 p-3 rounded-xl">
                 <p className="text-xs text-amber-800 font-bold">
                   ⏳ Awaiting Admin Approval
@@ -376,9 +378,9 @@ _DRC Software Engine — Account Verification Team_`;
                 </p>
               </div>
 
-              {/* User Info Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 col-span-2">
+              {/* 🔥 MOBILE FIX: grid-cols-1 on mobile, grid-cols-2 on desktop */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 sm:col-span-2">
                   <p className="text-[10px] text-slate-400 uppercase font-bold">Full Name</p>
                   <p className="text-sm font-bold text-slate-800">
                     {selectedUser.full_name || 'N/A'}
@@ -454,13 +456,13 @@ _DRC Software Engine — Account Verification Team_`;
                     </p>
                   </div>
                 )}
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 col-span-2">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 sm:col-span-2">
                   <p className="text-[10px] text-slate-400 uppercase font-bold">Address</p>
                   <p className="text-xs font-bold text-slate-800">
                     {selectedUser.address || 'N/A'}
                   </p>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 col-span-2">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 sm:col-span-2">
                   <p className="text-[10px] text-slate-400 uppercase font-bold">User ID (UUID)</p>
                   <p className="text-[10px] font-mono text-slate-600 break-all">
                     {selectedUser.id}
@@ -468,7 +470,6 @@ _DRC Software Engine — Account Verification Team_`;
                 </div>
               </div>
 
-              {/* 🆕 WhatsApp Button in Modal */}
               <div className="bg-green-50 border-2 border-green-300 p-4 rounded-xl space-y-2">
                 <div className="flex items-start gap-2">
                   <span className="text-2xl">📱</span>
@@ -494,7 +495,6 @@ _DRC Software Engine — Account Verification Team_`;
                   <span>Send WhatsApp Verification</span>
                 </button>
 
-                {/* Show "Already Sent" badge */}
                 {(() => {
                   try {
                     const sentAt = localStorage.getItem(`wa_approval_sent_${selectedUser.id}`);
@@ -512,12 +512,12 @@ _DRC Software Engine — Account Verification Team_`;
                 })()}
               </div>
 
-              {/* 🆕 Quick Actions in Modal */}
               <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
                 <p className="text-[10px] text-slate-500 uppercase font-bold text-center">
                   Quick Actions
                 </p>
-                <div className="flex gap-2">
+                {/* 🔥 MOBILE FIX: stack vertically on mobile */}
+                <div className="flex flex-col sm:flex-row gap-2">
                   <button
                     onClick={() => handleApprove(selectedUser.id, selectedUser.email)}
                     disabled={loading}

@@ -3,6 +3,18 @@ import { formatDim, renderSideDim } from "./CadDimUtils";
 import { placeRoomLabel, buildNameVariants, doorSwingBox, Box } from "../engine/labelPlacer";
 import { FloorData, FloorRoom, PlacedDoor, PlacedWindow } from "../engine/planningTypes";
 import { validateConstructionPlan, RenderedRoomBox } from "../engine/validationEngine";
+import { calculateStaircase, solveStairDrawPlan, StaircaseFootprint, StairDrawPlan } from "../engine/stairPlanner";
+
+// 🎨 LIGHT THEME COLORS
+const BG_FILL = "#ffffff";          // SVG background (was #020617 / #0f172a)
+const LINE_PRIMARY = "#000000";     // Primary line color (was #ef4444, #38bdf8)
+const LINE_SECONDARY = "#333333";   // Secondary lines (was #475569, #666666)
+const TEXT_PRIMARY = "#000000";     // Room name text (was #ffffff)
+const TEXT_DIM = "#1e40af";         // Dimension text (was #38bdf8)
+const DOOR_COLOR = "#000000";       // Door symbols (was #eab308)
+const WARN_COLOR = "#dc2626";       // Warning text (was #f87171)
+const DUCT_TEXT = "#666666";        // Duct text (was #94a3b8)
+const PASSAGE_COLOR = "#000000";    // Passage guide lines (was #ec4899)
 
 const cadDiagnosticCache = new Set<string>();
 const cadValidationCache = new Set<string>();
@@ -103,130 +115,169 @@ export default function CadFloorPlansView({
     return 10;
   })();
 
+  // ✅ STAIR RENDERER (ground / upper / tower sab ke liye ek hi path)
+  // Planner frame (stairPlanner.StairDrawPlan): x = cross axis, y = run axis, entry NEECHE (y = run), far end upar (y = 0).
+  //   far end par Landing-1 (x = 0) aur Landing-2 (x = cross - fw), dono ke beech MIDDLE treads (x axis par).
+  //   Flight-1 x = 0 par (entry wali), Flight-2 x = cross - fw par.
+  // Rect ke hisaab se frame ko rotate kiya jaata hai (entryFace BOTTOM / TOP / LEFT / RIGHT):
+  //   BOTTOM / TOP  -> rect w = cross, h = run   (portrait)
+  //   LEFT / RIGHT  -> rect w = run,   h = cross (rotated)
+  // "SHORT n TREAD" sirf plan.shortTreads se dikhta hai (renderer apna kuch calculate nahi karta).
   const renderEngineStaircase = (
     x: number, y: number, w: number, h: number,
     stairConfig?: StaircaseConfig
   ) => {
-    const preCalcSpec = (stairConfig as any)?.staircaseSpec || {};
+    const cfg: any = stairConfig || {};
+    const given: any = cfg.staircaseSpec || {};
+    const wFt = w / scale;
+    const hFt = h / scale;
 
-    const stairType = String(
-      preCalcSpec?.staircaseType ||
-      (stairConfig as any)?.staircaseType ||
-      "2_QUARTER_LANDING"
-    ).toUpperCase();
+    const floorHeightFt =
+      Number(given?.floorToFloorHeight || given?.floorToFloorHeightFeet || given?.floorHeightFt || given?.floorHeightFeet) ||
+      stairFloorHeightFt || 10;
 
-    const renderCShape = () => {
-      const floorHeightFt =
-        Number(preCalcSpec?.floorToFloorHeightFeet || preCalcSpec?.floorHeightFt || preCalcSpec?.floorHeightFeet) ||
-        stairFloorHeightFt || 10;
-      const floorHeightIn = floorHeightFt * 12;
-      const MAX_RISER_IN = 7;
-      const MIN_TREAD_IN = 10;
+    const usableSpec = Number(given?.riserCount) > 0 && Number(given?.flightWidthFt) > 0 && given?.flight1 && given?.flight2;
+    const prePlan: StairDrawPlan | undefined = given?.drawPlan ?? cfg?.renderHints?.drawPlan;
 
-      const specRisers = Number(preCalcSpec?.riserCount);
-      const specRiserIn = specRisers > 0 ? floorHeightIn / specRisers : 0;
+    // ---- orientation: pehle planner ka entryFace / rotated, phir rect ke dimensions se confirm ----
+    const faceIn = String(cfg.entryFace || given?.entryFace || "").toUpperCase();
+    const wantRotated: boolean =
+      typeof cfg.rotated === "boolean" ? cfg.rotated
+      : (faceIn === "LEFT" || faceIn === "RIGHT");
 
-      let riserCount: number;
-      if (specRisers > 0 && specRiserIn >= 5 && specRiserIn <= 7.5) {
-        riserCount = specRisers;
-      } else {
-        riserCount = Math.ceil(floorHeightIn / MAX_RISER_IN);
-      }
-      riserCount = Math.max(17, riserCount);
-
-      const riserIn = floorHeightIn / riserCount;
-      const minTreadIn = Math.max(MIN_TREAD_IN, Number(preCalcSpec?.treadInches) || MIN_TREAD_IN);
-      const requiredTreads = Math.max(3, riserCount - 3);
-
-      const boxWft = w / scale;
-      const boxHft = h / scale;
-      const G = Math.min(3.0, Math.max(2.5, Number(preCalcSpec?.landing1WidthFt) || 3.0), boxWft * 0.5);
-      const flightLenFt = Math.max(0, boxWft - G);
-      const middleLenFt = Math.max(0, boxHft - 2 * G);
-
-      const flightCap = Math.floor((flightLenFt * 12) / minTreadIn);
-      const middleCap = Math.floor((middleLenFt * 12) / minTreadIn);
-
-      const f1 = Math.min(flightCap, Math.ceil(requiredTreads / 3));
-      const f2 = Math.min(flightCap, Math.ceil((requiredTreads - f1) / 2));
-      let m = Math.max(0, requiredTreads - f1 - f2);
-      let shortBy = 0;
-      if (m > middleCap) { shortBy = m - middleCap; m = middleCap; }
-
-      const col1W = G * scale;
-      const col2W = Math.max(0, w - col1W);
-      const rowGH = G * scale;
-      const row2H = Math.max(0, h - 2 * rowGH);
-
-      const row1Y = y;
-      const row2Y = y + rowGH;
-      const row3Y = y + rowGH + row2H;
-
-      const flight1TreadStep = col2W / Math.max(1, f1);
-      const flight2TreadStep = col2W / Math.max(1, f2);
-      const middleTreadStep = row2H / Math.max(1, m);
-
-      const flightTreadIn = f1 > 0 ? (flightLenFt * 12) / f1 : 0;
-      const middleTreadIn = m > 0 ? (middleLenFt * 12) / m : 0;
-      const fs = Math.max(1.5, Math.min(2.4, scale * 0.4));
-
-      void stairType;
-
-      return (
-        <g id="c-shape-stair">
-          {/* ROW 1 — 1st landing + flight 1 */}
-          <rect x={x} y={row1Y} width={col1W} height={rowGH} fill="#0f172a" stroke="#38bdf8" strokeWidth="0.5" />
-          <text x={x + col1W / 2} y={row1Y + rowGH / 2} fill="#38bdf8" fontSize={Math.min(2.5, col1W * 0.12)} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
-            {col1W > 8 ? "1ST LANDING" : "1ST LNDG"}
-          </text>
-          <rect x={x + col1W} y={row1Y} width={col2W} height={rowGH} fill="none" stroke="#38bdf8" strokeWidth="0.5" />
-          {Array.from({ length: Math.max(0, f1 - 1) }).map((_, i) => (
-            <line key={`f1-${i}`} x1={x + col1W + ((i + 1) * flight1TreadStep)} y1={row1Y} x2={x + col1W + ((i + 1) * flight1TreadStep)} y2={row1Y + rowGH} stroke="#38bdf8" strokeWidth="0.4" />
-          ))}
-          <circle cx={x + col1W + col2W - 2} cy={row1Y + rowGH / 2} r="0.9" fill="#eab308" />
-          <g transform={`translate(${x + col1W + col2W / 2}, ${row1Y + rowGH / 2})`}>
-            <line x1="-3" y1="0" x2="3" y2="0" stroke="#eab308" strokeWidth="0.7" />
-            <polygon points="-4.5,0 -1,-1.5 -1,1.5" fill="#eab308" />
-          </g>
-
-          {/* ROW 2 — middle flight + well */}
-          <rect x={x} y={row2Y} width={col1W} height={row2H} fill="none" stroke="#38bdf8" strokeWidth="0.5" />
-          {Array.from({ length: Math.max(0, m - 1) }).map((_, i) => (
-            <line key={`mid-${i}`} x1={x} y1={row2Y + ((i + 1) * middleTreadStep)} x2={x + col1W} y2={row2Y + ((i + 1) * middleTreadStep)} stroke="#38bdf8" strokeWidth="0.4" />
-          ))}
-          <rect x={x + col1W} y={row2Y} width={col2W} height={row2H} fill="none" stroke="#38bdf8" strokeWidth="0.3" strokeDasharray="2,2" />
-          <text x={x + col1W + col2W / 2} y={row2Y + row2H / 2 - fs * 0.9} fill="#38bdf8" fontSize={fs} textAnchor="middle" dominantBaseline="middle" fontWeight="600">
-            {`${riserCount} R @ ${riserIn.toFixed(1)}"`}
-          </text>
-          <text x={x + col1W + col2W / 2} y={row2Y + row2H / 2 + fs * 0.4} fill="#38bdf8" fontSize={fs} textAnchor="middle" dominantBaseline="middle" fontWeight="600">
-            {`T ${flightTreadIn.toFixed(1)}" / ${middleTreadIn.toFixed(1)}"`}
-          </text>
-          {shortBy > 0 && (
-            <text x={x + col1W + col2W / 2} y={row2Y + row2H / 2 + fs * 1.9} fill="#f87171" fontSize={fs * 0.9} textAnchor="middle" dominantBaseline="middle" fontWeight="700">
-              {`SHORT ${shortBy} TREAD`}
-            </text>
-          )}
-
-          {/* ROW 3 — 2nd landing + flight 2 */}
-          <rect x={x} y={row3Y} width={col1W} height={rowGH} fill="#0f172a" stroke="#38bdf8" strokeWidth="0.5" />
-          <text x={x + col1W / 2} y={row3Y + rowGH / 2} fill="#38bdf8" fontSize={Math.min(2.5, col1W * 0.12)} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
-            {col1W > 8 ? "2ND LANDING" : "2ND LNDG"}
-          </text>
-          <rect x={x + col1W} y={row3Y} width={col2W} height={rowGH} fill="none" stroke="#38bdf8" strokeWidth="0.5" />
-          {Array.from({ length: Math.max(0, f2 - 1) }).map((_, i) => (
-            <line key={`f2-${i}`} x1={x + col1W + ((i + 1) * flight2TreadStep)} y1={row3Y} x2={x + col1W + ((i + 1) * flight2TreadStep)} y2={row3Y + rowGH} stroke="#38bdf8" strokeWidth="0.4" />
-          ))}
-          <g transform={`translate(${x + col1W + col2W / 2}, ${row3Y + rowGH / 2})`}>
-            <line x1="-3" y1="0" x2="3" y2="0" stroke="#eab308" strokeWidth="0.7" />
-            <polygon points="4.5,0 1,-1.5 1,1.5" fill="#eab308" />
-          </g>
-        </g>
-      );
+    const fitsRect = (p: StairDrawPlan | undefined, rotated: boolean) => {
+      if (!p || p.shortTreads !== 0) return false;
+      const crossBox = rotated ? hFt : wFt;
+      const runBox = rotated ? wFt : hFt;
+      return p.usedCrossFt <= crossBox + 0.05 && p.usedRunFt <= runBox + 0.05;
     };
 
+    let rotated = wantRotated;
+    let plan: StairDrawPlan | undefined;
+    const lockFace = !!cfg.lockFace;   // building-level U/C decision aayi hai -> orientation badalni nahi
+    if (fitsRect(prePlan, wantRotated)) {
+      plan = prePlan;
+    } else if (!lockFace && fitsRect(prePlan, !wantRotated)) {
+      // planner ka flag rect se match nahi karta -> rect ke dimensions ko sach maano
+      rotated = !wantRotated;
+      plan = prePlan;
+    } else {
+      // Planner ka plan is rect me nahi baitha (e.g. user ne box badla / tower) -> usi orientation me dobara solve
+      const crossBox = rotated ? hFt : wFt;
+      const runBox = rotated ? wFt : hFt;
+      const base: StaircaseFootprint = usableSpec
+        ? (given as StaircaseFootprint)
+        : calculateStaircase(floorHeightFt, crossBox, runBox, "DOG_LEGGED");
+      plan = solveStairDrawPlan(base, crossBox, runBox).plan;
+    }
+    const P_: StairDrawPlan = plan as StairDrawPlan;
+
+    // entry face final: rotated -> LEFT/RIGHT, warna BOTTOM/TOP
+    let face: "BOTTOM" | "TOP" | "LEFT" | "RIGHT";
+    if (rotated) face = faceIn === "LEFT" ? "LEFT" : "RIGHT";
+    else face = faceIn === "TOP" ? "TOP" : "BOTTOM";
+
+    const R = P_.riserCount;
+    const riserIn = (floorHeightFt * 12) / Math.max(1, R);
+    const fwPx = P_.flightWidthFt * scale;
+    const crossPx = P_.usedCrossFt * scale;
+    const runPx = P_.usedRunFt * scale;
+    const f1 = P_.flight1.depthsIn, f2 = P_.flight2.depthsIn, mid = P_.middle.depthsIn;
+    const f1Px = P_.flight1.runFt * scale, f2Px = P_.flight2.runFt * scale;
+    const x2 = Math.max(fwPx, crossPx - fwPx);          // flight-2 / landing-2 ka local x
+    const flightsRunPx = Math.max(f1Px, f2Px);
+
+    // local (planner frame) -> world (svg) mapping
+    const toWorld = (lx: number, ly: number): [number, number] => {
+      switch (face) {
+        case "TOP":   return [x + crossPx - lx, y + runPx - ly];
+        case "LEFT":  return [x + runPx - ly, y + lx];
+        case "RIGHT": return [x + ly, y + lx];                 // C-shape: landings left, entry right (flight-1 upar wali row)
+        default:      return [x + lx, y + ly];
+      }
+    };
+    const matrix =
+      face === "TOP" ? `matrix(-1 0 0 -1 ${x + crossPx} ${y + runPx})`
+      : face === "LEFT" ? `matrix(0 1 -1 0 ${x + runPx} ${y})`
+      : face === "RIGHT" ? `matrix(0 1 1 0 ${x} ${y})`
+      : `matrix(1 0 0 1 ${x} ${y})`;
+
+    const avg = (a: number[]) => (a.length ? a.reduce((p, c) => p + c, 0) / a.length : 0);
+    const fs = Math.max(1.5, Math.min(2.4, scale * 0.4));
+    const lblFs = Math.min(2.5, fwPx * 0.12);
+
+    // flight tread lines: landing se entry ki taraf (local y badhta hai)
+    const flightTreadLines = (depths: number[], lx: number, key: string) => {
+      const out: React.ReactNode[] = [];
+      let acc = 0;
+      for (let i = 0; i < depths.length - 1; i++) {
+        acc += (depths[i] / 12) * scale;
+        out.push(<line key={`${key}-${i}`} x1={lx} y1={fwPx + acc} x2={lx + fwPx} y2={fwPx + acc} stroke={LINE_PRIMARY} strokeWidth="0.4" />);
+      }
+      return out;
+    };
+    // middle tread lines: dono landings ke beech (local x badhta hai)
+    const midTreadLines = () => {
+      const out: React.ReactNode[] = [];
+      let acc = 0;
+      for (let i = 0; i < mid.length - 1; i++) {
+        acc += (mid[i] / 12) * scale;
+        out.push(<line key={`mid-${i}`} x1={fwPx + acc} y1={0} x2={fwPx + acc} y2={fwPx} stroke={LINE_PRIMARY} strokeWidth="0.4" />);
+      }
+      return out;
+    };
+
+    const [l1x, l1y] = toWorld(fwPx / 2, fwPx / 2);
+    const [l2x, l2y] = toWorld(x2 + fwPx / 2, fwPx / 2);
+    const [cx, cy] = toWorld(crossPx / 2, fwPx + flightsRunPx / 2);
+
     return (
-      <g id="engine-validated-staircase">
-        {renderCShape()}
+      <g id="engine-validated-staircase" data-entry-face={face} data-rotated={rotated ? "1" : "0"}>
+        <g id="c-shape-stair" transform={matrix}>
+          {/* LANDING-1 (far end, x = 0) */}
+          <rect x={0} y={0} width={fwPx} height={fwPx} fill="#f0f0f0" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+          {/* FLIGHT-1 (entry flight) */}
+          <rect x={0} y={fwPx} width={fwPx} height={f1Px} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+          {flightTreadLines(f1, 0, "f1")}
+          <circle cx={fwPx / 2} cy={fwPx + f1Px - 2} r="0.9" fill={DOOR_COLOR} />
+          <g transform={`translate(${fwPx / 2}, ${fwPx + f1Px / 2})`}>
+            <line x1="0" y1="-3" x2="0" y2="3" stroke={DOOR_COLOR} strokeWidth="0.7" />
+            <polygon points="0,-4.5 -1.5,-1 1.5,-1" fill={DOOR_COLOR} />
+          </g>
+
+          {/* MIDDLE : landing-1 <-> landing-2 treads (0 bhi ho sakte hain) */}
+          <rect x={fwPx} y={0} width={Math.max(0, x2 - fwPx)} height={fwPx} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+          {midTreadLines()}
+          <rect x={fwPx} y={fwPx} width={Math.max(0, x2 - fwPx)} height={flightsRunPx} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.3" strokeDasharray="2,2" />
+
+          {/* LANDING-2 (far end, x = cross - fw) + FLIGHT-2 */}
+          <rect x={x2} y={0} width={fwPx} height={fwPx} fill="#f0f0f0" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+          <rect x={x2} y={fwPx} width={fwPx} height={f2Px} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+          {flightTreadLines(f2, x2, "f2")}
+          <g transform={`translate(${x2 + fwPx / 2}, ${fwPx + f2Px / 2})`}>
+            <line x1="0" y1="-3" x2="0" y2="3" stroke={DOOR_COLOR} strokeWidth="0.7" />
+            <polygon points="0,4.5 -1.5,1 1.5,1" fill={DOOR_COLOR} />
+          </g>
+        </g>
+
+        {/* TEXT: hamesha seedha (rotate nahi hota) */}
+        <text x={l1x} y={l1y} fill={LINE_PRIMARY} fontSize={lblFs} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
+          {fwPx > 8 ? "1ST LANDING" : "1ST LNDG"}
+        </text>
+        <text x={l2x} y={l2y} fill={LINE_PRIMARY} fontSize={lblFs} textAnchor="middle" dominantBaseline="middle" fontWeight="bold">
+          {fwPx > 8 ? "2ND LANDING" : "2ND LNDG"}
+        </text>
+        <text x={cx} y={cy - fs * 0.6} fill={LINE_PRIMARY} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fontWeight="600">
+          {`${R} R @ ${riserIn.toFixed(1)}"`}
+        </text>
+        <text x={cx} y={cy + fs * 0.7} fill={LINE_PRIMARY} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fontWeight="600">
+          {`T ${avg(f1).toFixed(1)}"${mid.length ? ` / ${avg(mid).toFixed(1)}"` : ""}`}
+        </text>
+        {P_.shortTreads > 0 && (
+          <text x={cx} y={cy + fs * 2} fill={WARN_COLOR} fontSize={fs * 0.9} textAnchor="middle" dominantBaseline="middle" fontWeight="700">
+            {`SHORT ${P_.shortTreads} TREAD`}
+          </text>
+        )}
       </g>
     );
   };
@@ -303,7 +354,6 @@ export default function CadFloorPlansView({
       return room.doors.some((d: any) => covers(room, wall, d)) || nb.doors.some((d: any) => covers(nb, OPP[wall], d));
     };
 
-    // ---------- A) align PARKING / KITCHEN band tops ----------
     const band = rooms.filter((r) => !isStair(r) && Math.abs(r.y + r.h - H) <= EPS && has(r, "PARKING", "KITCHEN"));
     if (band.length >= 2) {
       const topY = Math.min(...band.map((r) => r.y));
@@ -319,7 +369,6 @@ export default function CadFloorPlansView({
       });
     }
 
-    // ---------- B) hall absorbs the leftover gap below it ----------
     rooms.filter(isHall).forEach((h) => {
       const bottom = h.y + h.h;
       if (bottom >= H - EPS) return;
@@ -334,7 +383,6 @@ export default function CadFloorPlansView({
       h.windows = h.windows.filter((w: any) => w.wall !== "BOTTOM");
     });
 
-    // ---------- E) narrow bedroom => horizontal attached bath at the entry side ----------
     rooms.filter((r) => has(r, "ATTACHED") || (has(r, "BATH", "TOILET") && !has(r, "COMMON"))).forEach((b) => {
       const parent = rooms.find((p) => p !== b && has(p, "BEDROOM") && contains(p, b));
       if (!parent || parent.w > 12.01 || b.h <= b.w) return;
@@ -364,7 +412,6 @@ export default function CadFloorPlansView({
       }
     });
 
-    // ---------- D) private-room doors must never open to the outside ----------
     const isPrivate = (r: any) => has(r, "BEDROOM", "BATH", "TOILET", "DRESS", "STORE", "POOJA", "STUDY") && !has(r, "PARKING");
     const bestInterval = (lo: number, hi: number, forbidden: [number, number][], need: number): [number, number] | null => {
       const sorted = forbidden.filter((f) => f[1] > lo && f[0] < hi).sort((a, b) => a[0] - b[0]);
@@ -427,7 +474,6 @@ export default function CadFloorPlansView({
       });
     });
 
-    // ---------- C) gate/door on PARKING <-> HALL partition (+ kitchen door) ----------
     rooms.filter((r) => has(r, "PARKING")).forEach((p) => {
       const hall = rooms.find((h) => isCirc(h) && Math.abs(h.y + h.h - p.y) <= 0.25 && xOv(h, p) >= 3);
       if (hall && !hasDoorBetween(p, "TOP", hall)) addDoor(p, "TOP", hall, 3, "parking-hall");
@@ -538,8 +584,8 @@ export default function CadFloorPlansView({
 
     return (
       <g key={keyStr} id="cad-door-symbol">
-        <path d={arcPath} fill="none" stroke="#eab308" strokeWidth="0.5" strokeDasharray="1.5,1.5" />
-        <path d={shutterPath} stroke="#eab308" strokeWidth="1.2" strokeLinecap="round" />
+        <path d={arcPath} fill="none" stroke={DOOR_COLOR} strokeWidth="0.5" strokeDasharray="1.5,1.5" />
+        <path d={shutterPath} stroke={DOOR_COLOR} strokeWidth="1.2" strokeLinecap="round" />
       </g>
     );
   };
@@ -560,17 +606,17 @@ export default function CadFloorPlansView({
     if (isHorizontal) {
       return (
         <g key={keyStr} id="cad-window-symbol">
-          <rect x={wx} y={wy} width={ww} height={wallThick} fill="#020617" stroke="#ffffff" strokeWidth="0.4" />
-          <line x1={wx} y1={wy + wallThick * 0.3} x2={wx + ww} y2={wy + wallThick * 0.3} stroke="#38bdf8" strokeWidth="0.6" />
-          <line x1={wx} y1={wy + wallThick * 0.7} x2={wx + ww} y2={wy + wallThick * 0.7} stroke="#38bdf8" strokeWidth="0.6" />
+          <rect x={wx} y={wy} width={ww} height={wallThick} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.4" />
+          <line x1={wx} y1={wy + wallThick * 0.3} x2={wx + ww} y2={wy + wallThick * 0.3} stroke={LINE_PRIMARY} strokeWidth="0.6" />
+          <line x1={wx} y1={wy + wallThick * 0.7} x2={wx + ww} y2={wy + wallThick * 0.7} stroke={LINE_PRIMARY} strokeWidth="0.6" />
         </g>
       );
     }
     return (
       <g key={keyStr} id="cad-window-symbol">
-        <rect x={wx} y={wy} width={wallThick} height={ww} fill="#020617" stroke="#ffffff" strokeWidth="0.4" />
-        <line x1={wx + wallThick * 0.3} y1={wy} x2={wx + wallThick * 0.3} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
-        <line x1={wx + wallThick * 0.7} y1={wy} x2={wx + wallThick * 0.7} y2={wy + ww} stroke="#38bdf8" strokeWidth="0.6" />
+        <rect x={wx} y={wy} width={wallThick} height={ww} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.4" />
+        <line x1={wx + wallThick * 0.3} y1={wy} x2={wx + wallThick * 0.3} y2={wy + ww} stroke={LINE_PRIMARY} strokeWidth="0.6" />
+        <line x1={wx + wallThick * 0.7} y1={wy} x2={wx + wallThick * 0.7} y2={wy + ww} stroke={LINE_PRIMARY} strokeWidth="0.6" />
       </g>
     );
   };
@@ -587,8 +633,8 @@ export default function CadFloorPlansView({
     const EDGE_EPS = 0.16;
     const TOUCH_EPS = 0.25;
     const LINE = 0.32;
-    const OUTLINE = "#ef4444";
-    const FILL = "#020617";
+    const OUTLINE = LINE_PRIMARY;
+    const FILL = BG_FILL;
 
     type Side = "TOP" | "BOTTOM" | "LEFT" | "RIGHT";
     type Seg = { horizontal: boolean; fixed: number; start: number; end: number; room: any; side: Side; others: any[] };
@@ -756,10 +802,10 @@ export default function CadFloorPlansView({
           const inset = 0.35;
           const span = Math.max(0, rs.widthFeet * scale - 2 * inset);
           const off = Math.max(0, rs.offsetFeet * scale) + inset;
-          if (o.wall === "TOP") return <rect key={`cut-t-${index}`} x={rx + off} y={ry - cutDepth / 2} width={span} height={cutDepth} fill="#020617" />;
-          if (o.wall === "BOTTOM") return <rect key={`cut-b-${index}`} x={rx + off} y={ry + rh - cutDepth / 2} width={span} height={cutDepth} fill="#020617" />;
-          if (o.wall === "LEFT") return <rect key={`cut-l-${index}`} x={rx - cutDepth / 2} y={ry + off} width={cutDepth} height={span} fill="#020617" />;
-          return <rect key={`cut-r-${index}`} x={rx + rw - cutDepth / 2} y={ry + off} width={cutDepth} height={span} fill="#020617" />;
+          if (o.wall === "TOP") return <rect key={`cut-t-${index}`} x={rx + off} y={ry - cutDepth / 2} width={span} height={cutDepth} fill={BG_FILL} />;
+          if (o.wall === "BOTTOM") return <rect key={`cut-b-${index}`} x={rx + off} y={ry + rh - cutDepth / 2} width={span} height={cutDepth} fill={BG_FILL} />;
+          if (o.wall === "LEFT") return <rect key={`cut-l-${index}`} x={rx - cutDepth / 2} y={ry + off} width={cutDepth} height={span} fill={BG_FILL} />;
+          return <rect key={`cut-r-${index}`} x={rx + rw - cutDepth / 2} y={ry + off} width={cutDepth} height={span} fill={BG_FILL} />;
         })}
       </g>
     );
@@ -772,7 +818,7 @@ export default function CadFloorPlansView({
   ) => {
     void outerW; void outerH;
     const cuts: React.ReactElement[] = [];
-    const bg = "#020617";
+    const bg = BG_FILL;
     const extend = Math.max(0.35, outerWallThicknessFt * scale + 1);
     const pushOpening = (room: any, o: any) => {
       const wall = String(o.wall || "").toUpperCase();
@@ -816,6 +862,143 @@ export default function CadFloorPlansView({
     }
     return lines;
   };
+
+  // =========================================================================
+  // STAIR SHAPE DECISION (U ya C) — poori building ke liye EK hi faisla
+  //   U-shape = entry NEECHE (BOTTOM/TOP), flights portrait  -> stair ke neeche/upar 3.5 ft khuli jagah chahiye
+  //   C-shape = entry SIDE se (LEFT/RIGHT), landings ek side  -> stair ke side me 3.5 ft khuli jagah chahiye
+  // Har candidate face har floor (ground + upper) par check hota hai:
+  //   1) plan us rect me exact baithe (shortTreads = 0, treads 9"-11", riser count same)
+  //   2) entry/arrival side par poori stair-width x 3.5 ft ka zone plan ke andar ho aur
+  //      kisi bedroom / toilet / kitchen / parking / duct se na takraye (sirf living / passage / hall ke upar ho sakta hai)
+  // Jo face sab floors par pass ho wahi use hota hai (ground = upper = tower). Koi sab par pass na ho to
+  // sabse zyada floors par pass hone wala (console me warning aati hai).
+  // =========================================================================
+  type StairFace = "BOTTOM" | "TOP" | "LEFT" | "RIGHT";
+  const STAIR_ACCESS_DEPTH_FT = 3.5;
+
+  const lookupFloorRooms = (name: string): any[] => {
+    if (!floorRooms) return [];
+    let src: any = (floorRooms as any)[name];
+    if (!src) {
+      const clean = name.trim().toLowerCase().replace(/\s+/g, "_");
+      const key = Object.keys(floorRooms).find(
+        (k) => k.trim().toLowerCase() === name.trim().toLowerCase() || k.trim().toLowerCase().replace(/\s+/g, "_") === clean
+      );
+      src = key ? (floorRooms as any)[key] : null;
+    }
+    if (!src) return [];
+    return Array.isArray(src) ? src : Object.values(src);
+  };
+
+  const stairDecision: { face: StairFace; allOk: boolean; summary: string } | null = (() => {
+    try {
+      const CIRC = ["LIVING", "HALL", "DRAWING", "PASSAGE", "CORRIDOR", "DINING", "LOBBY"];
+      const isCirc = (n: string) => CIRC.some((k) => n.includes(k));
+      type Item = { floor: string; W: number; H: number; rooms: any[]; sx: number; sy: number; sw: number; sh: number; es: any };
+      const items: Item[] = [];
+
+      for (const fname of processedFloors) {
+        const up = fname.toUpperCase();
+        if (up.includes("TOWER") || up.includes("MUMTY")) continue;
+        const info: any = getFloorInfo(fname);
+        const wall = 4 / 12;
+        const sb = info?.setbacks || {};
+        const plotW = Number(info?.width) || 10;
+        const plotL = Number(info?.length) || 40;
+        const cw = Number(info?.clearWidth), cl = Number(info?.clearLength);
+        const W = Math.max(3.5, cw > 0 ? cw : plotW - ((Number(sb.left) || 0) + (Number(sb.right) || 0)) - wall * 2);
+        const H = Math.max(6, cl > 0 ? cl : plotL - ((Number(sb.front) || 0) + (Number(sb.rear) || 0)) - wall * 2);
+
+        let entries: any[] = lookupFloorRooms(fname);
+        if (entries.length === 0 && Array.isArray(info?.rooms)) entries = info.rooms;
+        if (entries.length === 0) continue;
+        const raw = entries.map((r: any) => ({
+          ...r,
+          name: r.name || r.label || r.roomType || "ROOM",
+          x: Math.max(0, Number(r.x ?? 0)), y: Math.max(0, Number(r.y ?? 0)),
+          w: Math.max(0.1, Math.min(Number(r.w ?? W), W)), h: Math.max(0.1, Math.min(Number(r.h ?? H), H)),
+          type: r.type || r.roomType || "room",
+        }));
+        const rooms = normalizeRoomList(raw, W, H);
+        const living: any = rooms.find((r: any) => String(r.name || "").toUpperCase().includes("LIVING") && r.embeddedStair && (r.embeddedStair.w || 0) > 0 && (r.embeddedStair.h || 0) > 0);
+        if (!living) continue;
+        const es = living.embeddedStair;
+        const sx = (living.x || 0) + (es.relX !== undefined ? es.relX : (es.x || 0));
+        const sy = (living.y || 0) + (es.relY !== undefined ? es.relY : (es.y || 0));
+        items.push({ floor: fname, W, H, rooms, sx, sy, sw: es.w || 0, sh: es.h || 0, es });
+      }
+      if (items.length === 0) return null;
+
+      const planFits = (it: Item, face: StairFace): boolean => {
+        const rot = face === "LEFT" || face === "RIGHT";
+        const cross = rot ? it.sh : it.sw;
+        const run = rot ? it.sw : it.sh;
+        const given: any = it.es.staircaseSpec || {};
+        const pre: StairDrawPlan | undefined = given?.drawPlan ?? it.es.renderHints?.drawPlan;
+        if (pre && pre.shortTreads === 0 && pre.usedCrossFt <= cross + 0.05 && pre.usedRunFt <= run + 0.05) return true;
+        const usable = Number(given?.riserCount) > 0 && Number(given?.flightWidthFt) > 0 && given?.flight1 && given?.flight2;
+        const base: StaircaseFootprint = usable ? (given as StaircaseFootprint) : calculateStaircase(stairFloorHeightFt, cross, run, "DOG_LEGGED");
+        return solveStairDrawPlan(base, cross, run).plan.shortTreads === 0;
+      };
+
+      const accessFree = (it: Item, face: StairFace): boolean => {
+        const D = STAIR_ACCESS_DEPTH_FT;
+        let zx = it.sx, zy = it.sy, zw = it.sw, zh = it.sh;
+        if (face === "BOTTOM") { zy = it.sy + it.sh; zh = D; }
+        else if (face === "TOP") { zy = it.sy - D; zh = D; }
+        else if (face === "RIGHT") { zx = it.sx + it.sw; zw = D; }
+        else { zx = it.sx - D; zw = D; }
+        const E = 0.05;
+        if (zx < -E || zy < -E || zx + zw > it.W + E || zy + zh > it.H + E) return false;
+        for (const r of it.rooms) {
+          const n = String(r.name || "").toUpperCase();
+          if (r.type === "stairs" || n.includes("STAIR") || isCirc(n)) continue;
+          const ox = Math.min(zx + zw, (r.x || 0) + (r.w || 0)) - Math.max(zx, r.x || 0);
+          const oy = Math.min(zy + zh, (r.y || 0) + (r.h || 0)) - Math.max(zy, r.y || 0);
+          if (ox > E && oy > E) return false;
+        }
+        return true;
+      };
+
+      const plannerFace = String(items[0].es.entryFace || "").toUpperCase() as StairFace;
+      const order = Array.from(new Set<StairFace>([
+        ...(["BOTTOM", "TOP", "LEFT", "RIGHT"].includes(plannerFace) ? [plannerFace] : []),
+        "BOTTOM", "RIGHT", "LEFT", "TOP",
+      ] as StairFace[]));
+
+      let best: { face: StairFace; okCount: number; fitAll: boolean } | null = null;
+      const lines: string[] = [];
+      for (const face of order) {
+        const fitAll = items.every((it) => planFits(it, face));
+        const okFloors = items.filter((it) => accessFree(it, face)).map((it) => it.floor);
+        const okCount = okFloors.length;
+        lines.push(`${face}: fit=${fitAll} access ${okCount}/${items.length} [${okFloors.join(", ")}]`);
+        const better = !best
+          || (fitAll && !best.fitAll)
+          || (fitAll === best.fitAll && okCount > best.okCount);
+        if (better) best = { face, okCount, fitAll };
+        if (fitAll && okCount === items.length) { best = { face, okCount, fitAll }; break; }
+      }
+      const b = best!;
+      const allOk = b.fitAll && b.okCount === items.length;
+      return { face: b.face, allOk, summary: lines.join(" | ") };
+    } catch (e) {
+      console.warn("[STAIR DECISION] fail -> planner ka face use hoga", e);
+      return null;
+    }
+  })();
+
+  if (stairDecision && typeof console !== "undefined") {
+    const k = `stair-decision-${stairDecision.face}-${stairDecision.summary}`;
+    if (!cadStairDebugCache.has(k)) {
+      cadStairDebugCache.add(k);
+      const shape = stairDecision.face === "LEFT" || stairDecision.face === "RIGHT" ? "C-SHAPE (side entry)" : "U-SHAPE (front entry)";
+      (stairDecision.allOk ? console.info : console.warn)(
+        `[STAIR DECISION] ${shape} face=${stairDecision.face} allFloorsOk=${stairDecision.allOk}`, stairDecision.summary
+      );
+    }
+  }
 
   return (
     <g>
@@ -997,11 +1180,11 @@ export default function CadFloorPlansView({
               </clipPath>
             </defs>
 
-            <path d={outerWallPath} fill="url(#wallHatch)" fillRule="evenodd" stroke="#ef4444" strokeWidth="0.8" strokeLinejoin="round" />
-            <path d={`M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z`} fill="none" stroke="#ef4444" strokeWidth="0.5" />
+            <path d={outerWallPath} fill="url(#wallHatch)" fillRule="evenodd" stroke={LINE_PRIMARY} strokeWidth="0.8" strokeLinejoin="round" />
+            <path d={`M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z`} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
 
             <g id="internal-room-planning" clipPath={`url(#${clipId})`}>
-              <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} fill="#020617" stroke="#ef4444" strokeWidth="0.5" />
+              <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.5" />
 
               {roomList.map((rm: any, rIdx: number) => {
                 const rx = i0.x + (rm.x || 0) * scale;
@@ -1018,7 +1201,19 @@ export default function CadFloorPlansView({
                     const stairConfig = {
                       ...floorInfo?.staircaseConfig,
                       staircaseType: stairType,
-                      staircaseSpec: { ...((rm as any)?.staircaseSpec || {}), staircaseType: stairType },
+                      entryFace: stairDecision
+                        ? stairDecision.face
+                        : ((rm as any)?.entryFace || (rm as any)?.stairMeta?.entryFace || (rm as any)?.staircaseSpec?.entryFace || floorInfo?.staircaseConfig?.entryFace),
+                      rotated: stairDecision
+                        ? (stairDecision.face === "LEFT" || stairDecision.face === "RIGHT")
+                        : ((rm as any)?.rotated ?? (rm as any)?.stairMeta?.rotated ?? floorInfo?.staircaseConfig?.rotated),
+                      lockFace: !!stairDecision,
+                      staircaseSpec: {
+                        ...(floorInfo?.staircase || {}),
+                        ...((rm as any)?.stairMeta?.staircaseSpec || {}),
+                        ...((rm as any)?.staircaseSpec || {}),
+                        staircaseType: stairType,
+                      },
                     };
                     return (
                       <g key={`tower-stairs-${index}-${rIdx}`}>
@@ -1042,7 +1237,7 @@ export default function CadFloorPlansView({
                   if (rx < ox + ow && rx + rw > ox && ry < oy + oh && ry + rh > oy) { hasOverlap = true; break; }
                 }
 
-                const rectFill = isDuct ? "url(#wallHatch)" : String(rm.name || "").toUpperCase() === "PASSAGE" ? "none" : "#020617";
+                const rectFill = isDuct ? "url(#wallHatch)" : String(rm.name || "").toUpperCase() === "PASSAGE" ? "none" : BG_FILL;
                 void hasOverlap;
                 const rectStroke = "none";
                 const rectStrokeWidth = 0;
@@ -1073,6 +1268,12 @@ export default function CadFloorPlansView({
                             {
                               staircaseType: embeddedStair.staircaseType,
                               staircaseSpec: embeddedStair.staircaseSpec,
+                              entryFace: stairDecision ? stairDecision.face : embeddedStair.entryFace,
+                              rotated: stairDecision
+                                ? (stairDecision.face === "LEFT" || stairDecision.face === "RIGHT")
+                                : (typeof embeddedStair.rotated === "boolean" ? embeddedStair.rotated : embeddedStair.renderHints?.rotated),
+                              lockFace: !!stairDecision,
+                              renderHints: embeddedStair.renderHints,
                             }
                           );
                         })()}
@@ -1083,22 +1284,22 @@ export default function CadFloorPlansView({
                       <g id={`passage-guide-${index}-${rIdx}`} pointerEvents="none">
                         {rw <= rh ? (
                           <>
-                            <line x1={rx + 0.6} y1={ry} x2={rx + 0.6} y2={ry + rh} stroke="#ec4899" strokeWidth="1.1" />
-                            <line x1={rx + rw - 0.6} y1={ry} x2={rx + rw - 0.6} y2={ry + rh} stroke="#ec4899" strokeWidth="1.1" />
+                            <line x1={rx + 0.6} y1={ry} x2={rx + 0.6} y2={ry + rh} stroke={PASSAGE_COLOR} strokeWidth="1.1" />
+                            <line x1={rx + rw - 0.6} y1={ry} x2={rx + rw - 0.6} y2={ry + rh} stroke={PASSAGE_COLOR} strokeWidth="1.1" />
                           </>
                         ) : (
                           <>
-                            <line x1={rx} y1={ry + 0.6} x2={rx + rw} y2={ry + 0.6} stroke="#ec4899" strokeWidth="1.1" />
-                            <line x1={rx} y1={ry + rh - 0.6} x2={rx + rw} y2={ry + rh - 0.6} stroke="#ec4899" strokeWidth="1.1" />
+                            <line x1={rx} y1={ry + 0.6} x2={rx + rw} y2={ry + 0.6} stroke={PASSAGE_COLOR} strokeWidth="1.1" />
+                            <line x1={rx} y1={ry + rh - 0.6} x2={rx + rw} y2={ry + rh - 0.6} stroke={PASSAGE_COLOR} strokeWidth="1.1" />
                           </>
                         )}
-                        <text x={rx + rw / 2} y={ry + rh / 2} fill="#ec4899" fontSize={Math.max(2, Math.min(3.2, Math.min(rw, rh) * 0.10))} textAnchor="middle" dominantBaseline="middle" fontWeight="700" transform={rw <= rh ? `rotate(-90 ${rx + rw / 2} ${ry + rh / 2})` : undefined}>PASSAGE {Number((rm as any).corridorWidthFt || Math.min(rm.w || 0, rm.h || 0) || 0).toFixed(2)}'</text>
+                        <text x={rx + rw / 2} y={ry + rh / 2} fill={PASSAGE_COLOR} fontSize={Math.max(2, Math.min(3.2, Math.min(rw, rh) * 0.10))} textAnchor="middle" dominantBaseline="middle" fontWeight="700" transform={rw <= rh ? `rotate(-90 ${rx + rw / 2} ${ry + rh / 2})` : undefined}>PASSAGE {Number((rm as any).corridorWidthFt || Math.min(rm.w || 0, rm.h || 0) || 0).toFixed(2)}'</text>
                       </g>
                     ) : null}
                     {isDuct && (
                       <g id="duct-cross-lines">
-                        <line x1={rx} y1={ry} x2={rx + rw} y2={ry + rh} stroke="#475569" strokeWidth="0.4" strokeDasharray="3,2" />
-                        <line x1={rx + rw} y1={ry} x2={rx} y2={ry + rh} stroke="#475569" strokeWidth="0.4" strokeDasharray="3,2" />
+                        <line x1={rx} y1={ry} x2={rx + rw} y2={ry + rh} stroke={LINE_SECONDARY} strokeWidth="0.4" strokeDasharray="3,2" />
+                        <line x1={rx + rw} y1={ry} x2={rx} y2={ry + rh} stroke={LINE_SECONDARY} strokeWidth="0.4" strokeDasharray="3,2" />
                       </g>
                     )}
 
@@ -1166,11 +1367,11 @@ export default function CadFloorPlansView({
                         <g clipPath={`url(#room-label-clip-${index}-${rIdx})`}>
                           <g transform={lp.rotate ? `rotate(${lp.rotate} ${lp.cx} ${lp.cy})` : undefined}>
                             {lp.lines.map((ln, lineIdx) => ln.kind === "name" ? (
-                              <text key={`title-${lineIdx}`} x={ln.x} y={ln.y} fill={isDuct ? "#94a3b8" : "#ffffff"} fontSize={ln.fontSize} fontWeight="bold" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "1.0px" }}>
+                              <text key={`title-${lineIdx}`} x={ln.x} y={ln.y} fill={isDuct ? DUCT_TEXT : TEXT_PRIMARY} fontSize={ln.fontSize} fontWeight="bold" textAnchor="middle" dominantBaseline="central">
                                 {ln.text}
                               </text>
                             ) : (
-                              <text key={`dim-${lineIdx}`} x={ln.x} y={ln.y} fill="#38bdf8" fontSize={ln.fontSize} fontWeight="600" textAnchor="middle" dominantBaseline="central" style={{ paintOrder: "stroke", stroke: "#000", strokeWidth: "0.8px" }}>
+                              <text key={`dim-${lineIdx}`} x={ln.x} y={ln.y} fill={TEXT_DIM} fontSize={ln.fontSize} fontWeight="600" textAnchor="middle" dominantBaseline="central">
                                 {ln.text}
                               </text>
                             ))}
@@ -1295,7 +1496,7 @@ export default function CadFloorPlansView({
             {renderSideDim(p1, p2, centerPt, scale, measurementUnit)}
             {renderSideDim(p0, p3, centerPt, scale, measurementUnit)}
 
-            <text x={centerPt.x} y={labelY} textAnchor="middle" dominantBaseline="middle" fill="#000000" style={{ fontWeight: "900", fontSize: "8.5px", fontFamily: "sans-serif", paintOrder: "stroke", stroke: "#ffffff", strokeWidth: "3px" }}>
+            <text x={centerPt.x} y={labelY} textAnchor="middle" dominantBaseline="middle" fill={TEXT_PRIMARY} style={{ fontWeight: "900", fontSize: "8.5px", fontFamily: "sans-serif" }}>
               {floorName}
             </text>
 

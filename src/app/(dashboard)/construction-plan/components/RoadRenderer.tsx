@@ -21,6 +21,9 @@ interface RoadRendererProps {
 const SCALE = 5.5;
 export const SITE_LAYOUT_GAP = 20;
 
+// 🎨 LIGHT THEME: Road line color
+const ROAD_LINE_COLOR = "#000000";  // was #ffffff
+
 export default function RoadRenderer({
   roadFacingOption,
   bottomBoundary,
@@ -100,28 +103,22 @@ export default function RoadRenderer({
   // ORTHOGONAL (90-DEGREE) RECTANGLE ROAD GEOMETRY
   // ==========================================
 
-  // Left & Right Side Road Boundaries
   const lLeft = pTopLeft.x - leftDirHeight;
   const lRight = pTopLeft.x;
   const rLeft = pBottomRight.x;
   const rRight = pBottomRight.x + rightDirHeight;
 
-  // Bottom Road Box (Updated: 6' extra extension on both sides even if side road is absent)
   const bLeft = hasLeftRoad ? lLeft - ext : pBottomLeft.x - ext;
   const bRight = hasRightRoad ? rRight + ext : pBottomRight.x + ext;
   const bTop = pBottomLeft.y;
   const bBottom = pBottomLeft.y + bottomDirHeight;
 
-  // Top Road Box
   const tLeft = pTopLeft.x - (hasLeftRoad ? leftDirHeight + ext : ext);
   const tRight = pTopRight.x + (hasRightRoad ? rightDirHeight + ext : ext);
   const tBottom = pTopLeft.y;
   const tTop = pTopLeft.y - topDirHeight;
 
-  // Left Road Box
   const lTop = hasTopRoad ? tTop : pTopLeft.y - ext;
-
-  // Right Road Box
   const rTop = hasTopRoad ? tTop : pTopRight.y - ext;
 
   return (
@@ -129,42 +126,39 @@ export default function RoadRenderer({
       {/* 1. BOTTOM ROAD */}
       {hasBottomRoad && (
         <>
-          <line x1={bLeft} y1={bBottom} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+          <line x1={bLeft} y1={bBottom} x2={bRight} y2={bBottom} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           
           {hasLeftRoad ? (
-            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           ) : (
-            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bLeft} y1={bTop} x2={bLeft} y2={bBottom} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           )}
 
           {hasRightRoad ? (
-            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           ) : (
-            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bRight} y1={bTop} x2={bRight} y2={bBottom} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           )}
           
-          {/* Left Extension Top Line */}
           {hasLeftRoad ? (
-            <line x1={bLeft} y1={bTop} x2={lLeft} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bLeft} y1={bTop} x2={lLeft} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           ) : (
-            <line x1={bLeft} y1={bTop} x2={pBottomLeft.x} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+            <line x1={bLeft} y1={bTop} x2={pBottomLeft.x} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           )}
 
-          {/* Main Front Plot Road Line */}
           <line
             x1={pBottomLeft.x}
             y1={bTop}
             x2={pBottomRight.x}
             y2={bTop}
-            stroke="#ffffff"
+            stroke={ROAD_LINE_COLOR}
             strokeWidth="1"
           />
 
-          {/* Right Extension Top Line */}
           {hasRightRoad ? (
-            <line x1={rRight} y1={bTop} x2={bRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+            <line x1={rRight} y1={bTop} x2={bRight} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           ) : (
-            <line x1={pBottomRight.x} y1={bTop} x2={bRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
+            <line x1={pBottomRight.x} y1={bTop} x2={bRight} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           )}
         </>
       )}
@@ -172,15 +166,15 @@ export default function RoadRenderer({
       {/* 2. TOP ROAD */}
       {hasTopRoad && (
         <>
-          <line x1={tLeft} y1={tTop} x2={tRight} y2={tTop} stroke="#ffffff" strokeWidth="1" />
-          <line x1={tLeft} y1={tBottom} x2={tLeft} y2={tTop} stroke="#ffffff" strokeWidth="1" />
-          <line x1={tRight} y1={tBottom} x2={tRight} y2={tTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={tLeft} y1={tTop} x2={tRight} y2={tTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
+          <line x1={tLeft} y1={tBottom} x2={tLeft} y2={tTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
+          <line x1={tRight} y1={tBottom} x2={tRight} y2={tTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           <line
             x1={hasLeftRoad ? pTopLeft.x : tLeft}
             y1={tBottom}
             x2={hasRightRoad ? pTopRight.x : tRight}
             y2={tBottom}
-            stroke="#ffffff"
+            stroke={ROAD_LINE_COLOR}
             strokeWidth="1"
           />
         </>
@@ -189,14 +183,14 @@ export default function RoadRenderer({
       {/* 3. LEFT SIDE ROAD */}
       {hasLeftRoad && (
         <>
-          <line x1={lLeft} y1={lTop} x2={lLeft} y2={bTop} stroke="#ffffff" strokeWidth="1" />
-          <line x1={lLeft} y1={lTop} x2={lRight} y2={lTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={lLeft} y1={lTop} x2={lLeft} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
+          <line x1={lLeft} y1={lTop} x2={lRight} y2={lTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           <line
             x1={lRight}
             y1={hasTopRoad ? pTopLeft.y : lTop}
             x2={lRight}
             y2={bTop}
-            stroke="#ffffff"
+            stroke={ROAD_LINE_COLOR}
             strokeWidth="1"
           />
         </>
@@ -205,14 +199,14 @@ export default function RoadRenderer({
       {/* 4. RIGHT SIDE ROAD */}
       {hasRightRoad && (
         <>
-          <line x1={rRight} y1={rTop} x2={rRight} y2={bTop} stroke="#ffffff" strokeWidth="1" />
-          <line x1={rLeft} y1={rTop} x2={rRight} y2={rTop} stroke="#ffffff" strokeWidth="1" />
+          <line x1={rRight} y1={rTop} x2={rRight} y2={bTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
+          <line x1={rLeft} y1={rTop} x2={rRight} y2={rTop} stroke={ROAD_LINE_COLOR} strokeWidth="1" />
           <line
             x1={rLeft}
             y1={hasTopRoad ? pTopRight.y : rTop}
             x2={rLeft}
             y2={bTop}
-            stroke="#ffffff"
+            stroke={ROAD_LINE_COLOR}
             strokeWidth="1"
           />
         </>

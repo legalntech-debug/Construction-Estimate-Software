@@ -11,6 +11,11 @@ interface PlotPolygonRendererProps {
   ) => void;
 }
 
+// 🎨 LIGHT THEME COLORS
+const PLOT_STROKE = "#000000";        // Plot border (was #E6B800 yellow)
+const HATCH_STROKE = "#666666";       // Hatch lines (was #ffffff)
+const PROPOSED_STROKE = "#1e40af";    // Proposed site border (was #00ffff cyan)
+
 export default function PlotPolygonRenderer({
   plotPolygon,
   proposedSitePolygon,
@@ -43,20 +48,20 @@ export default function PlotPolygonRenderer({
             y1="0"
             x2="0"
             y2={hatchSpacing}
-            stroke="#ffffff"
+            stroke={HATCH_STROKE}
             strokeWidth={0.8 * (cadZoom || 1)}
-            opacity="0.25"
+            opacity="0.4"
           />
         </pattern>
       </defs>
 
-      {/* Main Plot Polygon (Engineering Thin Sharp Border) */}
+      {/* Main Plot Polygon */}
       {plotPoints && (
         <polygon
           points={plotPoints}
-          fill="rgba(255, 255, 255, 0.02)" 
-          stroke="#E6B800" 
-          strokeWidth={isSelected ? 1.8 : 1.2} /* <-- Yahan stroke width ko thin kar diya gaya hai */
+          fill="none" 
+          stroke={PLOT_STROKE} 
+          strokeWidth={isSelected ? 2.5 : 1.5}
           strokeLinejoin="round"
           className="cursor-pointer transition-all"
           onClick={(e) => handlePolygonClick(e, "plot")}
@@ -68,7 +73,7 @@ export default function PlotPolygonRenderer({
         <polygon
           points={proposedPoints}
           fill={`url(#${hatchId})`}
-          stroke="#00ffff"
+          stroke={PROPOSED_STROKE}
           strokeWidth={1}
           strokeDasharray="3 3"
           strokeLinejoin="round"

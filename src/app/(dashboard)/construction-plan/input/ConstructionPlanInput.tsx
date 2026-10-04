@@ -7,6 +7,10 @@ import PlotConfigSection from "../components/PlotConfigSection";
 import FloorManagerSection from "../components/FloorManagerSection";
 import FloorPlanningSettings from "../components/FloorPlanningSettings";
 import CadModalView from "../components/CadModalView";
+import CadFloorElevationRenderer from "../components/CadFloorElevationRenderer";
+import PlotPolygonRenderer from "../components/PlotPolygonRenderer";
+import BoundaryLabels from "../components/BoundaryLabels";
+import RoadRenderer from "../components/RoadRenderer";
 import { DEFAULT_FLOOR_PLANNING_SETTINGS, FloorData, FloorPlanningSettings as FloorPlanningSettingsType, FloorRoom, PlanningMode, PlotDimensions, PlotShape } from "../engine/planningTypes";
 import { calculateSetbacks } from "../engine/setbackRules";
 import { generateCompleteConstructionPlan } from "../engine/planGenerator";
@@ -61,7 +65,6 @@ export default function ConstructionPlanInput() {
   const [measurementUnit, setMeasurementUnit] = useState<"FEET" | "METERS">("FEET");
   const [roadFacingOption, setRoadFacingOption] = useState("");
 
-  // ✅ Parking side state — for 2+ road / corner plots
   const [parkingSide, setParkingSide] = useState<string>("SOUTH");
 
   const [coverageType, setCoverageType] = useState("100_PERCENT");
@@ -70,10 +73,13 @@ export default function ConstructionPlanInput() {
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [isCadModalOpen, setIsCadModalOpen] = useState(false);
   
+  const [showInlinePlan, setShowInlinePlan] = useState<boolean>(false);
+  const [generatedPreviewPayload, setGeneratedPreviewPayload] = useState<any>(null);
+  const inlinePlansRef = useRef<HTMLDivElement>(null);
+  
   const [blueprintZoom, setBlueprintZoom] = useState(1.0);
   const [dimensionHistory, setDimensionHistory] = useState<PlotDimensions[]>([]);
   
-  // Initial dimensions set to 0 with required PlotDimensions properties
   const [plotDimensions, setPlotDimensions] = useState<PlotDimensions>({
     length: 0,
     width: 0,
@@ -90,13 +96,92 @@ export default function ConstructionPlanInput() {
 
   const [setbackInputs, setSetbackInputs] = useState({ front: 5, rear: 3, left: 3, right: 3 });
 
-  // ✅ Stair position inheritance state
   const [groundStairPos, setGroundStairPos] = useState<{ x: number; y: number; w?: number; h?: number } | null>(null);
   const [groundStairOffset, setGroundStairOffset] = useState<{ dx: number; dy: number } | null>(null);
   const [groundFloorProgram, setGroundFloorProgram] = useState<string[]>([]);
 
-  // ✅ Guard to avoid infinite re-render
   const lastExtractedSignature = useRef<string>("");
+
+  // ============================================================
+  // ✅ Restore saved construction plan data (from Reopen Old Case)
+  // ============================================================
+  const hasRestoredRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+
+    try {
+      const raw =
+        localStorage.getItem("constructionPlanData") ||
+        localStorage.getItem("construction_plan_preview_data") ||
+        localStorage.getItem("CONSTRUCTION_PLAN_INPUT");
+
+      if (!raw) return;
+
+      const saved = JSON.parse(raw);
+      if (!saved || typeof saved !== "object") return;
+
+      console.log("[REOPEN] Restoring construction plan data:", {
+        refNo: saved.ref_no || saved.refNo,
+        plotShape: saved.plotShape,
+        selectedFloors: saved.selectedFloors,
+      });
+
+      if (saved.selectedClientName) setSelectedClientName(saved.selectedClientName);
+      if (saved.representative) setRepresentative(saved.representative);
+      if (saved.customerName) setCustomerName(saved.customerName);
+      if (saved.propertyAddress) setPropertyAddress(saved.propertyAddress);
+
+      if (saved.plotShape) setPlotShape(saved.plotShape);
+      if (saved.roadFacingOption) setRoadFacingOption(saved.roadFacingOption);
+      if (saved.parkingSide) setParkingSide(saved.parkingSide);
+      if (saved.coverageType) setCoverageType(saved.coverageType);
+      if (saved.measurementUnit) setMeasurementUnit(saved.measurementUnit);
+
+      if (saved.plotDimensions) setPlotDimensions(saved.plotDimensions);
+      if (saved.dimDetails) setDimDetails(saved.dimDetails);
+      if (saved.setbackInputs) setSetbackInputs(saved.setbackInputs);
+
+      if (saved.boundaries) {
+        if (saved.boundaries.north) setBoundaryNorth(saved.boundaries.north);
+        if (saved.boundaries.south) setBoundarySouth(saved.boundaries.south);
+        if (saved.boundaries.east) setBoundaryEast(saved.boundaries.east);
+        if (saved.boundaries.west) setBoundaryWest(saved.boundaries.west);
+      }
+
+      if (Array.isArray(saved.selectedFloors) && saved.selectedFloors.length > 0) {
+        setSelectedFloors(saved.selectedFloors);
+        setTempSelectedFloors(saved.selectedFloors);
+      }
+      if (saved.floorData && typeof saved.floorData === "object") {
+        setFloorData(saved.floorData);
+      }
+      if (saved.floorRooms && typeof saved.floorRooms === "object") {
+        setFloorRooms(saved.floorRooms);
+      }
+      if (saved.floorBhkConfig) setFloorBhkConfig(saved.floorBhkConfig);
+
+      if (saved.planningMode) setPlanningMode(saved.planningMode);
+      if (saved.floorSettings) setFloorSettings(saved.floorSettings);
+
+      if (saved.groundStairPosition) setGroundStairPos(saved.groundStairPosition);
+      if (saved.groundStairRelativeOffset) setGroundStairOffset(saved.groundStairRelativeOffset);
+      if (Array.isArray(saved.groundFloorProgram)) setGroundFloorProgram(saved.groundFloorProgram);
+
+      if (saved.feeMode) setFeeMode(saved.feeMode);
+
+      hasRestoredRef.current = true;
+      console.log("[REOPEN] ✅ Construction plan data restored successfully");
+    } catch (e) {
+      console.error("[REOPEN] Failed to restore construction plan data:", e);
+    } finally {
+      try {
+        localStorage.removeItem("constructionPlanData");
+        localStorage.removeItem("construction_plan_preview_data");
+        localStorage.removeItem("CONSTRUCTION_PLAN_INPUT");
+      } catch {}
+    }
+  }, []);
 
   useEffect(() => {
     if (coverageType === "100_PERCENT") {
@@ -133,7 +218,6 @@ export default function ConstructionPlanInput() {
   const [boundaryEast, setBoundaryEast] = useState("");
   const [boundaryWest, setBoundaryWest] = useState("");
 
-  // Side A = Front Width, Side C = Depth / Length
   const frontWidthFt = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0) + Number(dimDetails.A?.in ?? 0) / 12;
   const depthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
   const plotArea = frontWidthFt * depthFt;
@@ -146,7 +230,6 @@ export default function ConstructionPlanInput() {
     }
   });
 
-  // Ground Floor width = frontWidthFt, length = depthFt sync logic
   useEffect(() => {
     if (frontWidthFt <= 0 || depthFt <= 0) return;
 
@@ -157,12 +240,26 @@ export default function ConstructionPlanInput() {
     setFloorData(prev => {
       const updated = { ...prev };
       selectedFloors.forEach(floor => {
+        const isTower = floor.toUpperCase().includes("TOWER") || floor.toUpperCase().includes("MUMTY");
+        
         if (floor === "GROUND FLOOR") {
           updated[floor] = {
             width: currentWidth,
             length: currentLength,
             area: calculatedArea
           };
+        } else if (isTower) {
+          const towerWidth = Math.min(10, currentWidth);
+          const towerLength = Math.min(10, currentLength);
+          const towerArea = Number((towerWidth * towerLength).toFixed(2));
+          
+          if (!updated[floor]) {
+            updated[floor] = {
+              width: towerWidth,
+              length: towerLength,
+              area: towerArea
+            };
+          }
         } else {
           if (!updated[floor]) {
             updated[floor] = { width: currentWidth, length: currentLength, area: calculatedArea };
@@ -279,7 +376,7 @@ export default function ConstructionPlanInput() {
   }, [selectedFloors, planningMode]);
 
   // ============================================================================
-  // ✅ GROUND FLOOR STAIR POSITION — runs actual layout engine
+  // ✅ GROUND FLOOR STAIR POSITION
   // ============================================================================
   useEffect(() => {
     const groundFloor = selectedFloors.find(f => f.toUpperCase().includes('GROUND'));
@@ -410,43 +507,44 @@ export default function ConstructionPlanInput() {
     }
   };
 
+  // ============================================================
+  // ✅ FIXED: updateDimensionPart — NO nested setState
+  // ============================================================
   const updateDimensionPart = (side: keyof PlotDimensions, field: "ft" | "in", val: number) => {
     setDimensionHistory(prev => [...prev, { ...plotDimensions }]);
-    
+
+    const currentDetail = dimDetails[side as string] || { ft: 0, in: 0 };
+    const updatedDetail = { ...currentDetail, [field]: val };
+    const totalFeet = Number(updatedDetail.ft || 0) + Number(updatedDetail.in || 0) / 12;
+
     setDimDetails(prev => {
-      const current = prev[side as string] || { ft: 0, in: 0 };
-      const updated = { ...current, [field]: val };
-      
-      const totalFeet = Number(updated.ft || 0) + Number(updated.in || 0) / 12;
+      if (plotShape === "SQUARE") {
+        const next = { ...prev };
+        ['A', 'B', 'C', 'D'].forEach(s => { next[s] = updatedDetail; });
+        return next;
+      }
+      return { ...prev, [side]: updatedDetail };
+    });
+
+    setPlotDimensions(prevDims => {
+      const next: PlotDimensions = { ...prevDims, [side]: totalFeet };
 
       if (plotShape === "SQUARE") {
-        const newDimDetails: Record<string, { ft: number; in: number }> = { ...prev };
-        const newPlotDims: PlotDimensions = { ...plotDimensions };
-
-        ['A', 'B', 'C', 'D'].forEach(s => {
-          newDimDetails[s] = updated;
-          newPlotDims[s as keyof PlotDimensions] = totalFeet;
-        });
-        newPlotDims.length = totalFeet;
-        newPlotDims.width = totalFeet;
-        newPlotDims.area = totalFeet * totalFeet;
-
-        setPlotDimensions(newPlotDims);
-        return newDimDetails;
+        ['A', 'B', 'C', 'D'].forEach(s => { (next as any)[s] = totalFeet; });
+        next.length = totalFeet;
+        next.width = totalFeet;
+        next.area = totalFeet * totalFeet;
       } else {
-        setPlotDimensions(prevDims => ({
-          ...prevDims,
-          [side]: totalFeet,
-          length: side === 'C' ? totalFeet : prevDims.length,
-          width: side === 'A' ? totalFeet : prevDims.width,
-          area: (side === 'A' || side === 'C') ? frontWidthFt * depthFt : prevDims.area
-        }));
+        if (side === 'A') next.width = totalFeet;
+        if (side === 'C') next.length = totalFeet;
 
-        return {
-          ...prev,
-          [side]: updated
-        };
+        const finalA = side === 'A' ? totalFeet : (Number(prevDims.A) || 0);
+        const finalC = side === 'C' ? totalFeet : (Number(prevDims.C) || 0);
+        next.area = finalA * finalC;
       }
+
+      console.log('[UPDATE DIM]', { side, field, val, totalFeet, next });
+      return next;
     });
   };
 
@@ -515,7 +613,6 @@ export default function ConstructionPlanInput() {
     });
   };
 
-  // ✅ FIX: UPSERT — agar room exist nahi karta to naya banao + selected force true
   const updateRoom = (floor: string, roomKey: string, patch: Partial<FloorRoom>) => {
     setFloorRooms(prev => {
       const floorMap = prev[floor] || {};
@@ -568,18 +665,106 @@ export default function ConstructionPlanInput() {
     setGroundStairPos(null);
     setGroundStairOffset(null);
     setGroundFloorProgram([]);
+    setShowInlinePlan(false);
+    setGeneratedPreviewPayload(null);
     alert("Form cleared successfully!");
   };
 
+  // ============================================================
+  // ✅ FIXED: handleGeneratePlan
+  //   - safePlotDimensions (dimDetails se fallback)
+  //   - safeFloorData (1×1 detection)
+  //   - floorData/floorRooms GENERATED se (input se nahi)
+  // ============================================================
   const handleGeneratePlan = () => {
     try {
-      const inputPayload = {
-        caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
-        selectedClientName, representative, measurementUnit, roadFacingOption, plotShape,
+      const getDim = (side: 'A' | 'B' | 'C' | 'D'): number => {
+        const fromState = Number(plotDimensions[side]) || 0;
+        if (fromState > 0) return fromState;
+        const detail = dimDetails[side] || { ft: 0, in: 0 };
+        return Number(detail.ft || 0) + Number(detail.in || 0) / 12;
+      };
+
+      const safeA = getDim('A');
+      const safeB = getDim('B') || safeA;
+      const safeC = getDim('C');
+      const safeD = getDim('D') || safeC;
+
+      const safePlotDimensions: PlotDimensions = {
+        ...plotDimensions,
+        A: safeA,
+        B: safeB,
+        C: safeC,
+        D: safeD,
+        E: Number(plotDimensions.E) || 0,
+        F: Number(plotDimensions.F) || 0,
+        width: safeA,
+        length: safeC,
+        area: safeA * safeC,
+      };
+
+      const safePlotArea = safePlotDimensions.area > 0
+        ? safePlotDimensions.area
+        : (safeA * safeC);
+
+      const safeFloorData: Record<string, any> = { ...floorData };
+      Object.keys(safeFloorData).forEach(floor => {
+        const fd = safeFloorData[floor];
+        if (!fd || (Number(fd.width) === 1 && Number(fd.length) === 1)) {
+          safeFloorData[floor] = {
+            width: safeA,
+            length: safeC,
+            area: safePlotArea,
+          };
+        }
+      });
+
+      console.log("[GENERATE] State check:", {
+        plotDimensions,
+        dimDetails,
+        safePlotDimensions,
+        safePlotArea,
+        customerName,
+        selectedClientName,
+        representative,
+        roadFacingOption,
+        plotShape,
         parkingSide,
-        plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
-        boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
-        selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
+        selectedFloors,
+        floorData: safeFloorData,
+      });
+
+      const inputPayload = {
+        caseType,
+        feeMode,
+        manualFee,
+        registeredFee,
+        customerName: customerName || "",
+        propertyAddress: propertyAddress || "",
+        selectedClientName: selectedClientName || "",
+        representative: representative || "",
+        measurementUnit,
+        roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
+        plotShape: plotShape || "RECTANGLE",
+        parkingSide,
+        plotArea: safePlotArea,
+        coverageType,
+        plotDimensions: safePlotDimensions,
+        dimensions: safePlotDimensions,
+        dimDetails: { ...dimDetails },
+        setbackInputs,
+        boundaries: {
+          north: boundaryNorth || "",
+          south: boundarySouth || "",
+          east: boundaryEast || "",
+          west: boundaryWest || "",
+        },
+        selectedFloors,
+        floorData: safeFloorData,
+        floorBhkConfig,
+        floorRooms,
+        planningMode,
+        floorSettings,
         groundStairPosition: groundStairPos,
         groundStairRelativeOffset: groundStairOffset,
         groundFloorProgram,
@@ -588,11 +773,40 @@ export default function ConstructionPlanInput() {
 
       const generated = generateCompleteConstructionPlan(inputPayload);
 
+      // ✅ FINAL previewPayload
       const previewPayload = {
         ...inputPayload,
-        floorData: generated.floorData,
-        floorRooms: generated.floorRooms,
+        // Inputs (user entered) — preserve
+        plotDimensions: safePlotDimensions,
+        dimensions: safePlotDimensions,
+        dimDetails: { ...dimDetails },
+        plotArea: safePlotArea,
+        plotShape: plotShape || "RECTANGLE",
+        roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
+        customerName: customerName || "",
+        propertyAddress: propertyAddress || "",
+        selectedClientName: selectedClientName || "",
+        representative: representative || "",
+        boundaries: {
+          north: boundaryNorth || "",
+          south: boundarySouth || "",
+          east: boundaryEast || "",
+          west: boundaryWest || "",
+        },
+
+        // ✅ FIX: floorData/floorRooms GENERATED se lo (rooms, walls, staircase sab)
+        // Agar generated empty ho to input ka safeFloorData fallback
+        floorData: (generated?.floorData && Object.keys(generated.floorData).length > 0)
+          ? generated.floorData
+          : safeFloorData,
+        floorRooms: (generated?.floorRooms && Object.keys(generated.floorRooms).length > 0)
+          ? generated.floorRooms
+          : floorRooms,
+
+        // Generated output (backup ke liye)
         generatedFloorPlans: generated.floors,
+        generatedFloorData: generated.floorData,
+        generatedFloorRooms: generated.floorRooms,
         generatedConstructionPlan: generated,
         plotGeometry: generated.plotGeometry,
         buildableGeometry: generated.buildableGeometry,
@@ -603,8 +817,25 @@ export default function ConstructionPlanInput() {
         previewVersion: 2,
       };
 
+      console.log("[GENERATE] Final previewPayload:", {
+        plotDimensions: previewPayload.plotDimensions,
+        plotArea: previewPayload.plotArea,
+        customerName: previewPayload.customerName,
+        selectedClientName: previewPayload.selectedClientName,
+        representative: previewPayload.representative,
+        roadFacingOption: previewPayload.roadFacingOption,
+        plotShape: previewPayload.plotShape,
+        boundaries: previewPayload.boundaries,
+        floorDataKeys: Object.keys(previewPayload.floorData || {}),
+        groundFloorRoomsCount:
+          (previewPayload.floorData?.["GROUND FLOOR"]?.rooms || []).length,
+      });
+
       localStorage.setItem("construction_plan_preview_data", JSON.stringify(previewPayload));
+      localStorage.setItem("constructionPlanData", JSON.stringify(previewPayload));
+
       router.push("/construction-plan-preview");
+
     } catch (error) {
       console.error("Construction plan generation failed:", error);
       alert("Plan generation failed. Please check plot, floor size and room requirements.");
@@ -674,6 +905,24 @@ export default function ConstructionPlanInput() {
   }, [liveGeneratedPlan, selectedFloors, enrichedFloorData]);
 
   const isMultiDimShape = typeof plotShape === "string" && plotShape.includes("L-SHAPE");
+
+  const inlinePlotPoints = useMemo(() => {
+    const payload = generatedPreviewPayload;
+    if (!payload) return [];
+    const d = payload.plotDimensions || payload.dimensions || {};
+    const A = Number(d.A || d.width || 20);
+    const B = Number(d.B || A);
+    const C = Number(d.C || d.length || 50);
+    const D = Number(d.D || C);
+    const s = 5.5;
+    const bw = A * s, tw = B * s, hl = C * s, hr = D * s;
+    return [
+      { x: -tw / 2, y: -hl / 2 },
+      { x: tw / 2, y: -hr / 2 },
+      { x: bw / 2, y: hl / 2 },
+      { x: -bw / 2, y: hl / 2 },
+    ];
+  }, [generatedPreviewPayload]);
 
   return (
     <div className="p-6 max-w-[1400px] mx-auto bg-white text-black font-sans uppercase">
@@ -871,7 +1120,6 @@ export default function ConstructionPlanInput() {
         floorRooms={(() => {
           const merged: Record<string, Record<string, FloorRoom>> = {};
 
-          // ✅ 1. Engine-generated floorRooms pehle lo (deep clone)
           Object.entries(generatedCadFloorRooms || {}).forEach(([floor, rooms]) => {
             if (Array.isArray(rooms)) {
               merged[floor] = Object.fromEntries(
@@ -886,7 +1134,6 @@ export default function ConstructionPlanInput() {
             }
           });
 
-          // ✅ 2. User-selected floorRooms se merge karo (priority yahan)
           Object.entries(floorRooms || {}).forEach(([floor, roomsMap]) => {
             const existing = merged[floor] || {};
             const mergedFloor: Record<string, FloorRoom> = { ...existing };
@@ -902,15 +1149,6 @@ export default function ConstructionPlanInput() {
             merged[floor] = mergedFloor;
           });
 
-          // ✅ 3. Debug log — dekhne ke liye ki har floor me kitne rooms hain
-          if (typeof console !== 'undefined') {
-            const summary: Record<string, number> = {};
-            Object.entries(merged).forEach(([f, roomsMap]) => {
-              summary[f] = Object.values(roomsMap).filter((r: any) => r?.selected).length;
-            });
-            console.log('[PARENT] CadModalView floorRooms merged — selected count per floor:', summary);
-          }
-
           return merged;
         })()}
 
@@ -919,7 +1157,6 @@ export default function ConstructionPlanInput() {
         planningMode={planningMode}
       />
 
-      {/* Floor Selection Modal */}
       {isFloorModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-white p-6 border border-black w-[400px] uppercase text-[9pt]">

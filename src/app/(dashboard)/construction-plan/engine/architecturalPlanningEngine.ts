@@ -3,7 +3,12 @@ import { calculateBuildableGeometry, calculateBuildableFootprint } from './geome
 import { calculateSetbacks } from './setbackRules';
 import { generateFloorOpenings, findSharedBoundary } from './openingPlanner';
 import { calculateElevationProfile } from './elevationEngine';
-import { calculateSectionProfile } from './sectionEngine';
+import {
+  buildSectionContext,
+  buildSectionModel,
+  DEFAULT_SECTION_CUTS,
+  type SectionModel,
+} from './sectionEngine';
 import { generateWallsFromRooms, generateStructuralColumns } from './cad/cadGeometry';
 import { PlotDimensions, PlotShape, FloorRoom, PlanningMode, ParkingMode, VastuAssessment, VastuDirection } from './planningTypes';
 import { toFiniteNumber, cleanFloorName } from './planningInput';
@@ -14,7 +19,10 @@ import {
   generateArchitecturalFloorPlan,
   roomProgramForFloor,
   extractStairPositionFromResult,
+  getInheritedGroundStairSpec,
 } from './roomPlanner';
+import { adaptStairToFloorHeight, getStairDrawingHints } from './stairPlanner';
+import { planTowerLayout, buildTowerRooms } from './towerPlanner';
 import { scorePlan } from './planningScore';
 
 // ✅ Import from layoutFormulas.ts (single source of truth)
@@ -41,8 +49,10 @@ export interface DynamicFloorRequest {
   planningArea?: number;
   parkingMode?: ParkingMode;
   groundFloorProgram?: string[];
-  groundStairPosition?: { x: number; y: number; w?: number; h?: number };
+  groundStairPosition?: { x: number; y: number; w?: number; h?: number; spec?: any; corner?: string; entryFace?: string; exitFace?: string; flightDirection?: string; staircaseType?: string };
   groundStairRelativeOffset?: { dx: number; dy: number };
+  /** Ground par final hui stair ka spec — upar ki floors aur tower isi ko reuse karte hain (same riser/tread count) */
+  groundStairSpec?: any;
 }
 
 export interface GeneratedFloorPlan {
@@ -83,7 +93,7 @@ export interface GeneratedConstructionPlan {
   floorData: Record<string, any>;
   floorRooms: Record<string, FloorRoom[]>;
   elevation: any[];
-  section: any[];
+  section: SectionModel[];
   orientation: ReturnType<typeof getRoadOrientation>;
   generatedAt: string;
 }
@@ -141,161 +151,99 @@ function normalizeSelectedRooms(selectedRooms: any): any {
 }
 
 // ============================================================================
-// ✅ generateTowerPlan — TOWER EXACTLY at STAIR position (no terrace, no overlap)
-// ============================================================================
-// ✅ generateTowerPlan — TOWER EXACTLY at STAIR position + 4ft PASSAGE
+// ✅ generateTowerPlan
+//  - Tower ka stair core = upar ki floor ki stair ka EXACT rect (same x, y, w, h) -> stair ke theek upar
+//  - Canvas = upar ki floor ka clear size (tower ke apne chhote W/H se clamp nahi hota)
+//  - User tower area / dimension zyada de to stair ke bagal me alag TOWER ROOM box (towerPlanner.ts)
 // ============================================================================
 function generateTowerPlan(
-  width: number,
-  length: number,
+  canvasW: number,
+  canvasL: number,
   floorName: string,
   floorToFloorHeight = 10,
-  groundStairPosition?: { x: number; y: number; w?: number; h?: number },
+  groundStairPosition?: { x: number; y: number; w?: number; h?: number; spec?: any; corner?: string; entryFace?: string; exitFace?: string; flightDirection?: string; staircaseType?: string },
+  groundStairSpec?: any,
+  towerOpts?: { towerArea?: number; roomWidth?: number; roomLength?: number },
 ) {
-  const W = Math.max(1, width), H = Math.max(1, length);
+  const W = Math.max(1, canvasW), H = Math.max(1, canvasL);
 
-  // ✅ Stair size (same as ground floor stair — inherited)
-  let targetStairW = groundStairPosition?.w && groundStairPosition.w > 0
+  const stairW0 = groundStairPosition?.w && groundStairPosition.w > 0
     ? Number(groundStairPosition.w)
     : Math.min(6, Math.max(5, W * 0.55));
-
-  let targetStairH = groundStairPosition?.h && groundStairPosition.h > 0
+  const stairH0 = groundStairPosition?.h && groundStairPosition.h > 0
     ? Number(groundStairPosition.h)
     : Math.min(Math.max(8.5, H * 0.75), 12);
+  const hasPos = !!groundStairPosition && Number.isFinite(groundStairPosition.x) && Number.isFinite(groundStairPosition.y);
 
-  targetStairW = Math.min(targetStairW, W);
-  targetStairH = Math.min(targetStairH, H);
-
-  // ✅ STAIR position = ground stair position (inherited, EXACT)
-  let stairX = Math.max(0, W - targetStairW);
-  let stairY = 0;
-
-  if (groundStairPosition &&
-      Number.isFinite(groundStairPosition.x) &&
-      Number.isFinite(groundStairPosition.y)) {
-    stairX = Math.max(0, Math.min(groundStairPosition.x, W - targetStairW));
-    stairY = Math.max(0, Math.min(groundStairPosition.y, H - targetStairH));
-  }
-
-  // ✅ TOWER = SAME SIZE as stair (exact same area)
-  const towerW = targetStairW;
-  const towerH = targetStairH;
-  const towerX = stairX;
-  const towerY = stairY;
-
-  // ✅ PASSAGE: 4 ft
-  const PASSAGE_FT = 4;
-  const hasTopSpace = stairY >= PASSAGE_FT;
-  const hasBottomSpace = (stairY + targetStairH) <= (H - PASSAGE_FT);
-
-  // ✅ BUILD ROOMS
-  const rooms: FloorRoom[] = [];
-
-  // ✅ Passage at TOP (above stair) — if space
-  if (hasTopSpace) {
-    rooms.push({
-      id: 'tower_passage_top',
-      name: 'PASSAGE',
-      label: 'PASSAGE',
-      roomType: 'passage',
-      type: 'passage',
-      x: 0,
-      y: 0,
-      w: W,
-      h: Math.min(PASSAGE_FT, stairY),
-      selected: true,
-      count: 1,
-      areaMode: 'AUTO',
-      areaPerRoom: W * PASSAGE_FT,
-      circulationZone: true,
-      protectedCorridor: true,
-      corridorWidthFt: PASSAGE_FT,
-    });
-  }
-
-  // ✅ TOWER block — exact stair position par
-  rooms.push({
-    id: 'tower_block',
-    name: 'TOWER',
-    label: 'TOWER',
-    roomType: 'room',
-    type: 'room',
-    x: towerX,
-    y: towerY,
-    w: towerW,
-    h: towerH,
-    selected: true,
-    count: 1,
-    areaMode: 'AUTO',
-    areaPerRoom: towerW * towerH,
+  const layout = planTowerLayout({
+    stair: {
+      x: hasPos ? Number(groundStairPosition!.x) : Math.max(0, W - stairW0),
+      y: hasPos ? Number(groundStairPosition!.y) : 0,
+      w: stairW0, h: stairH0,
+    },
+    canvasW: W, canvasL: H,
+    towerArea: towerOpts?.towerArea,
+    roomWidth: towerOpts?.roomWidth,
+    roomLength: towerOpts?.roomLength,
   });
+  const rooms: FloorRoom[] = buildTowerRooms(layout);
+  const { stair: st } = layout;
 
-  // ✅ STAIR TOWER / MUMTY — same position, same size
-  rooms.push({
-    id: 'tower_stair',
-    name: 'STAIR TOWER / MUMTY',
-    label: 'STAIR TOWER / MUMTY',
-    roomType: 'stairs',
-    type: 'stairs',
-    x: stairX,
-    y: stairY,
-    w: targetStairW,
-    h: targetStairH,
-    selected: true,
-    count: 1,
-    areaMode: 'AUTO',
-    areaPerRoom: targetStairW * targetStairH,
-  });
-
-  // ✅ Passage at BOTTOM (below stair) — if space
-  if (hasBottomSpace) {
-    rooms.push({
-      id: 'tower_passage_bottom',
-      name: 'PASSAGE',
-      label: 'PASSAGE',
-      roomType: 'passage',
-      type: 'passage',
-      x: 0,
-      y: stairY + targetStairH,
-      w: W,
-      h: Math.min(PASSAGE_FT, H - (stairY + targetStairH)),
-      selected: true,
-      count: 1,
-      areaMode: 'AUTO',
-      areaPerRoom: W * PASSAGE_FT,
-      circulationZone: true,
-      protectedCorridor: true,
-      corridorWidthFt: PASSAGE_FT,
-    });
+  // ✅ Tower stair = ground wali stair ka SAME spec (type, flight width, tread, riser COUNT).
+  const inheritedSpec = groundStairSpec ?? groundStairPosition?.spec ?? getInheritedGroundStairSpec(W, floorToFloorHeight);
+  const stair = inheritedSpec
+    ? adaptStairToFloorHeight(inheritedSpec, floorToFloorHeight)
+    : generateArchitecturalFloorPlan({
+        floorName,
+        width: st.w,
+        length: st.h,
+        bhk: '1 RK',
+        selectedRooms: ['STAIRCASE'],
+        planningMode: 'AUTO',
+        roadSide: '1 SIDE ROAD (SOUTH)',
+        hasParking: false,
+        floorToFloorHeightFeet: floorToFloorHeight,
+      }).staircase;
+  if (!inheritedSpec && typeof console !== 'undefined') {
+    console.warn('[generateTowerPlan] ⚠️ Ground stair spec nahi mila — tower stair alag calculate hui. Pehle GROUND generate karo.');
   }
 
-  // ✅ Generate stair spec
-  const stair = generateArchitecturalFloorPlan({
-    floorName,
-    width: targetStairW,
-    length: targetStairH,
-    bhk: '1 RK',
-    selectedRooms: ['STAIRCASE'],
-    planningMode: 'AUTO',
-    roadSide: '1 SIDE ROAD (SOUTH)',
-    hasParking: false,
-    floorToFloorHeightFeet: floorToFloorHeight,
-  }).staircase;
+  // Renderer ke liye: spec room par DIRECT (renderer rm.staircaseSpec padhta hai) + stairMeta
+  const towerStairRoom: any = rooms.find((r: any) => r.id === 'tower_stair');
+  if (towerStairRoom) {
+    towerStairRoom.staircaseSpec = stair;
+    towerStairRoom.staircaseType = (stair as any).staircaseType;
+    towerStairRoom.stairMeta = {
+      staircaseType: (stair as any).staircaseType,
+      staircaseSpec: stair,
+      absX: st.x, absY: st.y, w: st.w, h: st.h,
+      corner: groundStairPosition?.corner,
+      entryFace: groundStairPosition?.entryFace,
+      exitFace: groundStairPosition?.exitFace,
+      flightDirection: groundStairPosition?.flightDirection,
+      renderHints: {
+        drawFromSpec: true,
+        riserCount: (stair as any).riserCount,
+        flight1Treads: (stair as any).flight1?.treads,
+        flight2Treads: (stair as any).flight2?.treads,
+        middleTreads: (stair as any).middleTreads,
+        treadInches: (stair as any).treadInches,
+        actualRiserInches: (stair as any).actualRiserInches,
+        drawPlan: (stair as any).drawPlan,
+      },
+      stairDrawing: getStairDrawingHints('TOWER'),
+      source: 'TOWER_INHERITED_FROM_GROUND',
+    };
+  }
 
   if (typeof console !== 'undefined') {
-    console.log('[generateTowerPlan] ✅ Tower at stair position + 4ft passage', {
-      W, H,
-      stairPos: { x: stairX, y: stairY, w: targetStairW, h: targetStairH },
-      towerPos: { x: towerX, y: towerY, w: towerW, h: towerH },
-      passages: {
-        top: hasTopSpace ? { x: 0, y: 0, w: W, h: Math.min(PASSAGE_FT, stairY) } : 'NO_SPACE',
-        bottom: hasBottomSpace ? { x: 0, y: stairY + targetStairH, w: W, h: Math.min(PASSAGE_FT, H - (stairY + targetStairH)) } : 'NO_SPACE',
-      },
-      roomsCount: rooms.length,
+    console.log('[generateTowerPlan] ✅ tower anchored on upper-floor stair', {
+      canvas: { W, H }, stair: st, room: layout.room, placement: layout.placement,
+      stairArea: layout.stairArea, roomArea: layout.roomArea, totalArea: layout.totalArea,
     });
   }
 
-  return { rooms, stair };
+  return { rooms, stair, layout };
 }
 
 // ============================================================================
@@ -314,6 +262,9 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   const floorArea = outerW * outerL;
   const isGround = floorName.includes('GROUND');
   const isTower = floorName.includes('TOWER') || floorName.includes('MUMTY');
+  // Tower ka canvas = upar ki floor ka clear size (stair ke theek upar aane ke liye); baaki floors me same as clear.
+  const layoutW = isTower ? Math.max(clearW, maxFootprint.width - 2 * wall) : clearW;
+  const layoutL = isTower ? Math.max(clearL, maxFootprint.length - 2 * wall) : clearL;
 
   const hasParking = request.hasParking === true
     ? true
@@ -341,15 +292,24 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   let furnitureChecks: any[] = [];
 
   if (isTower) {
+    const ps: any = request.planningSettings || {};
     const tower = generateTowerPlan(
-      clearW,
-      clearL,
+      layoutW,
+      layoutL,
       floorName,
-      num(request.planningSettings?.floorToFloorHeightFeet, 10),
+      num(ps.floorToFloorHeightFeet, 10),
       request.groundStairPosition,
+      request.groundStairSpec,
+      {
+        // Sirf jab user ne tower area / room dimension khud diya ho (default 10x10 se extra room na bane)
+        towerArea: num(ps.towerArea, 0),
+        roomWidth: num(ps.towerRoomWidth, 0),
+        roomLength: num(ps.towerRoomLength, 0),
+      },
     );
     rooms = tower.rooms;
     staircase = tower.stair;
+    warnings.push(...tower.layout.notes);
     warnings.push('Tower/Mumty is planned as dynamic open terrace plus vertical stair headroom core; final authority/structural checks remain required.');
   } else {
     if (typeof console !== 'undefined') {
@@ -381,6 +341,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       groundFloorProgram: isGround ? undefined : request.groundFloorProgram,
       groundStairPosition: isGround ? undefined : request.groundStairPosition,
       groundStairRelativeOffset: isGround ? undefined : request.groundStairRelativeOffset,
+      groundStairSpec: isGround ? undefined : (request.groundStairSpec ?? request.groundStairPosition?.spec),
     });
     rooms = smart.rooms;
     warnings.push(...smart.warnings);
@@ -411,10 +372,10 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   rooms = rooms.map((r, i) => ({
     ...r,
     id: r.id || `room_${i}`,
-    x: Number(Math.max(0, Math.min(num(r.x), clearW - .01)).toFixed(3)),
-    y: Number(Math.max(0, Math.min(num(r.y), clearL - .01)).toFixed(3)),
-    w: Number(Math.max(.1, Math.min(num(r.w), clearW - num(r.x))).toFixed(3)),
-    h: Number(Math.max(.1, Math.min(num(r.h), clearL - num(r.y))).toFixed(3)),
+    x: Number(Math.max(0, Math.min(num(r.x), layoutW - .01)).toFixed(3)),
+    y: Number(Math.max(0, Math.min(num(r.y), layoutL - .01)).toFixed(3)),
+    w: Number(Math.max(.1, Math.min(num(r.w), layoutW - num(r.x))).toFixed(3)),
+    h: Number(Math.max(.1, Math.min(num(r.h), layoutL - num(r.y))).toFixed(3)),
     areaPerRoom: Number((Math.max(.1, num(r.w)) * Math.max(.1, num(r.h))).toFixed(2)),
     doors: Array.isArray(r.doors) ? [...r.doors] : [],
     windows: Array.isArray(r.windows) ? [...r.windows] : [],
@@ -426,7 +387,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     rooms = rooms.filter((r) => {
       const name = String(r.name || '').toUpperCase();
       return name.includes('TERRACE') ||
-             name === 'TOWER' ||
+             name.includes('TOWER') ||
              name.includes('STAIR') ||
              name.includes('MUMTY');
     });
@@ -438,7 +399,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     }
   }
 
-  const opened = generateFloorOpenings(rooms as any, orientation.mainRoad, clearW, clearL) as any[];
+  const opened = generateFloorOpenings(rooms as any, orientation.mainRoad, layoutW, layoutL) as any[];
 
   if (typeof console !== 'undefined') {
     console.log('[ENGINE] 🔍 after openingPlanner doors:', opened.map((r: any) => ({
@@ -473,7 +434,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     isParking: typeOf(r) === 'parking',
   }));
 
-  const walls = generateWallsFromRooms(blueprintRooms, clearW, clearL);
+  const walls = generateWallsFromRooms(blueprintRooms, layoutW, layoutL);
   const columns = generateStructuralColumns(blueprintRooms);
 
   const planScore = scorePlan(opened as FloorRoom[]);
@@ -718,7 +679,24 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   }
 
   const elevation = calculateElevationProfile(selectedFloors, num(payload?.floorToFloorHeightFeet, 10));
-  const section = calculateSectionProfile(selectedFloors, num(payload?.floorToFloorHeightFeet, 10));
+
+  // ✅ SECTION: build context first (from generated data), then build one SectionModel per cut.
+  const sectionContext = buildSectionContext(
+    selectedFloors,
+    generatedFloorData,
+    generatedFloorRooms,
+    maxFootprint.width,
+    maxFootprint.length,
+  );
+
+  const cutsInput: any[] =
+    Array.isArray(payload?.sectionCuts) && payload.sectionCuts.length > 0
+      ? payload.sectionCuts
+      : DEFAULT_SECTION_CUTS;
+
+  const section: SectionModel[] = cutsInput.map((cut) =>
+    buildSectionModel(sectionContext, cut),
+  );
 
   return {
     plotGeometry,

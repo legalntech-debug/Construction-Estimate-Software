@@ -16,6 +16,7 @@ interface PartnerApprovalLockProps {
   approvedByLevel1: string | null;
   approvedByAdmin: string | null;
   onRefresh: () => void;
+  onClose?: () => void; // 🔥 NEW - optional close handler
 }
 
 interface Nominee {
@@ -31,7 +32,8 @@ export default function PartnerApprovalLockModal({
   approvalStatus,
   approvedByLevel1,
   approvedByAdmin,
-  onRefresh
+  onRefresh,
+  onClose // 🔥 NEW
 }: PartnerApprovalLockProps) {
   const [submitting, setSubmitting] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -127,13 +129,13 @@ export default function PartnerApprovalLockModal({
   // 1. FIRST TIME ONBOARDING FORM
   if (!hasAccount) {
     return (
-      <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center z-50 p-4 font-sans text-xs uppercase">
+      <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md flex items-center justify-center z-[110] p-4 font-sans text-xs uppercase">
         <div className="bg-slate-900 border border-indigo-900/60 p-6 rounded-2xl w-full max-w-2xl space-y-4 shadow-2xl overflow-y-auto max-h-[90vh] relative">
           
-          {/* CLOSE / EXIT BUTTON */}
+          {/* 🔥 CLOSE / EXIT BUTTON - uses onClose prop if provided, else history.back() */}
           <button 
             type="button" 
-            onClick={() => window.history.back()}
+            onClick={onClose || (() => window.history.back())}
             className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800/80 p-1.5 rounded-full border border-slate-700 transition"
             title="Close / Go Back"
           >
@@ -261,7 +263,7 @@ export default function PartnerApprovalLockModal({
 
   // 2. LIVE STAGE TRACKER LOCK SCREEN (AFTER SUBMISSION)
   return (
-    <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center z-40 p-4 font-sans uppercase">
+    <div className="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center z-[110] p-4 font-sans uppercase">
       <div className="bg-slate-900 border border-amber-800/80 p-6 md:p-8 rounded-2xl w-full max-w-lg space-y-5 shadow-2xl text-center">
         <div className="p-3 bg-amber-950/80 border border-amber-800/60 rounded-2xl w-fit mx-auto">
           <ShieldAlert className="text-amber-400 w-10 h-10" />

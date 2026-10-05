@@ -120,7 +120,6 @@ export default function AdminPartnerApproval({ isAdmin, isApprover, userData }: 
 
     const targetPartner = pendingPartners.find((p) => p.partner_id === partnerId);
     const partnerName = targetPartner?.profiles?.full_name || 'Valued Partner';
-    // ✅ mobile column confirmed exists
     const partnerMobile = targetPartner?.profiles?.mobile;
 
     if (level === 'LEVEL1') {
@@ -131,13 +130,9 @@ export default function AdminPartnerApproval({ isAdmin, isApprover, userData }: 
         `Kindly proceed with final administrative approval.\n\n` +
         `Regards,\nL&T Management System`
       );
-
-      // Admin aur Co-Partner dono ko notify karein
       window.open(`https://wa.me/${MANAGEMENT_CONTACTS.admin}?text=${msg}`, '_blank');
       window.open(`https://wa.me/${MANAGEMENT_CONTACTS.coPartner}?text=${msg}`, '_blank');
-
     } else if (level === 'ADMIN') {
-      // CEO ko notify karein
       const ceoMsg = encodeURIComponent(
         `Dear CEO,\n\n` +
         `Final Admin Approval granted for partner account: *${partnerName}*\n` +
@@ -147,7 +142,6 @@ export default function AdminPartnerApproval({ isAdmin, isApprover, userData }: 
       );
       window.open(`https://wa.me/${MANAGEMENT_CONTACTS.ceo}?text=${ceoMsg}`, '_blank');
 
-      // ✅ Partner ko congratulations WhatsApp (mobile confirmed hai)
       if (partnerMobile) {
         const formatted = partnerMobile.replace(/\D/g, '');
         const recipient = formatted.startsWith('91') ? formatted : `91${formatted}`;
@@ -166,22 +160,15 @@ export default function AdminPartnerApproval({ isAdmin, isApprover, userData }: 
       }
     }
 
-    // List refresh karein
     fetchPendingPartners();
   };
 
-  // Sirf Admin/Approver ke liye
+  // ✅ Sirf Admin/Approver ke liye
   if (!isAdmin && !isApprover) return null;
 
-  // No pending
+  // ✅ FIX: Agar koi pending partner approval nahi hai, to KUCH BHI RENDER NA KARO (blank return)
   if (pendingPartners.length === 0) {
-    return (
-      <div className="bg-emerald-50 border-2 border-emerald-300 rounded-xl p-3 text-center">
-        <p className="text-xs font-bold text-emerald-700 uppercase">
-          ✅ No Pending Partner Approvals
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (

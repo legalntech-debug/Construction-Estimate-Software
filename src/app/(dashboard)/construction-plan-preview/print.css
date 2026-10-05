@@ -1,72 +1,110 @@
+/* ============================================================
+   PRINT STYLES — LNT WITH AI 2.0 (SECURED)
+   ============================================================ */
+
 @media print {
-  @page {
-    size: A4 landscape;
-    margin: 4mm;
-  }
+  @page { size: A4 landscape; margin: 4mm; }
 
   html, body {
-    margin: 0 !important;
-    padding: 0 !important;
+    margin: 0 !important; padding: 0 !important;
     background: #ffffff !important;
-    /* ❌ overflow: hidden HATAO — isse extra pages allow karo */
     overflow: visible !important;
-    /* ❌ height: 100% HATAO — dynamic height allow karo */
-    height: auto !important;
-    width: 100% !important;
+    height: auto !important; width: 100% !important;
   }
 
-  body * {
+  /* ============================================================
+     LAYER 1: NON-PAID USERS → BLOCK EVERYTHING
+     ============================================================ */
+  body:not(.paid-user) #print-root,
+  body:not(.paid-user) #print-root *,
+  body:not(.paid-user) #main-cad-canvas,
+  body:not(.paid-user) #main-cad-canvas *,
+  body:not(.paid-user) #main-sidebar,
+  body:not(.paid-user) #main-sidebar * {
+    display: none !important;
     visibility: hidden !important;
   }
 
-  #main-cad-canvas, #main-cad-canvas *,
-  #main-sidebar, #main-sidebar * {
+  body:not(.paid-user)::before {
+    content: "🔒 PAYMENT REQUIRED TO PRINT" !important;
+    display: block !important; visibility: visible !important;
+    position: fixed !important;
+    top: 50% !important; left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    font-size: 28pt !important; font-weight: 900 !important;
+    font-family: Arial, sans-serif !important;
+    text-align: center !important;
+    color: #cc0000 !important;
+    background: #ffffff !important;
+    padding: 60px 80px !important;
+    border: 4px dashed #cc0000 !important;
+    border-radius: 12px !important;
+    z-index: 99999 !important;
+    white-space: nowrap !important;
+  }
+
+  body:not(.paid-user)::after {
+    content: "Please complete the payment to unlock the print." !important;
+    display: block !important; visibility: visible !important;
+    position: fixed !important;
+    top: 62% !important; left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    font-size: 12pt !important; font-weight: 700 !important;
+    font-family: Arial, sans-serif !important;
+    text-align: center !important;
+    color: #666 !important;
+    z-index: 99999 !important;
+  }
+
+  /* ============================================================
+     LAYER 2: PAID USERS → FULL PRINT LAYOUT
+     ============================================================ */
+  body.paid-user * { visibility: hidden !important; }
+
+  body.paid-user #main-cad-canvas,
+  body.paid-user #main-cad-canvas *,
+  body.paid-user #main-sidebar,
+  body.paid-user #main-sidebar *,
+  body.paid-user #print-grid,
+  body.paid-user #print-grid *,
+  body.paid-user #print-root,
+  body.paid-user #print-root * {
     visibility: visible !important;
   }
 
-  /* Parent container — height auto karo */
-  .max-w-\[1600px\] {
-    max-width: 100% !important;
-    width: 100% !important;
-    height: auto !important;      /* ✅ dynamic height */
-    margin: 0 !important;
-    padding: 2mm !important;
-    border: none !important;
-    overflow: visible !important;
+  body.paid-user .max-w-\[1600px\] {
+    max-width: 100% !important; width: 100% !important;
+    height: auto !important;
+    margin: 0 !important; padding: 2mm !important;
+    border: none !important; overflow: visible !important;
   }
 
-  #main-cad-canvas {
-    position: relative !important;  /* ✅ absolute ki jagah relative */
-    left: 0 !important;
-    top: 0 !important;
-    width: 70% !important;
-    height: auto !important;        /* ✅ height auto */
-    margin: 0 !important;
-    padding: 0 !important;
-    border: none !important;
-    overflow: visible !important;
-  }
-
-  /* SVG — height auto, width full */
-  #main-cad-canvas svg {
-    width: 100% !important;
-    height: auto !important;        /* ✅ auto height */
-    max-height: none !important;    /* ✅ max-height hataya */
-    display: block !important;
-  }
-
-  #main-sidebar {
+  body.paid-user #main-cad-canvas {
     position: relative !important;
-    right: 0 !important;
-    top: 0 !important;
-    width: 28% !important;
-    height: auto !important;        /* ✅ auto height */
-    font-size: 9px !important;
-    padding: 4px !important;
-    overflow: visible !important;
+    left: 0 !important; top: 0 !important;
+    width: 70% !important; height: auto !important;
+    margin: 0 !important; padding: 0 !important;
+    border: none !important; overflow: visible !important;
   }
 
-  button {
-    display: none !important;
+  body.paid-user #main-cad-canvas svg {
+    width: 100% !important; height: auto !important;
+    max-height: none !important; display: block !important;
+  }
+
+  body.paid-user #main-sidebar {
+    position: relative !important;
+    right: 0 !important; top: 0 !important;
+    width: 28% !important; height: auto !important;
+    font-size: 9px !important;
+    padding: 4px !important; overflow: visible !important;
+  }
+
+  body.paid-user button { display: none !important; }
+  button { display: none !important; }
+
+  /* Non-paid watermark opacity stronger */
+  body:not(.paid-user) svg text[opacity] {
+    opacity: 0.15 !important;
   }
 }

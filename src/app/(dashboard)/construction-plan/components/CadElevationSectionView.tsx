@@ -1,5 +1,8 @@
 import React from "react";
 import { formatDim, renderTopWidthDim, renderHeightDim, renderEarthSymbol } from "./CadDimUtils";
+import SectionDrawing from "./SectionDrawing";
+import ElevationDrawing from "./ElevationDrawing";
+import { buildSectionContext, type SectionCutDef } from "../engine/sectionEngine";
 
 // 🎨 LIGHT THEME COLORS (White background + Black lines)
 const LINE_COLOR = "#000000";         // Primary line color (was #ffffff / #00aaff)
@@ -381,128 +384,29 @@ export default function CadElevationSectionView({
     );
   };
 
+  // ============================================================
+  // DYNAMIC ARCHITECT-STYLE ELEVATION + SECTION (same rooms/doors/windows/stairs as the plans)
+  // ============================================================
+  const sectionCtx = React.useMemo(
+    () => buildSectionContext(processedFloors, floorData, floorRooms, baseBuiltUpWidth / scale, baseBuiltUpHeight / scale),
+    [processedFloors, floorData, floorRooms, baseBuiltUpWidth, baseBuiltUpHeight, scale]
+  );
+  const sectionCut: SectionCutDef = { id: "A", axis: "VERTICAL", positionFt: "AUTO", look: "LEFT" };
+
   return (
     <g>
       {/* ============================================================ */}
       {/* 1. FRONT ELEVATION                                          */}
       {/* ============================================================ */}
       <g className="elevation-view">
-        {renderTopWidthDim(elevationStartX, baseBuiltUpWidth, -elevationHeight, formatDim(baseBuiltUpWidth, scale, measurementUnit), scale)}
-
-        <rect x={elevationStartX} y={-elevationHeight} width={baseBuiltUpWidth} height={elevationHeight} stroke={LINE_COLOR} strokeWidth="0.6" fill="none" />
-
-        {renderBuildingStructure(elevationStartX, baseBuiltUpWidth, widthColumnCount, false, true)}
-
-        {processedFloors.map((floor, index) => {
-          const isGround = floor.toUpperCase().includes("GROUND");
-          const fData = floorData[floor] || { width: baseBuiltUpWidth / scale, length: 30, area: 0, hasBalcony: !isGround };
-          const FLOOR_H = getFloorHeightFt(floor) * scale;
-          const SLAB_H = getSlabThicknessFt(floor) * scale;
-
-          let accumulatedH = 0;
-          for (let i = 0; i < index; i++) {
-            accumulatedH += getFloorHeightFt(processedFloors[i]) * scale + getSlabThicknessFt(processedFloors[i]) * scale;
-          }
-          const floorTopY = -accumulatedH - FLOOR_H - SLAB_H;
-
-          const hasBalcony = fData.hasBalcony !== undefined ? fData.hasBalcony : !isGround;
-          const gateW = (fData.gateWidth || 4) * scale;
-          const gateH = (fData.gateHeight || 6) * scale;
-          const gateXOffset = elevationStartX + baseBuiltUpWidth / 2 + (fData.gateOffsetX !== undefined ? fData.gateOffsetX * scale : (-baseBuiltUpWidth / 2 + gateW / 2 + 10));
-
-          const stairWidth = 4 * scale;
-          const stairTreadCount = 3;
-
-          return (
-            <g key={`elev-features-${index}`}>
-              {!isGround && hasBalcony && (
-                <g transform={`translate(${elevationStartX}, ${floorTopY})`}>
-                  <rect x={WALL_THICKNESS} y={FLOOR_H - BALCONY_H} width={baseBuiltUpWidth - (2 * WALL_THICKNESS)} height={BALCONY_H} fill="none" stroke={ACCENT_COLOR} strokeWidth="0.8" />
-                  <text x={baseBuiltUpWidth / 2} y={FLOOR_H - BALCONY_H / 2} fill={ACCENT_COLOR} fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
-                    BALCONY (1.2M HEIGHT)
-                  </text>
-                </g>
-              )}
-
-              {isGround && (
-                <g>
-                  <rect x={gateXOffset - gateW / 2} y={-gateH} width={gateW} height={gateH} fill="none" stroke={ACCENT_COLOR} strokeWidth="1" strokeDasharray="3 2" />
-                  <text x={gateXOffset} y={-gateH / 2} fill={ACCENT_COLOR} fontSize="5" fontWeight="800" textAnchor="middle" dominantBaseline="middle">
-                    GATE ({(gateW / scale).toFixed(1)}&apos;×{(gateH / scale).toFixed(1)}&apos;)
-                  </text>
-                  <g transform={`translate(${gateXOffset}, 0)`}>
-                    {Array.from({ length: stairTreadCount }).map((_, stepIdx) => {
-                      const stepW = stairWidth - (stepIdx * (0.5 * scale));
-                      const stepH = PLINTH_H / stairTreadCount;
-                      const stepY = (stepIdx + 1) * stepH;
-                      return (
-                        <rect key={stepIdx} x={-stepW / 2} y={stepY - stepH} width={stepW} height={stepH} fill="#e5e7eb" stroke={LINE_COLOR} strokeWidth="0.4" />
-                      );
-                    })}
-                    <text x="0" y={PLINTH_H + 6} fill={LINE_COLOR} fontSize="4" fontWeight="700" textAnchor="middle">
-                      STAIRS (RISE 6&quot;, TREAD 1&apos;)
-                    </text>
-                  </g>
-                </g>
-              )}
-            </g>
-          );
-        })}
-
-        <line x1={elevationStartX - PLINTH_OFFSET - 25} y1={0} x2={elevationStartX + baseBuiltUpWidth + PLINTH_OFFSET + 25} y2={0} stroke={LINE_COLOR} strokeWidth="0.6" strokeDasharray="4" />
-        <text x={elevationStartX + baseBuiltUpWidth / 2 + 110} y={2} fill={LINE_COLOR} fontSize="7.5" fontWeight="bold" textAnchor="middle">PLINTH LEVEL</text>
-
-        <line x1={elevationStartX - 25} y1={PLINTH_H} x2={elevationStartX + baseBuiltUpWidth + 25} y2={PLINTH_H} stroke={LINE_COLOR} strokeWidth="0.6" />
-        {renderEarthSymbol(elevationStartX - 25, elevationStartX, PLINTH_H, scale)}
-        {renderEarthSymbol(elevationStartX + baseBuiltUpWidth, elevationStartX + baseBuiltUpWidth + 25, PLINTH_H, scale)}
-
-        <text x={elevationStartX + baseBuiltUpWidth / 2 + 130} y={PLINTH_H + 4} fill={LINE_COLOR} fontSize="7.5" fontWeight="bold" textAnchor="middle">GROUND LEVEL</text>
-
-        {hasBasement && (
-          <g>
-            <rect x={elevationStartX} y={PLINTH_H} width={baseBuiltUpWidth} height={BASEMENT_H} stroke={LINE_COLOR} strokeWidth="0.5" fill="none" />
-            {renderHeightDim(elevationStartX, PLINTH_H, PLINTH_H + BASEMENT_H, formatDim(BASEMENT_H, scale, measurementUnit), 'left', LINE_COLOR, scale)}
-            <line x1={elevationStartX + WALL_THICKNESS} y1={PLINTH_H + BASEMENT_H - (3 * scale)} x2={elevationStartX + baseBuiltUpWidth - WALL_THICKNESS} y2={PLINTH_H + BASEMENT_H - (3 * scale)} stroke={LINE_COLOR} strokeWidth="0.4" strokeDasharray="2" />
-            <line x1={elevationStartX + baseBuiltUpWidth} y1={PLINTH_H + BASEMENT_H / 2} x2={elevationStartX + baseBuiltUpWidth + 6 * scale} y2={PLINTH_H + BASEMENT_H / 2} stroke={LINE_COLOR} strokeWidth="0.5" strokeDasharray="2" />
-            <rect x={elevationStartX + baseBuiltUpWidth + 6 * scale} y={PLINTH_H + BASEMENT_H / 2 - 7.5} width={95} height={15} fill={LABEL_BG} stroke={LINE_COLOR} strokeWidth="0.5" rx="2" />
-            <text x={elevationStartX + baseBuiltUpWidth + 10 * scale + 35} y={PLINTH_H + BASEMENT_H / 2} fill={LABEL_TEXT} fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
-              BASEMENT ({formatDim(BASEMENT_H, scale, measurementUnit)})
-            </text>
-          </g>
-        )}
-
-        <text x={elevationStartX + baseBuiltUpWidth / 2} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill={LINE_COLOR} fontSize="10" fontWeight="bold" textAnchor="middle">FRONT ELEVATION</text>
+        <ElevationDrawing ctx={sectionCtx} side="FRONT" embedded={{ originX: elevationStartX, originY: 0, pxPerFt: scale }} />
       </g>
 
       {/* ============================================================ */}
       {/* 2. SECTION VIEW                                             */}
       {/* ============================================================ */}
       <g className="section-view" transform={`translate(${sectionStartX - elevationStartX}, 0)`}>
-        {renderTopWidthDim(elevationStartX, baseBuiltUpHeight, -sectionHeight, formatDim(baseBuiltUpHeight, scale, measurementUnit), scale)}
-
-        <text x={elevationStartX + (baseBuiltUpHeight / 2)} y={PLINTH_H + (hasBasement ? BASEMENT_H : 0) + 45} fill={LINE_COLOR} fontSize="10" fontWeight="bold" textAnchor="middle">
-          SECTION VIEW (RIGHT SIDE FROM {sectionLineX} FT)
-        </text>
-
-        <rect x={elevationStartX} y={-sectionHeight} width={baseBuiltUpHeight} height={sectionHeight} stroke={LINE_COLOR} strokeWidth="0.5" fill="none" />
-
-        {renderBuildingStructure(elevationStartX, baseBuiltUpHeight, depthColumnCount, true, false)}
-
-        {processedFloors.map((floor, floorIdx) => {
-          const isTower = floor.toUpperCase().includes("TOWER");
-          if (isTower) return null;
-
-          const floorTopY = getFloorTopY(floorIdx);
-          const floorH = getFloorHeightFt(floor) * scale;
-
-          return (
-            <g key={`section-rooms-wrapper-${floorIdx}`}>
-              {renderSectionRoomsForFloor(floor, floorTopY, floorH)}
-            </g>
-          );
-        })}
-
-        {renderRightFloorLabels(elevationStartX, baseBuiltUpHeight)}
+        <SectionDrawing ctx={sectionCtx} cut={sectionCut} embedded={{ originX: elevationStartX, originY: 0, pxPerFt: scale }} />
 
         {frontMos > 0 && (
           <g className="front-boundary-wall">
@@ -523,8 +427,6 @@ export default function CadElevationSectionView({
             </text>
           </g>
         )}
-
-        <line x1={elevationStartX} y1={0} x2={elevationStartX + baseBuiltUpHeight} y2={0} stroke={LINE_COLOR} strokeWidth="0.6" strokeDasharray="4" />
 
         <line x1={sectionGroundStartX - 15} y1={PLINTH_H} x2={sectionGroundEndX + 15} y2={PLINTH_H} stroke={LINE_COLOR} strokeWidth="0.6" />
         {renderEarthSymbol(sectionGroundStartX - 15, sectionGroundStartX, PLINTH_H, scale)}

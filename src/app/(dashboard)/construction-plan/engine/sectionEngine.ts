@@ -55,6 +55,8 @@ export interface StairCtx {
   x: number; y: number; w: number; h: number;           // inner frame
   entryFace: "BOTTOM" | "TOP" | "LEFT" | "RIGHT";
   riserCount: number; riserIn: number; flightWidthFt: number;
+  /** exact tread/riser plan from stairPlanner.solveStairDrawPlan (same data the plan view draws) */
+  drawPlan?: any;
 }
 export interface FloorCtx {
   name: string; isTower: boolean; heightFt: number; slabFt: number;
@@ -113,6 +115,7 @@ export function buildSectionContext(
           riserCount: Number(spec.riserCount) > 0 ? Number(spec.riserCount) : 0,
           riserIn: Number(spec.actualRiserInches) > 0 ? Number(spec.actualRiserInches) : 0,
           flightWidthFt: Number(spec.flightWidthFt) > 0 ? Number(spec.flightWidthFt) : 0,
+          drawPlan: spec.drawPlan,
         });
       });
     }
@@ -190,7 +193,7 @@ export interface WallCut { v0: number; v1: number; kind: "E" | "I"; gaps: WallGa
 export interface FaceOpening { kind: "D" | "W" | "V"; a0: number; a1: number; z0: number; z1: number }
 export interface Face { v0: number; v1: number; roomName: string; openings: FaceOpening[] }
 export interface SecPoly { kind: "POCHE" | "LINE"; pts: [number, number][] }   // [v, z] absolute
-export interface SecStair { relation: "CUT" | "BEYOND"; mode: "RUN" | "CROSS"; polys: SecPoly[]; label: string }
+export interface SecStair { relation: "CUT" | "BEYOND"; mode: "RUN" | "CROSS"; polys: SecPoly[]; label: string; anchor?: [number, number] }
 export interface SectionFloor {
   name: string; ffl: number; clearTop: number; slabTop: number; heightFt: number; slabFt: number;
   outerLen: number; walls: WallCut[]; faces: Face[]; stairs: SecStair[];
@@ -250,93 +253,124 @@ function stairPolys(
   const vertical = axis === "VERTICAL";
   const runY = s.entryFace === "BOTTOM" || s.entryFace === "TOP";
   const C = runY ? s.w : s.h, Run = runY ? s.h : s.w;
-  const total = f.heightFt + f.slabFt;
-  const R = s.riserCount > 0 ? s.riserCount : Math.max(6, Math.round(total / 0.6));
+  const total = f.heightFt + f.slabFt;                  // stair climbs from this FFL to the NEXT FFL
+  const dp = s.drawPlan;
+  let R = s.riserCount > 0 ? s.riserCount : Number(dp?.riserCount) > 0 ? Number(dp!.riserCount) : 0;
+  if (!(R > 0)) R = Math.max(6, Math.round(total / 0.6));
   const rise = total / R;
   const fw = s.flightWidthFt > 0 ? Math.min(s.flightWidthFt, C / 2 - 0.1) : Math.max(1, (C - 0.5) / 2);
-  const nm = R >= 10 ? 2 : 1;
-  const n1 = Math.ceil((R - nm) / 2), n2 = R - nm - n1;
-  const L1 = Math.max(1, Run - fw);
-  const td = L1 / n1;
-  const wt = 0.55;                                      // waist thickness (vertical)
-  const POCHE: "POCHE" | "LINE" = "POCHE";
+  const wt = 0.5;                                       // waist / landing slab thickness
   const label = `${R} R @ ${(rise * 12).toFixed(1)}"`;
   const mode: "RUN" | "CROSS" = runY === vertical ? "RUN" : "CROSS";
+
+  // ---- tread / riser split: EXACTLY the plan's drawPlan when available (single source of truth)
+  const t1p = Number(dp?.flight1?.treads), t2p = Number(dp?.flight2?.treads), mtp = Number(dp?.middle?.treads) || 0;
+  const dpOk = !!dp && t1p >= 1 && t2p >= 1 && t1p + t2p + mtp + 3 === R;
+  let n1: number, nm: number, n2: number;               // risers: FFL->landing1, landing1->landing2, landing2->next FFL
+  let d1: number[], d2: number[], dm: number[];         // tread depths (ft) per flight
+  let L1: number;                                       // run length occupied by the flights (landings after it)
+  if (dpOk) {
+    n1 = t1p + 1; nm = mtp + 1; n2 = t2p + 1;
+    const toFt = (a: any, n: number, fallback: number) =>
+      Array.isArray(a) && a.length === n && a.every((x: any) => Number(x) > 0) ? a.map((x: any) => Number(x) / 12) : Array(n).fill(fallback);
+    const approx = Math.max(0.6, (Run - fw) / Math.max(1, t1p));
+    d1 = toFt(dp!.flight1.depthsIn, t1p, approx);
+    d2 = toFt(dp!.flight2.depthsIn, t2p, approx);
+    dm = toFt(dp!.middle?.depthsIn, mtp, Math.max(0.6, (C - 2 * fw) / Math.max(1, mtp)));
+    const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
+    L1 = Math.max(1, Math.min(Run - 0.5, Math.max(sum(d1), sum(d2))));
+  } else {
+    nm = R >= 10 ? 2 : 1;
+    n1 = Math.ceil((R - nm) / 2); n2 = R - nm - n1;
+    L1 = Math.max(1, Run - fw);
+    d1 = Array(Math.max(1, n1 - 1)).fill(L1 / Math.max(1, n1 - 1));
+    d2 = Array(Math.max(1, n2 - 1)).fill(L1 / Math.max(1, n2 - 1));
+    dm = Array(Math.max(0, nm - 1)).fill(Math.max(0.6, (C - 2 * fw) / Math.max(1, nm - 1)));
+  }
+  const zA = ffl + n1 * rise, zB = ffl + (n1 + nm) * rise, zTop = ffl + R * rise;
   const polys: SecPoly[] = [];
   let hole: [number, number] | undefined;
 
+  // which flight does the cut line pass through (cross coordinate)
+  const crossStart = vertical ? s.x : s.y;
+  const aAtStart = s.entryFace === "BOTTOM" || s.entryFace === "LEFT";
+  const aLo = aAtStart ? crossStart : crossStart + C - fw, bLo = aAtStart ? crossStart + C - fw : crossStart;
+  let which: "A" | "B" | "WELL" = "WELL";
+  if (uCut >= aLo - 0.01 && uCut <= aLo + fw + 0.01) which = "A"; else if (uCut >= bLo - 0.01 && uCut <= bLo + fw + 0.01) which = "B";
+
   if (mode === "RUN") {
-    // v along the run. entry at larger v when entering from BOTTOM (vertical cut) / RIGHT (horizontal cut)
     const sv0 = (vertical ? s.y : s.x) + WALL_T, sv1 = sv0 + Run;
     const entryAtV1 = vertical ? s.entryFace === "BOTTOM" : s.entryFace === "RIGHT";
     const vE = entryAtV1 ? sv1 : sv0, dir = entryAtV1 ? -1 : 1;
-    const V = (p: number) => vE + dir * p;
-    const zA = ffl + n1 * rise, zB = ffl + (n1 + nm) * rise, zTop = ffl + R * rise;
+    const V = (p: number) => vE + dir * p;              // p = distance from the entry riser
 
-    // flight A (rises from entry to landing 1)
+    // flight A: entry -> landing 1 (nosing profile, then landing slab, then sloping soffit)
     const A: Pt[] = [[V(0), ffl]];
-    for (let k = 1; k <= n1; k++) { A.push([V((k - 1) * td), ffl + k * rise]); A.push([V(k * td), ffl + k * rise]); }
-    A.push([V(Run), zA], [V(Run), zA - 0.5], [V(L1), zA - 0.5]);
-    A.push([V(Math.min(L1, (wt * td) / rise)), ffl]);
-    // flight B (descending view: from landing 2 back to arrival at entry)
-    const B: Pt[] = [[V(Run), zB]];
-    for (let m = 1; m <= n2; m++) { B.push([V(L1 - (m - 1) * td), ffl + (n1 + nm + m) * rise]); B.push([V(L1 - m * td), ffl + (n1 + nm + m) * rise]); }
-    const pEnd = L1 - n2 * td;
-    B.push([V(pEnd), zTop - wt], [V(Run), zB - 0.5]);
-    // middle (winder) treads at the far end, seen when cut passes the well
-    const M: Pt[] = [[V(L1), zA - 0.5]];
-    for (let k = 1; k <= nm; k++) { M.push([V(L1), zA + k * rise]); M.push([V(Run), zA + k * rise]); M.push([V(Run), zA + k * rise - 0.5]); M.push([V(L1), zA + k * rise - 0.5]); }
+    let x = 0;
+    d1.forEach((d, k) => { A.push([V(x), ffl + (k + 1) * rise]); x += d; A.push([V(x), ffl + (k + 1) * rise]); });
+    A.push([V(x), zA], [V(Run), zA], [V(Run), zA - wt], [V(x), zA - wt]);
+    A.push([V(Math.min(x * 0.9, (wt * (x / d1.length)) / rise)), ffl]);
 
-    // which flight does the cut pass through?
-    const crossStart = vertical ? s.x : s.y;
-    const aAtStart = s.entryFace === "BOTTOM" || s.entryFace === "LEFT";
-    const aLo = aAtStart ? crossStart : crossStart + C - fw, bLo = aAtStart ? crossStart + C - fw : crossStart;
-    let which: "A" | "B" | "WELL" = "WELL";
-    if (uCut >= aLo && uCut <= aLo + fw) which = "A"; else if (uCut >= bLo && uCut <= bLo + fw) which = "B";
+    // flight B: landing 2 -> next floor (descending towards the entry)
+    const B: Pt[] = [[V(Run), zB], [V(L1), zB]];
+    let xb = L1;
+    d2.forEach((d, j) => { B.push([V(xb), zB + (j + 1) * rise]); xb -= d; B.push([V(xb), zB + (j + 1) * rise]); });
+    B.push([V(xb), zTop]);
+    const sB = rise / Math.max(0.3, d2.reduce((a, b) => a + b, 0) / d2.length);
+    const pU = Math.min(L1, xb + (zTop - wt - (zB - wt)) / sB), zU = zTop - wt - sB * (pU - xb);
+    B.push([V(xb), zTop - wt], [V(pU), zU], [V(pU), zB - wt], [V(Run), zB - wt]);
 
-    if (relation === "BEYOND") {
+    if (relation === "BEYOND") polys.push({ kind: "LINE", pts: A }, { kind: "LINE", pts: B });
+    else if (which === "A") polys.push({ kind: "POCHE", pts: A }, { kind: "LINE", pts: B });
+    else if (which === "B") polys.push({ kind: "POCHE", pts: B }, { kind: "LINE", pts: A });
+    else {
+      // cut runs through the well: shows the middle (cross-running) treads on the far landing
       polys.push({ kind: "LINE", pts: A }, { kind: "LINE", pts: B });
-    } else if (which === "A") {
-      polys.push({ kind: POCHE, pts: A }, { kind: "LINE", pts: B });
-    } else if (which === "B") {
-      polys.push({ kind: POCHE, pts: B }, { kind: "LINE", pts: A });
-    } else {
-      polys.push({ kind: "LINE", pts: A }, { kind: "LINE", pts: B }, { kind: POCHE, pts: [[V(L1), zA + rise - 0.5], [V(Run), zA + rise - 0.5], [V(Run), zA + nm * rise], [V(L1), zA + nm * rise]] });
-      void M;
+      if (nm > 1 && C - 2 * fw > 0.2) {
+        const lo = (aAtStart ? crossStart : crossStart) + fw, width = C - 2 * fw;
+        const frac = Math.min(0.999, Math.max(0, (aAtStart ? uCut - lo : crossStart + C - fw - uCut) / width));
+        const idx = Math.floor(frac * (nm - 1));
+        const zt = zA + (idx + 1) * rise;
+        polys.push({ kind: "POCHE", pts: [[V(L1), zt - wt], [V(Run), zt - wt], [V(Run), zt], [V(L1), zt]] });
+      }
     }
     if (relation === "CUT") hole = [Math.min(V(0), V(L1)), Math.max(V(0), V(L1))];
-    return { stair: { relation, mode, polys, label }, hole };
+    return { stair: { relation, mode, polys, label, anchor: [V((L1 + Run) / 2), ffl + 0.6] }, hole };
   }
 
-  // CROSS: v runs across the flights; the cut is at run-distance sRun from the entry
-  const cs = (vertical ? s.y : s.x) + WALL_T;            // cross start in v
-  const aAtStart = s.entryFace === "BOTTOM" || s.entryFace === "LEFT";
+  // CROSS: v runs across the flights; the cut sits at run-distance sRun from the entry riser
+  const cs = (vertical ? s.y : s.x) + WALL_T;
   const aV: [number, number] = aAtStart ? [cs, cs + fw] : [cs + C - fw, cs + C];
   const bV: [number, number] = aAtStart ? [cs + C - fw, cs + C] : [cs, cs + fw];
   const sRun = s.entryFace === "BOTTOM" ? s.y + s.h - uCut : s.entryFace === "TOP" ? uCut - s.y : s.entryFace === "LEFT" ? uCut - s.x : s.x + s.w - uCut;
   const blk = (v: [number, number], zt: number, kind: "POCHE" | "LINE", thick = wt): SecPoly =>
     ({ kind, pts: [[v[0], zt - thick], [v[1], zt - thick], [v[1], zt], [v[0], zt]] });
+  const anchor: [number, number] = [cs + C / 2, ffl + 0.6];
 
   if (relation === "BEYOND") {
-    polys.push(blk(aV, ffl + n1 * rise, "LINE", n1 * rise), blk(bV, ffl + R * rise, "LINE", R * rise));
-    return { stair: { relation, mode, polys, label } };
+    polys.push(blk(aV, zA, "LINE", n1 * rise), blk(bV, zTop, "LINE", R * rise));
+    return { stair: { relation, mode, polys, label, anchor } };
   }
   if (sRun < L1) {
-    const i = Math.min(n1 - 1, Math.max(0, Math.floor(sRun / td)));
-    polys.push(blk(aV, ffl + (i + 1) * rise, POCHE), blk(bV, ffl + (R - i) * rise, POCHE));
+    const idx = (a: number[], p: number) => { let c = 0; for (let i = 0; i < a.length; i++) { c += a[i]; if (p < c) return i; } return a.length - 1; };
+    const i = idx(d1, sRun);                                         // A tread under the cut
+    const pB = L1 - sRun;                                            // B counts back from the far end
+    const j = Math.min(d2.length - 1, Math.max(0, idx(d2.slice().reverse(), Math.max(0, pB)) ));
+    const jj = d2.length - 1 - j;                                    // tread number counted from landing 2
+    polys.push(blk(aV, ffl + (i + 1) * rise, "POCHE"), blk(bV, zB + (jj + 1) * rise, "POCHE"));
     hole = [cs, cs + C];
   } else {
-    const zA = ffl + n1 * rise, zB = ffl + (n1 + nm) * rise;
-    polys.push(blk(aV, zA, POCHE, 0.5), blk(bV, zB, POCHE, 0.5));
-    const gap0 = aV[1] <= bV[0] ? aV[1] : bV[1], gap1 = aV[1] <= bV[0] ? bV[0] : aV[0];
-    const lo = Math.min(gap0, gap1), hi = Math.max(gap0, gap1);
-    const stepV = (hi - lo) / nm, dz = (zB - zA) / nm, rev = aV[0] > bV[0];
-    for (let k = 0; k < nm; k++) {
-      const a = lo + k * stepV, b = a + stepV, z = rev ? zB - k * dz : zA + (k + 1) * dz;
-      polys.push({ kind: POCHE, pts: [[a, z - 0.5], [b, z - 0.5], [b, z], [a, z]] });
+    polys.push(blk(aV, zA, "POCHE"), blk(bV, zB, "POCHE"));
+    const gapLo = Math.min(aV[1], bV[1]) === aV[1] ? aV[1] : bV[1];
+    const gapHi = gapLo === aV[1] ? bV[0] : aV[0];
+    const lo = Math.min(gapLo, gapHi), hi = Math.max(gapLo, gapHi), steps = Math.max(1, nm - 1);
+    const stepV = (hi - lo) / steps, rev = aV[0] > bV[0];
+    for (let k = 0; k < nm - 1; k++) {
+      const a = lo + k * stepV, b = a + stepV, z = rev ? zB - (k + 1) * rise : zA + (k + 1) * rise;
+      polys.push({ kind: "POCHE", pts: [[a, z - wt], [b, z - wt], [b, z], [a, z]] });
     }
   }
-  return { stair: { relation, mode, polys, label }, hole };
+  return { stair: { relation, mode, polys, label, anchor }, hole };
 }
 
 export function buildSectionModel(ctx: SectionContext, cutIn: SectionCutDef): SectionModel {

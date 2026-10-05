@@ -11,6 +11,8 @@ import { DeedFormData } from "../types/deed";
 import { generateDeedHtmlContent } from "../utils/deedTemplates";
 import { supabase } from "@/lib/supabase";
 import { getItemRate } from "@/lib/pricing";
+// ✅ NEW: State-wise DB pricing
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
 
 interface DeedFormLayoutProps {
   initialData?: any;
@@ -123,6 +125,90 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   const [currentRefNo, setCurrentRefNo] = useState<string>("");
 
   /* ============================================================
+     ✅ NEW: STATE-WISE PRICING DISPLAY (from pricing_config)
+     ============================================================ */
+  const [pricingDisplay, setPricingDisplay] = useState<{
+    mrp: number;
+    price: number;
+    discountEnabled: boolean;
+    discountPercent: number;
+    savings: number;
+    isFromDB: boolean;
+  }>({
+    mrp: 0,
+    price: 0,
+    discountEnabled: false,
+    discountPercent: 0,
+    savings: 0,
+    isFromDB: false,
+  });
+  const [pricingLoading, setPricingLoading] = useState(true);
+
+  /* ============================================================
+     ✅ NEW useEffect: Fetch pricing from pricing_config based on state
+     ============================================================ */
+  useEffect(() => {
+    let alive = true;
+
+    const loadPricing = async () => {
+      setPricingLoading(true);
+      const targetState = userProfileState || formData.stateName;
+      
+      try {
+        const row = await fetchPricingRow("drafting", targetState);
+        const display = getDisplayPricing(row);
+
+        if (!alive) return;
+
+        if (display.isFromDB && display.price > 0) {
+          // ✅ DB se aayi value
+          setPricingDisplay({
+            mrp: display.mrp,
+            price: display.price,
+            discountEnabled: display.discountEnabled,
+            discountPercent: display.discountPercent,
+            savings: display.savings,
+            isFromDB: true,
+          });
+          console.log(`💰 [DB PRICING] ${targetState} × drafting = ₹${display.price}`);
+        } else {
+          // ✅ Fallback: hardcoded pricing.ts
+          const fallbackPrice = getItemRate(targetState, "drafting");
+          setPricingDisplay({
+            mrp: fallbackPrice,
+            price: fallbackPrice,
+            discountEnabled: false,
+            discountPercent: 0,
+            savings: 0,
+            isFromDB: false,
+          });
+          console.log(`⚠️ [FALLBACK PRICING] ${targetState} × drafting = ₹${fallbackPrice}`);
+        }
+      } catch (err) {
+        console.error("[PRICING FETCH ERROR]", err);
+        if (!alive) return;
+        const fallbackPrice = getItemRate(targetState, "drafting");
+        setPricingDisplay({
+          mrp: fallbackPrice,
+          price: fallbackPrice,
+          discountEnabled: false,
+          discountPercent: 0,
+          savings: 0,
+          isFromDB: false,
+        });
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    };
+
+    loadPricing();
+
+    return () => {
+      alive = false;
+    };
+  }, [userProfileState, formData.stateName]);
+
+  /* ============================================================
      ✅ EFFECT 1: Restore saved draft data (from dashboard reopen)
      ============================================================ */
   useEffect(() => {
@@ -162,7 +248,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
   /* ============================================================
      ✅ EFFECT 2: Restore form data after payment cancel/fail
-     Ye backup `handleGenerateDraft` me Razorpay khulne se pehle set hota hai
      ============================================================ */
   useEffect(() => {
     const formBackup = localStorage.getItem("deedDraftFormBackup");
@@ -170,7 +255,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       try {
         const parsed = JSON.parse(formBackup);
         
-        // 10 minute se purana backup ignore karo (safety)
         const backupAge = Date.now() - (parsed.__backupTime || 0);
         if (backupAge < 10 * 60 * 1000) {
           const { __backupTime, ...cleanData } = parsed;
@@ -178,7 +262,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           console.log("✅ Form data restored from backup after payment cancel");
         }
         
-        // Backup consume karo — ek baar use hone ke baad delete
         localStorage.removeItem("deedDraftFormBackup");
       } catch (e) {
         console.error("Error restoring form backup:", e);
@@ -228,7 +311,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
   const handleClearForm = () => {
     if (window.confirm("Are you sure you want to clear all form fields?")) {
-      // ✅ Backup bhi clear karo
       localStorage.removeItem("deedDraftFormBackup");
       
       setFormData({
@@ -419,8 +501,22 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         userServiceFeeAmount = Number((formData as any).feeAmount) || 0;
       }
 
-      /* ✅ STATE-WISE DRAFTING FEE */
-      const gatewayFeeAmount = getItemRate(targetState, "drafting");
+      /* ✅ STATE-WISE DRAFTING FEE from pricing_config DB */
+      let gatewayFeeAmount = 0;
+      try {
+        const row = await fetchPricingRow("drafting", targetState);
+        const display = getDisplayPricing(row);
+        if (display.isFromDB && display.price > 0) {
+          gatewayFeeAmount = display.price;
+          console.log(`💰 [DB PRICING] ${targetState} × drafting = ₹${gatewayFeeAmount}`);
+        } else {
+          gatewayFeeAmount = getItemRate(targetState, "drafting");
+          console.log(`⚠️ [FALLBACK PRICING] ${targetState} × drafting = ₹${gatewayFeeAmount}`);
+        }
+      } catch (err) {
+        console.error("[PRICING FETCH ERROR]", err);
+        gatewayFeeAmount = getItemRate(targetState, "drafting");
+      }
 
       console.log(`🎯 State: ${targetState} | Gateway Fee: ₹${gatewayFeeAmount}`);
 
@@ -470,7 +566,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           });
 
           if (matchedRecord) {
-            /* ✅ REOPEN: Update existing record, ref no. same */
             try {
               const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
                 ? parseFloat(formData.plotArea) 
@@ -611,8 +706,6 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         return;
       }
 
-      /* ✅ Razorpay khulne se pehle form data local me save karo
-         taaki cancel/fail hone pe form wapas restore ho sake */
       try {
         localStorage.setItem(
           "deedDraftFormBackup",
@@ -625,15 +718,13 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
       const options: any = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_YourKeyHelp",
-        amount: gatewayFeeAmount * 100,
+        amount: Math.round(gatewayFeeAmount * 100),
         currency: "INR",
         name: "Legal Drafting Portal",
         description: `Drafting Fee for ${targetState} — ₹${gatewayFeeAmount}`,
 
-        /* ✅ PAYMENT SUCCESS — Ref No. abhi generate hoga */
         handler: async function (response: any) {
           try {
-            /* ✅ Success pe backup clear karo — ab zarurat nahi */
             localStorage.removeItem("deedDraftFormBackup");
 
             const nextSeq = await fetchNextSequenceNumber();
@@ -714,12 +805,10 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           setIsGenerating(false);
         },
 
-        /* ✅ PAYMENT CANCEL / POPUP CLOSE — User SAME PAGE pe rahega */
         modal: {
           ondismiss: function () {
             console.log("❌ Payment cancelled by user");
             setIsGenerating(false);
-            // ✅ Dashboard redirect NAHI — form backup se data restore ho jayega
             alert("❌ Payment cancel kar diya gaya.\n✅ Aapka form data safe hai — aap dobara try kar sakte hain.");
           }
         },
@@ -737,12 +826,10 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
       const paymentObject = new (window as any).Razorpay(options);
       paymentObject.open();
       
-      /* ✅ PAYMENT FAILED — User SAME PAGE pe rahega */
       paymentObject.on('payment.failed', function (response: any) {
         console.error("❌ Payment failed:", response.error);
         setIsGenerating(false);
         alert(`❌ Payment failed: ${response.error.description || 'Unknown error'}\n✅ Aapka form data safe hai — aap dobara try kar sakte hain.`);
-        // ✅ Dashboard redirect NAHI
       });
 
     } catch (err) {
@@ -765,6 +852,49 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         {currentRefNo && (
           <div className="mt-2 inline-block bg-blue-100 text-blue-900 px-3 py-1 rounded text-xs font-mono font-bold">
             Loaded Ref No: {currentRefNo}
+          </div>
+        )}
+
+        {/* ✅ STATE-WISE PRICING DISPLAY */}
+        {userRole !== 'admin' && (
+          <div className="mt-3 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="bg-red-600 text-white text-[11px] px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse font-extrabold">
+                ⚡ LIMITED TIME OFFER
+              </span>
+              <div>
+                <h4 className="text-xs font-extrabold text-slate-900 uppercase">
+                  Professional Legal Drafting Service
+                </h4>
+                <p className="text-[10px] text-slate-600 font-medium">
+                  State: <span className="font-bold text-blue-700">{userProfileState}</span> | Instant PDF + Digital Seal
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
+              <div className="text-right">
+                {pricingLoading ? (
+                  <span className="text-xs text-slate-500 font-bold">Loading price...</span>
+                ) : (
+                  <>
+                    {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-[11px] text-gray-400 line-through font-semibold">
+                          ₹ {pricingDisplay.mrp}/-
+                        </span>
+                        <span className="bg-green-100 text-green-800 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                          {pricingDisplay.discountPercent}% OFF
+                        </span>
+                      </div>
+                    )}
+                    <div className="text-lg font-black text-emerald-600 leading-tight">
+                      ₹ {pricingDisplay.price || 0}
+                      <span className="text-xs font-bold text-slate-700 ml-1">Only</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -790,11 +920,11 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         </div>
         
         <Section5Actions 
-          isGenerating={isGenerating} 
-          onDashboardClick={() => router.push("/dashboard")} 
-          onClearForm={handleClearForm}
-          isAdmin={userRole === 'admin'} 
-        />
+  isGenerating={isGenerating} 
+  onDashboardClick={() => router.push("/dashboard")} 
+  onClearForm={handleClearForm}
+  isAdmin={userRole === 'admin'}
+/>
       </form>
 
       {generatedDocHtml && (

@@ -48,6 +48,9 @@ interface PlotConfigSectionProps {
   calculatedNetArea?: number;
 }
 
+// Helper to hide 0 and show empty string
+const safeValue = (val: number | undefined) => (val === 0 || val === undefined ? "" : val);
+
 export default function PlotConfigSection({
   measurementUnit,
   setMeasurementUnit,
@@ -64,7 +67,7 @@ export default function PlotConfigSection({
   setTempSelectedFloors,
   selectedFloors,
   setIsFloorModalOpen,
-  setIsCadModalOpen,
+  setIsCadModalOpen, // kept for interface compatibility
   dimensionHistory,
   handleUndo,
   handleResetDimensions,
@@ -234,7 +237,7 @@ export default function PlotConfigSection({
           </div>
 
           <div>
-            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">FLOORS & CAD</label>
+            <label className="font-bold text-[12pt] md:text-[11pt] block mb-1">SELECT FLOORS</label>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -243,17 +246,9 @@ export default function PlotConfigSection({
                   setTempSelectedFloors(selectedFloors);
                   setIsFloorModalOpen(true);
                 }}
-                className="w-1/2 border border-black bg-gray-100 p-2.5 md:p-2 text-xs font-bold hover:bg-gray-200 disabled:opacity-40 transition cursor-pointer"
+                className="w-full border border-black bg-gray-100 p-2.5 md:p-2 text-xs font-bold hover:bg-gray-200 disabled:opacity-40 transition cursor-pointer"
               >
                 FLOORS ({selectedFloors.length})
-              </button>
-              <button
-                type="button"
-                disabled={!areDetailsCompleted}
-                onClick={() => setIsCadModalOpen(true)}
-                className="w-1/2 bg-blue-700 text-white p-2.5 md:p-2 text-xs font-black hover:bg-blue-800 disabled:opacity-40 transition cursor-pointer"
-              >
-                OPEN CAD
               </button>
             </div>
           </div>
@@ -303,37 +298,37 @@ export default function PlotConfigSection({
                     {/* SIDE A */}
                     <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '12%', left: '50%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-yellow-400 mr-1">A:</span>
-                      <input type="number" value={plotDimensions.A} onChange={(e) => updateDimensionPart("A", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.A)} onChange={(e) => updateDimensionPart("A", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE B */}
                     <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '38%', left: '88%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-yellow-400 mr-1">B:</span>
-                      <input type="number" value={plotDimensions.B} onChange={(e) => updateDimensionPart("B", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.B)} onChange={(e) => updateDimensionPart("B", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE C */}
                     <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '88%', left: '33%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-yellow-400 mr-1">C:</span>
-                      <input type="number" value={plotDimensions.C} onChange={(e) => updateDimensionPart("C", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.C)} onChange={(e) => updateDimensionPart("C", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE D */}
                     <div className="absolute flex items-center bg-black/95 border border-yellow-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '51%', left: '13%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-yellow-400 mr-1">D:</span>
-                      <input type="number" value={plotDimensions.D} onChange={(e) => updateDimensionPart("D", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.D)} onChange={(e) => updateDimensionPart("D", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE E */}
                     <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '53%', left: '67%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-cyan-300 mr-1">E:</span>
-                      <input type="number" value={plotDimensions.E} onChange={(e) => updateDimensionPart("E", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.E)} onChange={(e) => updateDimensionPart("E", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
 
                     {/* SIDE F */}
                     <div className="absolute flex items-center bg-black/95 border border-cyan-400 px-1.5 py-1 rounded shadow z-30" style={{ top: '69%', left: '44%', transform: 'translate(-50%, -50%)' }}>
                       <span className="text-[10px] font-bold text-cyan-300 mr-1">F:</span>
-                      <input type="number" value={plotDimensions.F} onChange={(e) => updateDimensionPart("F", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
+                      <input type="number" value={safeValue(plotDimensions.F)} onChange={(e) => updateDimensionPart("F", "ft", Number(e.target.value))} className="w-12 text-center text-[11px] font-black bg-white text-black rounded" />
                     </div>
                   </div>
                 </div>
@@ -359,7 +354,7 @@ export default function PlotConfigSection({
                         <input
                           type="number"
                           min={0}
-                          value={dimDetails[item.key]?.ft || 0}
+                          value={safeValue(dimDetails[item.key]?.ft)}
                           onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
                           className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                         />
@@ -370,7 +365,7 @@ export default function PlotConfigSection({
                           type="number"
                           min={0}
                           max={11}
-                          value={dimDetails[item.key]?.in || 0}
+                          value={safeValue(dimDetails[item.key]?.in)}
                           onChange={(e) => updateDimensionPart(item.key as any, "in", Number(e.target.value))}
                           className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                         />
@@ -383,7 +378,7 @@ export default function PlotConfigSection({
                         type="number"
                         min={0}
                         step="0.01"
-                        value={plotDimensions[item.key] || 0}
+                        value={safeValue(plotDimensions[item.key])}
                         onChange={(e) => updateDimensionPart(item.key as any, "ft", Number(e.target.value))}
                         className="w-full border border-black p-2 md:p-1 text-center text-sm font-bold bg-white"
                       />
@@ -408,15 +403,15 @@ export default function PlotConfigSection({
             <div className="grid grid-cols-2 md:grid-cols-1 gap-2 md:gap-3">
               {["front", "rear", "left", "right"].map((key) => (
                 <div key={key}>
-                  <label className="font-bold text-[10px] md:text-[9pt] uppercase block mb-1">{key}</label>
+                  <label className="font-bold text-[10px] md:text-[10pt] uppercase block mb-1">{key}</label>
                   <input
                     type="number"
                     min={0}
                     step="0.01"
                     disabled={!isShapeSelected || coverageType === "100_PERCENT"}
-                    value={coverageType === "100_PERCENT" ? 0 : setbackInputs[key as keyof typeof setbackInputs]}
+                    value={coverageType === "100_PERCENT" ? 0 : safeValue(setbackInputs[key as keyof typeof setbackInputs])}
                     onChange={(event) => setSetbackInputs((prev) => ({ ...prev, [key]: Math.max(0, Number(event.target.value) || 0) }))}
-                    className="w-full border border-black p-2 md:p-1.5 text-xs font-bold text-center disabled:bg-gray-100 bg-white"
+                    className="w-full border border-black p-2 md:p-1.5 text-11xl font-bold text-center disabled:bg-gray-100 bg-white"
                   />
                 </div>
               ))}

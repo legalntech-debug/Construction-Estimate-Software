@@ -12,10 +12,10 @@ export interface ServicePrices {
 export const stateWisePricing: Record<string, ServicePrices> = {
   // 1. Madhya Pradesh
   "MADHYA PRADESH": {
-    estimate: 21,
-    map: 231,
-    drafting: 21,
-    constructionCertificate: 51,
+    estimate: 120,
+    map: 200,
+    drafting: 120,
+    constructionCertificate: 80,
     completionCertificate: 700,
     locationPlan: 500, // Route Map ke liye bhi yahi use hoga
   },
@@ -23,7 +23,7 @@ export const stateWisePricing: Record<string, ServicePrices> = {
   // 2. Maharashtra
   "MAHARASHTRA": {
     estimate: 500,
-    map: 1,
+    map: 1000,
     drafting: 500,
     constructionCertificate: 500,
     completionCertificate: 1500,

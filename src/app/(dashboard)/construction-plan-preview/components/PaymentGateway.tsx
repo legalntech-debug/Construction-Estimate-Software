@@ -4,11 +4,14 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getItemRate } from "@/lib/pricing";
+import { fetchPricingRow, getDisplayPricing, formatPrice, PricingRow, PricingDisplay } from "@/lib/pricingFetch";
 import {
   createOrUpdateServiceRecord,
   updatePaymentStatus,
   isAlreadyPaid,
+  fetchPaidRecordByRef,
+  checkReprintStatus,
+  autoUpdatePaidRecord,
   ServiceRecordPayload,
 } from "@/lib/service-records";
 
@@ -17,7 +20,6 @@ import {
 // ============================================================
 interface PaymentGatewayProps {
   refNo: string;
-  /** ✅ Payment success ke baad call hoga, naya refNo return kare */
   refNoGenerator?: () => Promise<string>;
   caseType: string;
   stateName?: string;
@@ -26,9 +28,11 @@ interface PaymentGatewayProps {
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
+  propertyAddress?: string;
+  clientName?: string;
+  representative?: string;
   formSnapshot?: any;
   extraFields?: Partial<ServiceRecordPayload>;
-  /** ✅ 3rd param: finalRefNo (payment ke baad generate hua naya ref) */
   onPaymentSuccess?: (paymentId: string, orderId: string, finalRefNo?: string) => void;
   onPaymentError?: (error: string) => void;
   isAdmin?: boolean;
@@ -47,6 +51,9 @@ export default function PaymentGateway({
   customerName = "",
   customerEmail = "",
   customerPhone = "",
+  propertyAddress = "",
+  clientName = "",
+  representative = "",
   formSnapshot = null,
   extraFields = {},
   onPaymentSuccess,
@@ -63,8 +70,38 @@ export default function PaymentGateway({
   const [isPaid, setIsPaid] = useState(false);
   const [paymentError, setPaymentError] = useState<string>("");
 
-  // Calculate amount from pricing table
-  const amount = amountOverride ?? getItemRate(stateName, pricingItem);
+  // ============================================================
+  // ✅ NEW: DB Pricing State
+  // ============================================================
+  const [pricingRow, setPricingRow] = useState<PricingRow | null>(null);
+  const [pricingLoading, setPricingLoading] = useState(true);
+
+  // ============================================================
+  // ✅ NEW: Fetch pricing from DB
+  // ============================================================
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setPricingLoading(true);
+      try {
+        const row = await fetchPricingRow(pricingItem, stateName, userCategory);
+        if (alive) setPricingRow(row);
+      } catch (err) {
+        console.error("[PRICING FETCH ERROR]", err);
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [pricingItem, stateName, userCategory]);
+
+  // ✅ Display values from DB
+  const display: PricingDisplay = getDisplayPricing(pricingRow);
+
+  // ✅ Final price (jo user pay karega) — DB se, fallback override
+  const amount = amountOverride ?? display.price ?? 0;
   const gatewayFee = amount;
   const userServiceFee = 0;
 
@@ -104,17 +141,76 @@ export default function PaymentGateway({
   }, [refNo]);
 
   // ============================================================
-  // HANDLE PAYMENT
+  // ✅ NEW: HANDLE PAYMENT (with reprint logic)
   // ============================================================
   const handlePayment = useCallback(async () => {
-    // Already paid → trigger success callback
+    // ============================================================
+    // STEP 1: Agar already paid hai (same session me) → success callback
+    // ============================================================
     if (isPaid) {
-      onPaymentSuccess?.("already_paid", "already_paid");
+      onPaymentSuccess?.("already_paid", "already_paid", refNo);
       return;
     }
 
     // ============================================================
-    // ✅ ADMIN BYPASS — Admin/Engineer free print
+    // STEP 2: Reprint Check (agar refNo valid hai)
+    //   - 5 scenarios handle karo: NEW, PAID_SAME, MINOR, MAJOR, EXPIRED, ADMIN
+    // ============================================================
+    let reprintStatus: any = null;
+
+    if (refNo && refNo !== "DRAFT" && currentUser?.id) {
+      try {
+        reprintStatus = await checkReprintStatus(
+          refNo,
+          { customer_name: customerName, property_address: propertyAddress },
+          isAdminUser
+        );
+
+        console.log("[REPRINT CHECK]", reprintStatus);
+
+        // ✅ CASE 1: Admin Override — print allowed
+        if (reprintStatus.status === 'ADMIN_OVERRIDE') {
+          setIsPaid(true);
+          onPaymentSuccess?.("ADMIN_OVERRIDE", "ADMIN_OVERRIDE", refNo);
+          return;
+        }
+
+        // ✅ CASE 2: Minor changes → Auto-update + print
+        if (reprintStatus.status === 'PAID_MINOR_CHANGE') {
+          await autoUpdatePaidRecord(refNo, {
+            customer_name: customerName,
+            property_address: propertyAddress,
+            client_name: clientName,
+            representative: representative,
+            form_snapshot: formSnapshot,
+            ...extraFields,
+          });
+          setIsPaid(true);
+          onPaymentSuccess?.("MINOR_UPDATE", "MINOR_UPDATE", refNo);
+          return;
+        }
+
+        // ✅ CASE 3: PAID_SAME (identical data) → Direct print
+        if (reprintStatus.status === 'PAID_SAME') {
+          setIsPaid(true);
+          onPaymentSuccess?.("SAME_DATA", "SAME_DATA", refNo);
+          return;
+        }
+
+        // ❌ CASE 4: EXPIRED or MAJOR_CHANGE → Continue to payment (fresh charge)
+        if (reprintStatus.status === 'EXPIRED') {
+          console.warn("[REPRINT] Expired — new payment required");
+        } else if (reprintStatus.status === 'PAID_MAJOR_CHANGE') {
+          console.warn("[REPRINT] Major change — new payment required:", reprintStatus.reason);
+        }
+      } catch (err) {
+        console.error("[REPRINT CHECK ERROR]", err);
+        // Continue to payment flow on error
+      }
+    }
+
+    // ============================================================
+    // STEP 3: ADMIN BYPASS
     // ============================================================
     if (isAdminUser) {
       try {
@@ -132,6 +228,7 @@ export default function PaymentGateway({
           razorpay_order_id: "ADMIN_BYPASS",
           razorpay_payment_id: "ADMIN_FREE",
           customer_name: customerName,
+          property_address: propertyAddress,
           state_name: stateName,
           form_snapshot: formSnapshot,
           fee_mode: "Auto",
@@ -148,7 +245,7 @@ export default function PaymentGateway({
     }
 
     // ============================================================
-    // VALIDATIONS
+    // STEP 4: VALIDATIONS
     // ============================================================
     if (!scriptLoaded) {
       setPaymentError("Payment gateway is loading. Please wait...");
@@ -165,40 +262,26 @@ export default function PaymentGateway({
 
     try {
       // ============================================================
-      // ✅ DIRECT RAZORPAY — Deed Drafting pattern (no server API)
+      // RAZORPAY CHECKOUT
       // ============================================================
-      // - `amount` rupees mein hai
-      // - Razorpay `amount * 100` chahiye (paise)
-      // - No server-side order create needed — Razorpay directly handle karega
-      // - Ref No. `handler` ke andar generate hoga (payment success ke baad)
+      const razorpayKey =
+        process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_TK9kvfQQvEx2rQ";
 
-      const razorpayKey = "rzp_test_TK9kvfQQvEx2rQ";  // test key
-      // Production: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID
-
-      // ============================================================
-      // RAZORPAY CHECKOUT OPTIONS
-      // ============================================================
       const options = {
         key: razorpayKey,
-        amount: Math.round(amount * 100),          // ✅ paise (rupees × 100)
+        amount: Math.round(amount * 100), // paise
         currency: "INR",
         name: "LNT WITH AI 2.0",
         description: `${caseType.replace(/_/g, " ")} — ${stateName}`,
-        // ✅ No `order_id` — Razorpay auto-create karega
 
         handler: async function (response: any) {
           try {
-            console.log("[PAYMENT] Razorpay success response:", response);
+            console.log("[PAYMENT] Razorpay success:", response);
 
-            // ============================================================
-            // ✅ STEP 1: Payment ke BAAD fresh refNo generate karo
-            // ============================================================
+            // ✅ Step 1: Generate fresh ref_no
             const finalRefNo = refNoGenerator ? await refNoGenerator() : refNo;
-            console.log("[PAYMENT] Final ref_no:", finalRefNo);
 
-            // ============================================================
-            // ✅ STEP 2: CREATE service_records entry — SIRF payment success ke baad
-            // ============================================================
+            // ✅ Step 2: Save service record
             try {
               await createOrUpdateServiceRecord({
                 ref_no: finalRefNo,
@@ -212,19 +295,18 @@ export default function PaymentGateway({
                 razorpay_order_id: response.razorpay_order_id || "DIRECT_PAY",
                 razorpay_payment_id: response.razorpay_payment_id,
                 customer_name: customerName,
+                property_address: propertyAddress,
                 state_name: stateName,
                 form_snapshot: formSnapshot,
                 fee_mode: "Auto",
                 status: "finalized",
                 ...extraFields,
               });
-              console.log("[SERVICE RECORD] ✅ Entry created with ref:", finalRefNo);
+              console.log("[SERVICE RECORD] ✅ Saved with ref:", finalRefNo);
             } catch (recErr: any) {
               console.error("[SERVICE RECORD SAVE ERROR]", recErr);
-              // Payment ho chuki hai — record fail ho to bhi user ko success dikhao
             }
 
-            // ✅ Payment state update karo + caller ko notify karo
             setIsPaid(true);
             setPaymentLoading(false);
             onPaymentSuccess?.(
@@ -248,19 +330,16 @@ export default function PaymentGateway({
         notes: {
           ref_no: refNo,
           case_type: caseType,
+          mrp: display.mrp,
+          discount_percent: display.discountPercent,
         },
         theme: {
           color: "#1e3a8a",
         },
 
-        // ✅ CANCEL — User ne checkout band kiya
-        // Error nahi dikhana — sirf loading off karo
         modal: {
           ondismiss: function () {
             setPaymentLoading(false);
-            console.log("[PAYMENT] User cancelled the checkout");
-            // setPaymentError NAHI karenge
-            // onPaymentError NAHI call karenge
           },
         },
       };
@@ -268,14 +347,12 @@ export default function PaymentGateway({
       const razorpay = new (window as any).Razorpay(options);
       razorpay.open();
 
-      // ✅ PAYMENT FAILED — Razorpay network error / card decline
       razorpay.on("payment.failed", function (response: any) {
         console.error("[PAYMENT FAILED]", response.error);
         setPaymentError(response.error.description || "Payment failed");
         setPaymentLoading(false);
         onPaymentError?.(response.error.description || "Payment failed");
       });
-
     } catch (err: any) {
       console.error("[PAYMENT ERROR]", err);
       setPaymentError(err.message || "Payment failed");
@@ -293,14 +370,19 @@ export default function PaymentGateway({
     gatewayFee,
     userServiceFee,
     customerName,
+    propertyAddress,
     customerEmail,
     customerPhone,
     formSnapshot,
     extraFields,
     currentUser,
     stateName,
+    clientName,
+    representative,
     onPaymentSuccess,
     onPaymentError,
+    display.mrp,
+    display.discountPercent,
   ]);
 
   // ============================================================
@@ -313,6 +395,16 @@ export default function PaymentGateway({
     paymentLoading,
     paymentError,
     scriptLoaded,
+    pricingLoading,
+
+    // ✅ NEW: Pricing display values
+    mrp: display.mrp,
+    price: display.price,
+    discountEnabled: display.discountEnabled,
+    discountPercent: display.discountPercent,
+    savings: display.savings,
+
+    // Amount (backward compat)
     amount,
     gatewayFee,
     userServiceFee,
@@ -324,12 +416,12 @@ export default function PaymentGateway({
     renderButton: (customText?: string, customClass?: string) => (
       <button
         onClick={handlePayment}
-        disabled={paymentLoading || (!scriptLoaded && !isAdminUser)}
+        disabled={paymentLoading || (!scriptLoaded && !isAdminUser) || pricingLoading}
         className={
           customClass ||
           buttonClassName ||
           `px-4 py-1.5 text-xs font-bold transition rounded cursor-pointer ${
-            paymentLoading || (!scriptLoaded && !isAdminUser)
+            paymentLoading || (!scriptLoaded && !isAdminUser) || pricingLoading
               ? "bg-gray-400 cursor-not-allowed"
               : isPaid
               ? "bg-blue-600 hover:bg-blue-700"
@@ -339,7 +431,9 @@ export default function PaymentGateway({
           } text-white`
         }
       >
-        {paymentLoading
+        {pricingLoading
+          ? "LOADING PRICE..."
+          : paymentLoading
           ? "PROCESSING..."
           : isPaid
           ? "✅ PAID"

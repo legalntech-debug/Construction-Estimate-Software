@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 interface ClientDetailsSectionProps {
   caseType: string;
@@ -35,6 +35,10 @@ export default function ClientDetailsSection({
   propertyAddress,
   setPropertyAddress,
 }: ClientDetailsSectionProps) {
+  // Local state to toggle visibility
+  const [showClientName, setShowClientName] = useState(true);
+  const [showRepresentative, setShowRepresentative] = useState(true);
+
   return (
     <>
       {/* Top Fields Grid - 2 Columns on Mobile, 7-Cols on Desktop */}
@@ -47,7 +51,6 @@ export default function ClientDetailsSection({
             className="w-full border border-black p-2 md:p-1 uppercase text-center bg-white text-xs md:text-sm cursor-pointer"
           >
             <option>CONSTRUCTION PLAN</option>
-            <option>NEW CONSTRUCTION</option>
           </select>
         </div>
 
@@ -71,36 +74,66 @@ export default function ClientDetailsSection({
           )}
         </div>
         
+        {/* CLIENT NAME with Toggle */}
         <div className="col-span-1 md:col-span-2">
-          <label className="font-bold block text-[10pt] md:text-[12pt]">CLIENT NAME</label>
-          <input 
-            list="clients-list" 
-            value={selectedClientName} 
-            onChange={(e) => handleClientChange(e.target.value)} 
-            className="w-full border border-black p-2 md:p-1 uppercase text-center bg-white text-xs md:text-sm" 
-            placeholder="SEARCH CLIENT..." 
-          />
-          <datalist id="clients-list">
-            {[...new Set(clients.map(c => c.client_name || c.name))].filter(Boolean).map((name: any, i) => (
-              <option key={i} value={name} />
-            ))}
-          </datalist>
+          <div className="flex justify-between items-center">
+            <label className="font-bold block text-[10pt] md:text-[12pt]">CLIENT NAME</label>
+            <button 
+              type="button" 
+              onClick={() => setShowClientName(!showClientName)}
+              className="text-xs text-gray-500 hover:text-black"
+              title={showClientName ? "Hide field" : "Show field"}
+            >
+              {showClientName ? "👁️" : "👁️‍🗨️"}
+            </button>
+          </div>
+          {showClientName && (
+            <>
+              <input 
+                list="clients-list" 
+                value={selectedClientName} 
+                onChange={(e) => handleClientChange(e.target.value)} 
+                className="w-full border border-black p-2 md:p-1 uppercase text-center bg-white text-xs md:text-sm" 
+                placeholder="SEARCH CLIENT..." 
+              />
+              <datalist id="clients-list">
+                {[...new Set(clients.map(c => c.client_name || c.name))].filter(Boolean).map((name: any, i) => (
+                  <option key={i} value={name} />
+                ))}
+              </datalist>
+            </>
+          )}
         </div>
 
+        {/* REPRESENTATIVE with Toggle */}
         <div className="col-span-1 md:col-span-2">
-          <label className="font-bold block text-[10pt] md:text-[12pt]">REPRESENTATIVE</label>
-          <input 
-            list="reps-list" 
-            value={representative} 
-            onChange={(e) => setRepresentative(e.target.value)} 
-            className="w-full border border-black p-2 md:p-1 uppercase text-center bg-white text-xs md:text-sm" 
-            placeholder="SEARCH REP..." 
-          />
-          <datalist id="reps-list">
-            {filteredReps.filter(Boolean).map((rep, i) => (
-              <option key={i} value={rep} />
-            ))}
-          </datalist>
+          <div className="flex justify-between items-center">
+            <label className="font-bold block text-[10pt] md:text-[12pt]">REPRESENTATIVE</label>
+            <button 
+              type="button" 
+              onClick={() => setShowRepresentative(!showRepresentative)}
+              className="text-xs text-gray-500 hover:text-black"
+              title={showRepresentative ? "Hide field" : "Show field"}
+            >
+              {showRepresentative ? "👁️" : "👁️‍🗨️"}
+            </button>
+          </div>
+          {showRepresentative && (
+            <>
+              <input 
+                list="reps-list" 
+                value={representative} 
+                onChange={(e) => setRepresentative(e.target.value)} 
+                className="w-full border border-black p-2 md:p-1 uppercase text-center bg-white text-xs md:text-sm" 
+                placeholder="SEARCH REP..." 
+              />
+              <datalist id="reps-list">
+                {filteredReps.filter(Boolean).map((rep, i) => (
+                  <option key={i} value={rep} />
+                ))}
+              </datalist>
+            </>
+          )}
         </div>
       </div>
 

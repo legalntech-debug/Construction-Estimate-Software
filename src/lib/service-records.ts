@@ -1,6 +1,7 @@
 // src/lib/service-records.ts
 
 import { supabase } from "@/lib/supabase";
+import { checkChangesNeedRepayment, isRefNoExpired } from "./stringSimilarity";
 
 // ============================================================
 // TYPES
@@ -58,6 +59,7 @@ export interface ServiceRecordPayload {
 
 // ============================================================
 // ✅ CREATE OR UPDATE — VIA RPC rpc_save_map_service
+//    (Deed Drafting + Construction Plan — dono ke liye)
 // ============================================================
 export async function createOrUpdateServiceRecord(
   payload: ServiceRecordPayload
@@ -193,4 +195,221 @@ export async function isAlreadyPaid(ref_no: string): Promise<boolean> {
     record.platform_payment_status === "paid" ||
     record.platform_payment_status === "admin_bypass"
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+//   🆕 CONSTRUCTION PLAN SPECIFIC FUNCTIONS (NEW)
+// ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+
+// ============================================================
+// ✅ NEW-1: Fetch paid record by ref_no
+// ============================================================
+export async function fetchPaidRecordByRef(refNo: string) {
+  if (!refNo) return null;
+  const record = await getServiceRecord(refNo);
+  if (!record) return null;
+  const isPaid =
+    record.payment_status === "paid" ||
+    record.platform_payment_status === "paid";
+  return isPaid ? record : null;
+}
+
+// ============================================================
+// ✅ NEW-2: Check reprint status (Business Rules Engine)
+//    Rules:
+//      1. Minor changes (spelling, state) → Auto-update, No re-payment
+//      2. Major changes (name, colony, plot) → Re-payment
+//      3. 60+ days old → Re-payment + New ref_no
+//      4. Admin override → Print allowed (user_id same rahega)
+// ============================================================
+export async function checkReprintStatus(
+  refNo: string,
+  currentData: {
+    customer_name?: string;
+    property_address?: string;
+  },
+  isAdminOverride: boolean = false
+): Promise<{
+  status:
+    | 'NEW'
+    | 'PAID_SAME'
+    | 'PAID_MINOR_CHANGE'
+    | 'PAID_MAJOR_CHANGE'
+    | 'EXPIRED'
+    | 'ADMIN_OVERRIDE';
+  needsRepayment: boolean;
+  canPrint: boolean;
+  reason: string;
+  existingRecord?: any;
+  matchScore?: number;
+  daysRemaining?: number;
+}> {
+  // No ref_no → Naya user, normal payment
+  if (!refNo || refNo === 'DRAFT') {
+    return {
+      status: 'NEW',
+      needsRepayment: true,
+      canPrint: false,
+      reason: 'New record — payment required',
+    };
+  }
+
+  // Paid record check karo
+  const existing = await fetchPaidRecordByRef(refNo);
+
+  if (!existing) {
+    return {
+      status: 'NEW',
+      needsRepayment: true,
+      canPrint: false,
+      reason: 'No paid record found — payment required',
+    };
+  }
+
+  // 60-day validity check
+  const expired = isRefNoExpired(existing.created_at, 60);
+  const daysRemaining = Math.max(
+    0,
+    60 - Math.floor(
+      (Date.now() - new Date(existing.created_at).getTime()) / (1000 * 60 * 60 * 24)
+    )
+  );
+
+  // ✅ ADMIN OVERRIDE — Print karne do, user_id same rahega
+  if (isAdminOverride) {
+    return {
+      status: 'ADMIN_OVERRIDE',
+      needsRepayment: false,
+      canPrint: true,
+      reason: 'Admin override — print allowed (user data unchanged)',
+      existingRecord: existing,
+      daysRemaining,
+    };
+  }
+
+  // ❌ Expired → Re-payment
+  if (expired) {
+    return {
+      status: 'EXPIRED',
+      needsRepayment: true,
+      canPrint: false,
+      reason: `60-day validity expired (${60 - daysRemaining} days ago) — re-payment required`,
+      existingRecord: existing,
+      daysRemaining: 0,
+    };
+  }
+
+  // Similarity check
+  const result = checkChangesNeedRepayment(
+    existing.customer_name || '',
+    currentData.customer_name || '',
+    existing.property_address || '',
+    currentData.property_address || ''
+  );
+
+  if (!result.needsRepayment) {
+    return {
+      status: 'PAID_MINOR_CHANGE',
+      needsRepayment: false,
+      canPrint: true,
+      reason: `Minor changes only (Score: ${result.combinedScore}%) — auto-update allowed`,
+      existingRecord: existing,
+      matchScore: result.combinedScore,
+      daysRemaining,
+    };
+  }
+
+  return {
+    status: 'PAID_MAJOR_CHANGE',
+    needsRepayment: true,
+    canPrint: false,
+    reason: result.reason,
+    existingRecord: existing,
+    matchScore: result.combinedScore,
+    daysRemaining,
+  };
+}
+
+// ============================================================
+// ✅ NEW-3: Auto-update existing paid record (minor changes)
+//    Note: user_id, payment_status, ref_no SAME rahenge
+// ============================================================
+export async function autoUpdatePaidRecord(
+  refNo: string,
+  updates: Partial<ServiceRecordPayload>
+): Promise<{ success: boolean; error?: string }> {
+  const existing = await getServiceRecord(refNo);
+  if (!existing) {
+    return { success: false, error: 'Record not found' };
+  }
+
+  const result = await createOrUpdateServiceRecord({
+    ref_no: refNo,
+    user_id: existing.user_id,           // ✅ Same user_id
+    case_type: existing.case_type,
+    payment_status: existing.payment_status,           // ✅ 'paid' hi rahega
+    platform_payment_status: existing.platform_payment_status,
+    user_payment: existing.user_payment,
+    gateway_fee: existing.gateway_fee,
+    user_service_fee: existing.user_service_fee,
+    razorpay_order_id: existing.razorpay_order_id,
+    razorpay_payment_id: existing.razorpay_payment_id,
+
+    // ✅ Updated fields (minor changes)
+    customer_name: updates.customer_name ?? existing.customer_name,
+    property_address: updates.property_address ?? existing.property_address,
+    client_name: updates.client_name ?? existing.client_name,
+    representative: updates.representative ?? existing.representative,
+    state_name: updates.state_name ?? existing.state_name,
+    city_district: updates.city_district ?? existing.city_district,
+    plot_area: updates.plot_area ?? existing.plot_area,
+    plot_shape: updates.plot_shape ?? existing.plot_shape,
+    ground_coverage: updates.ground_coverage ?? existing.ground_coverage,
+    total_builtup_area: updates.total_builtup_area ?? existing.total_builtup_area,
+    floor_details: updates.floor_details ?? existing.floor_details,
+    boundary_east: updates.boundary_east ?? existing.boundary_east,
+    boundary_west: updates.boundary_west ?? existing.boundary_west,
+    boundary_north: updates.boundary_north ?? existing.boundary_north,
+    boundary_south: updates.boundary_south ?? existing.boundary_south,
+    form_snapshot: updates.form_snapshot ?? existing.form_snapshot,
+    fee_mode: existing.fee_mode,
+    status: existing.status,
+  });
+
+  return { success: result.success, error: result.error };
+}
+
+// ============================================================
+// ✅ NEW-4: Generate next ref_no (Global P count)
+//    Format: LnT/{FY}/{FIRST_NAME}/P{SEQ}
+//    Example: LnT/26-27/MADHUSMITA/P001
+//             LnT/26-27/DIKSHA/P002 (global count)
+// ============================================================
+export async function generateNextRefNo(
+  firstName: string,
+  caseType: string = 'CONSTRUCTION_PLAN'
+): Promise<string> {
+  const now = new Date();
+  const fy = (now.getMonth() + 1) >= 4
+    ? `${String(now.getFullYear()).slice(-2)}-${String(now.getFullYear() + 1).slice(-2)}`
+    : `${String(now.getFullYear() - 1).slice(-2)}-${String(now.getFullYear()).slice(-2)}`;
+
+  const cleanName = (firstName || 'GUEST').split(' ')[0].toUpperCase();
+
+  // Global count — sirf construction case records
+  const { count, error } = await supabase
+    .from('service_records')
+    .select('*', { count: 'exact', head: true })
+    .eq('case_type', caseType);
+
+  if (error) {
+    console.error('[generateNextRefNo] Count error:', error);
+  }
+
+  const seq = (count || 0) + 1;
+  const formattedSeq = `P${String(seq).padStart(3, '0')}`;
+
+  return `LnT/${fy}/${cleanName}/${formattedSeq}`;
 }

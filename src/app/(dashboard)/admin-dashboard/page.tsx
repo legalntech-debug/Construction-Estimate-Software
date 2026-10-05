@@ -15,15 +15,16 @@ import AdminBroadcastWidget from './components/AdminBroadcastWidget';
 import AdminCreateUserWidget from './components/AdminCreateUserWidget';
 import AdminPendingApprovalsWidget from './components/AdminPendingApprovalsWidget';
 import AdminRefundRequestsWidget from './components/AdminRefundRequestsWidget';
-import PremiumBillingWidget from './components/PremiumBillingWidget'; 
+import PremiumBillingWidget from './components/PremiumBillingWidget';
 import BusinessProfitSharingWidget from './components/BusinessProfitSharingWidget';
 import AdminRazorpayLiveWidget from '@/app/(dashboard)/admin-dashboard/components/AdminRazorpayLiveWidget';
 import UserManagementRBAC from './components/UserManagementRBAC';
+import PricingControlWidget from './components/PricingControlWidget';
+
+
 
 /* ============================================================
    ✅ Centralized amount resolver
-   - service_records (Drafting/Map) => gateway_fee priority
-   - estimates                     => user_payment priority
    ============================================================ */
 function resolveAmount(tx: any): number {
   const isService =
@@ -51,15 +52,14 @@ function resolveAmount(tx: any): number {
   return isNaN(n) ? 0 : n;
 }
 
-export default function AdminDashboardPage(props: { 
-  searchParams: Promise<{ filter?: string; inactiveDays?: string }> 
+export default function AdminDashboardPage(props: {
+  searchParams: Promise<{ filter?: string; inactiveDays?: string }>
 }) {
   const [searchParamsData, setSearchParamsData] = useState<{ filter?: string; inactiveDays?: string }>({});
   const [mounted, setMounted] = useState(false);
 
   const [userTableSearch, setUserTableSearch] = useState('');
 
-  // --- DROPDOWN FILTER FOR DASHBOARD FEATURES ---
   const [activeFeatureFilter, setActiveFeatureFilter] = useState<string>('ALL');
 
   const [hiddenSections, setHiddenSections] = useState<{ [key: string]: boolean }>({
@@ -74,7 +74,7 @@ export default function AdminDashboardPage(props: {
     razorpayChart: false,
     mis: false,
     gateway: false,
-    premiumBilling: false, 
+    premiumBilling: false,
     profitSharing: false,
   });
 
@@ -97,8 +97,7 @@ export default function AdminDashboardPage(props: {
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
   const [refundRequests, setRefundRequests] = useState<any[]>([]);
   const [gatewayTxns, setGatewayTxns] = useState<any[]>([]);
-  
-  // States for raw estimates and service records to support widget self-containment
+
   const [estimatesList, setEstimatesList] = useState<any[]>([]);
   const [serviceRecordsList, setServiceRecordsList] = useState<any[]>([]);
 
@@ -119,7 +118,7 @@ export default function AdminDashboardPage(props: {
   const [selectedGatewayFY, setSelectedGatewayFY] = useState('2026-27');
   const [rechargeFilterMode, setRechargeFilterMode] = useState<'all' | 'month'>('all');
   const [selectedRechargeMonth, setSelectedRechargeMonth] = useState(new Date().toISOString().slice(0, 7));
-  
+
   const filteredRechargeRequests = rechargeRequests.filter((req: any) => {
     if (rechargeFilterMode === 'month') {
       const reqDateStr = req.created_at ? new Date(req.created_at).toISOString().slice(0, 7) : '';
@@ -182,13 +181,13 @@ export default function AdminDashboardPage(props: {
 
   const fetchDashboardData = async () => {
     const startTime = Date.now();
-    let startDate = new Date(); 
-    
+    let startDate = new Date();
+
     if (filter === 'day') startDate.setDate(startDate.getDate() - 1);
     else if (filter === 'week') startDate.setDate(startDate.getDate() - 7);
     else if (filter === 'month') startDate.setMonth(startDate.getMonth() - 1);
     else if (filter === 'year') startDate.setFullYear(startDate.getFullYear() - 1);
-    else if (filter === 'fy') startDate.setMonth(3, 1); 
+    else if (filter === 'fy') startDate.setMonth(3, 1);
     else startDate.setFullYear(2020);
 
     try {
@@ -274,35 +273,15 @@ export default function AdminDashboardPage(props: {
 
       setRechargeRequests(rechargesDataRes.data || []);
       setIncomes(incomesDataRes.data || []);
-
-      /* ============================================================
-         ✅ SIMPLIFIED: Refund data ab wallet_refund_requests table
-         mein hi hai (user_name, user_mobile, user_code, etc.) — 
-         Manual JOIN ki zaroorat nahi.
-         ============================================================ */
       setRefundRequests(refundsDataRes.data || []);
 
       const estimatesData = estimatesRes.data || [];
       const serviceData = serviceRes.data || [];
-      
+
       setEstimatesList(estimatesData);
       setServiceRecordsList(serviceData);
 
-      /* ============================================================
-         ✅ COMBINED GATEWAY TRANSACTIONS — FINAL FIX
-         
-         Estimates (estimates table):
-           - ref_no → item.ref_no (PK, not item.id)
-           - Amount → item.user_payment (priority)
-           - Customer → item.customer_name || item.client_name
-         
-         Services (service_records table):
-           - ref_no → item.ref_no (PK, not item.id)
-           - Amount → item.gateway_fee (priority) 
-           - Customer → item.customer_name || form_snapshot.buyers[0].name
-         ============================================================ */
       const combinedGatewayTransactions = [
-        /* ---------- ESTIMATES ---------- */
         ...estimatesData.map((item: any) => {
           const refNo = item.ref_no || item.reference_no || item.estimate_no || item.id || '';
           let inferredType = 'Estimate';
@@ -333,7 +312,6 @@ export default function AdminDashboardPage(props: {
           };
         }),
 
-        /* ---------- SERVICE RECORDS ---------- */
         ...serviceData.map((item: any) => {
           const refNo = item.ref_no || item.reference_no || item.razorpay_payment_id || item.id || '';
           const gatewayAmount = Number(
@@ -352,7 +330,7 @@ export default function AdminDashboardPage(props: {
               const snapshot = typeof item.form_snapshot === 'string'
                 ? JSON.parse(item.form_snapshot)
                 : item.form_snapshot;
-              
+
               if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
                 customerName = snapshot.buyers[0]?.name;
               } else if (snapshot?.clientName) {
@@ -409,12 +387,12 @@ export default function AdminDashboardPage(props: {
       alert('Failed to update user RBAC: ' + (err.message || err));
     }
   };
-  
+
   const filteredGatewayTxns = gatewayTxns.filter((tx: any) => {
     const txDateStr = tx.created_at || tx.date || tx.payment_date || '';
     if (!txDateStr) return false;
     const txDate = new Date(txDateStr);
-    
+
     if (gatewayFilterMode === 'month') {
       return txDateStr.startsWith(selectedGatewayMonth);
     } else if (gatewayFilterMode === 'date') {
@@ -431,7 +409,6 @@ export default function AdminDashboardPage(props: {
     return true;
   });
 
-  /* ✅ Use centralized resolver — handles service vs estimate automatically */
   const activeGatewayRevenue = filteredGatewayTxns.reduce(
     (sum: number, tx: any) => sum + resolveAmount(tx),
     0
@@ -554,7 +531,7 @@ export default function AdminDashboardPage(props: {
       }
 
       setIncomeForm({ client_name: '', invoice_no: '', taxable_amount: '', gst_rate: '18', gst_type: 'INTRA', description: '' });
-      
+
       const { data: updatedIncomes } = await supabase.from('admin_incomes').select('*').order('created_at', { ascending: false });
       if (updatedIncomes) setIncomes(updatedIncomes);
 
@@ -590,7 +567,7 @@ export default function AdminDashboardPage(props: {
       if (profileErr) throw profileErr;
 
       alert('Recharge approved and user wallet updated successfully!');
-      
+
       const { data: updatedRecharges } = await supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false });
       if (updatedRecharges) setRechargeRequests(updatedRecharges);
     } catch (err: any) {
@@ -645,10 +622,10 @@ export default function AdminDashboardPage(props: {
   const stateMap: { [key: string]: number } = {};
   dashboardData.allProfiles?.forEach((p: any) => {
     const userState = p.state || p.user_state || p.location;
-    const st = userState && typeof userState === 'string' && userState.trim() !== '' 
-      ? userState.trim().toUpperCase() 
+    const st = userState && typeof userState === 'string' && userState.trim() !== ''
+      ? userState.trim().toUpperCase()
       : 'NOT SPECIFIED';
-    stateMap[st] = (stateMap[st] || 0) + 1; 
+    stateMap[st] = (stateMap[st] || 0) + 1;
   });
 
   let stateCases = Object.keys(stateMap).map(k => ({ state_name: k, case_count: stateMap[k] }));
@@ -663,15 +640,15 @@ export default function AdminDashboardPage(props: {
     const name = (p.full_name || p.name || '').toLowerCase();
     const email = (p.email || '').toLowerCase();
     const mobile = (p.mobile || '').toLowerCase();
-    
+
     const category = (p.category || p.user_category || p.user_type || p.account_type || '').toLowerCase();
     const firmName = (p.firm_name || p.company_name || p.business_name || '').toLowerCase();
 
     return (
-      name.includes(query) || 
-      email.includes(query) || 
-      mobile.includes(query) || 
-      category.includes(query) || 
+      name.includes(query) ||
+      email.includes(query) ||
+      mobile.includes(query) ||
+      category.includes(query) ||
       firmName.includes(query)
     );
   }) || [];
@@ -679,7 +656,7 @@ export default function AdminDashboardPage(props: {
   const filteredModalEstimates = userEstimatesList.filter((est: any) => {
     if (!est.created_at) return true;
     const estDate = new Date(est.created_at);
-    
+
     if (modalFilterType === 'date' && modalSelectedDate) {
       const formattedEstDate = estDate.toISOString().split('T')[0];
       return formattedEstDate === modalSelectedDate;
@@ -691,7 +668,6 @@ export default function AdminDashboardPage(props: {
     return true;
   });
 
-  /* ✅ Modal total — service-aware resolver use karo */
   const totalFilteredModalAmount = filteredModalEstimates.reduce(
     (sum, curr) => sum + resolveAmount(curr),
     0
@@ -708,7 +684,7 @@ export default function AdminDashboardPage(props: {
       `}</style>
 
       <div className="p-3 sm:p-6 lg:p-8 bg-slate-50/50 min-h-screen space-y-6 font-sans antialiased text-slate-950 relative select-none overflow-x-hidden">
-        
+
         {/* Top Header */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-4 sm:p-6 rounded-3xl shadow-sm border border-slate-100 gap-4">
           <div>
@@ -720,7 +696,7 @@ export default function AdminDashboardPage(props: {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-between lg:justify-end">
-            
+
             <div className="flex items-center gap-2 bg-blue-50/60 p-1.5 rounded-2xl border border-blue-100 w-full sm:w-auto">
               <span className="text-xs font-extrabold text-blue-800 uppercase px-2">Show Feature:</span>
               <select
@@ -741,15 +717,16 @@ export default function AdminDashboardPage(props: {
                 <option value="RAZORPAY_CHART">Razorpay Revenue Analytics</option>
                 <option value="MIS_METRICS">MIS Metrics & Geographic Cases</option>
                 <option value="GATEWAY_OPERATIONS">Razorpay Live API Hook Table</option>
+                <option value="PRICING_CONTROL">💰 Pricing Control</option>
                 <option value="ALL">Show All Features</option>
               </select>
             </div>
 
             <div className="flex bg-slate-100 p-1.5 rounded-2xl overflow-x-auto max-w-full">
               {['day', 'week', 'month', 'year', 'fy'].map((f) => (
-                <Link 
-                  key={f} 
-                  href={`/admin-dashboard?filter=${f}`} 
+                <Link
+                  key={f}
+                  href={`/admin-dashboard?filter=${f}`}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${filter === f ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-800'}`}
                 >
                   {f.toUpperCase()}
@@ -770,7 +747,7 @@ export default function AdminDashboardPage(props: {
 
         {/* RBAC Table Section */}
         {isSectionVisible('RBAC') && (
-          <UserManagementRBAC 
+          <UserManagementRBAC
             filteredProfiles={filteredProfiles}
             userTableSearch={userTableSearch}
             setUserTableSearch={setUserTableSearch}
@@ -795,7 +772,7 @@ export default function AdminDashboardPage(props: {
                 <h3 className="font-bold text-slate-800 text-base">Business Profit Sharing & Equity Distribution</h3>
                 <p className="text-xs text-slate-500">Track and calculate total net income distribution across shareholders and partners.</p>
               </div>
-              <button 
+              <button
                 onClick={() => toggleSection('profitSharing')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -817,7 +794,7 @@ export default function AdminDashboardPage(props: {
                 <h3 className="font-bold text-slate-800 text-base">Premium Subscribers Billing & Passbook</h3>
                 <p className="text-xs text-slate-500">Monitor active Premium Plan members and track cumulative debited usage bills.</p>
               </div>
-              <button 
+              <button
                 onClick={() => toggleSection('premiumBilling')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -840,13 +817,13 @@ export default function AdminDashboardPage(props: {
                 <p className="text-xs text-slate-500">Filter online gateway revenue dynamically by Date, Month, Year, or Financial Year with Excel export support.</p>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button 
+                <button
                   onClick={handleExportGatewayExcel}
                   className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                 >
                   <span>📊 Download Excel (CSV)</span>
                 </button>
-                <button 
+                <button
                   onClick={() => toggleSection('gatewayAnalytics')}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
                 >
@@ -871,7 +848,7 @@ export default function AdminDashboardPage(props: {
 
                   <div className="ml-auto flex items-center gap-2">
                     {gatewayFilterMode === 'month' && (
-                      <input 
+                      <input
                         type="month"
                         value={selectedGatewayMonth}
                         onChange={(e) => setSelectedGatewayMonth(e.target.value)}
@@ -879,7 +856,7 @@ export default function AdminDashboardPage(props: {
                       />
                     )}
                     {gatewayFilterMode === 'date' && (
-                      <input 
+                      <input
                         type="date"
                         value={selectedGatewayDate}
                         onChange={(e) => setSelectedGatewayDate(e.target.value)}
@@ -958,7 +935,7 @@ export default function AdminDashboardPage(props: {
                 <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-xl font-bold border border-emerald-200">
                   Total GST Liability: ₹ {totalGstCollected.toLocaleString('en-IN')}
                 </span>
-                <button 
+                <button
                   onClick={() => toggleSection('gstManager')}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
                 >
@@ -987,8 +964,8 @@ export default function AdminDashboardPage(props: {
                 <form onSubmit={handleAddIncomeSubmit} className="bg-slate-50/70 p-4 rounded-2xl border border-slate-200/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Client / Customer Name</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       required
                       placeholder="e.g. ABC Corp"
                       value={incomeForm.client_name}
@@ -999,8 +976,8 @@ export default function AdminDashboardPage(props: {
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Invoice Number</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       placeholder="e.g. INV-2026-001"
                       value={incomeForm.invoice_no}
                       onChange={(e) => setIncomeForm({...incomeForm, invoice_no: e.target.value})}
@@ -1010,8 +987,8 @@ export default function AdminDashboardPage(props: {
 
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">Taxable Amount (₹)</label>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       required
                       placeholder="10000"
                       value={incomeForm.taxable_amount}
@@ -1047,7 +1024,7 @@ export default function AdminDashboardPage(props: {
                   </div>
 
                   <div>
-                    <button 
+                    <button
                       type="submit"
                       className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
                     >
@@ -1123,7 +1100,7 @@ export default function AdminDashboardPage(props: {
                     MONTH WISE
                   </button>
                   {rechargeFilterMode === 'month' && (
-                    <input 
+                    <input
                       type="month"
                       value={selectedRechargeMonth}
                       onChange={(e) => setSelectedRechargeMonth(e.target.value)}
@@ -1132,7 +1109,7 @@ export default function AdminDashboardPage(props: {
                   )}
                 </div>
 
-                <button 
+                <button
                   onClick={() => toggleSection('recharge')}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
                 >
@@ -1251,7 +1228,7 @@ export default function AdminDashboardPage(props: {
           <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">System Telemetry & Health</h3>
-              <button 
+              <button
                 onClick={() => toggleSection('health')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -1298,8 +1275,8 @@ export default function AdminDashboardPage(props: {
             <p className="text-xs text-blue-200 mt-0.5">Total Revenue Tracked: ₹ {totalCalculatedRevenue.toLocaleString()}</p>
           </div>
           <div className="flex items-center gap-3">
-            <a 
-              href="/api/admin/export-reports" 
+            <a
+              href="/api/admin/export-reports"
               target="_blank"
               className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl text-xs font-semibold backdrop-blur-md transition flex items-center gap-2"
             >
@@ -1313,7 +1290,7 @@ export default function AdminDashboardPage(props: {
           <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">Key Performance Indicators</h3>
-              <button 
+              <button
                 onClick={() => toggleSection('kpi')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -1335,7 +1312,7 @@ export default function AdminDashboardPage(props: {
                     <span className="text-emerald-600 font-bold">100%</span> Database synced (A-Z Sorted)
                   </div>
                 </div>
-                
+
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                   <div className="flex justify-between items-start">
                     <div>
@@ -1361,13 +1338,13 @@ export default function AdminDashboardPage(props: {
         {selectedUserForEstimates && (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
-              
+
               <div className="p-4 sm:p-6 bg-slate-900 text-white flex justify-between items-center">
                 <div>
                   <h3 className="text-base sm:text-lg font-black tracking-tight">Payment & Estimate Dispute Tracking: {selectedUserForEstimates.full_name}</h3>
                   <p className="text-xs text-slate-300 mt-0.5">Email: {selectedUserForEstimates.email} | Mobile: <span className="text-blue-400 font-bold">{selectedUserForEstimates.mobile || 'N/A'}</span></p>
                 </div>
-                <button 
+                <button
                   onClick={() => setSelectedUserForEstimates(null)}
                   className="h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white font-bold transition"
                 >
@@ -1378,19 +1355,19 @@ export default function AdminDashboardPage(props: {
               <div className="p-4 sm:px-6 sm:py-4 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Filter By:</span>
-                  <button 
+                  <button
                     onClick={() => { setModalFilterType('all'); setModalSelectedDate(''); setModalSelectedMonth(''); }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${modalFilterType === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
                   >
                     All Records
                   </button>
-                  <button 
+                  <button
                     onClick={() => setModalFilterType('date')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${modalFilterType === 'date' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
                   >
                     Specific Date
                   </button>
-                  <button 
+                  <button
                     onClick={() => setModalFilterType('month')}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${modalFilterType === 'month' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border text-slate-600 hover:bg-slate-100'}`}
                   >
@@ -1400,7 +1377,7 @@ export default function AdminDashboardPage(props: {
 
                 <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
                   {modalFilterType === 'date' && (
-                    <input 
+                    <input
                       type="date"
                       value={modalSelectedDate}
                       onChange={(e) => setModalSelectedDate(e.target.value)}
@@ -1409,7 +1386,7 @@ export default function AdminDashboardPage(props: {
                   )}
 
                   {modalFilterType === 'month' && (
-                    <input 
+                    <input
                       type="month"
                       value={modalSelectedMonth}
                       onChange={(e) => setModalSelectedMonth(e.target.value)}
@@ -1529,7 +1506,7 @@ export default function AdminDashboardPage(props: {
               </div>
 
               <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-                <button 
+                <button
                   onClick={() => setSelectedUserForEstimates(null)}
                   className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow-sm"
                 >
@@ -1549,7 +1526,7 @@ export default function AdminDashboardPage(props: {
                 <h3 className="font-bold text-slate-800 text-base">System Audit Trail & Security Compliance</h3>
                 <p className="text-xs text-slate-500">Chronological telemetry log of database changes, CRUD operations, and administrative actions.</p>
               </div>
-              <button 
+              <button
                 onClick={() => toggleSection('audit')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -1585,20 +1562,20 @@ export default function AdminDashboardPage(props: {
                 <h3 className="font-bold text-slate-800 text-base">Dead User Engagement Analysis</h3>
                 <p className="text-xs text-slate-500">Monitor dormant user accounts based on custom inactivity thresholds.</p>
               </div>
-              
+
               <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
                 <div className="flex flex-wrap gap-1.5 bg-slate-50 p-1.5 rounded-2xl border">
                   {[10, 20, 30, 60, 90].map(d => (
-                    <Link 
-                      href={`/admin-dashboard?inactiveDays=${d}`} 
-                      key={d} 
+                    <Link
+                      href={`/admin-dashboard?inactiveDays=${d}`}
+                      key={d}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${inactiveDays === d ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200/50'}`}
                     >
                       {d} Days
                     </Link>
                   ))}
                 </div>
-                <button 
+                <button
                   onClick={() => toggleSection('inactive')}
                   className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition whitespace-nowrap"
                 >
@@ -1606,7 +1583,7 @@ export default function AdminDashboardPage(props: {
                 </button>
               </div>
             </div>
-            
+
             {!hiddenSections.inactive && (
               <div className="max-h-64 overflow-y-auto pr-2 divide-y divide-slate-100">
                 {dashboardData.inactiveUsers && dashboardData.inactiveUsers.length > 0 ? (
@@ -1631,7 +1608,7 @@ export default function AdminDashboardPage(props: {
           <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">Razorpay Revenue Analytics</h3>
-              <button 
+              <button
                 onClick={() => toggleSection('razorpayChart')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -1649,7 +1626,7 @@ export default function AdminDashboardPage(props: {
           <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex justify-between items-center">
               <h3 className="font-bold text-slate-800 text-base">MIS & Financial Telemetry Metrics</h3>
-              <button 
+              <button
                 onClick={() => toggleSection('mis')}
                 className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
               >
@@ -1717,7 +1694,7 @@ export default function AdminDashboardPage(props: {
                     ))}
                   </div>
                 </div>
-                
+
                 <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                    <h3 className="font-bold text-slate-800 mb-4">Revenue Trend Line</h3>
                    <DashboardChart data={dashboardData.records || []} />
@@ -1729,11 +1706,18 @@ export default function AdminDashboardPage(props: {
 
         {/* --- GATEWAY OPERATIONS WIDGET --- */}
         {isSectionVisible('GATEWAY_OPERATIONS') && (
-          <AdminRazorpayLiveWidget 
+          <AdminRazorpayLiveWidget
             transactions={gatewayTxns}
             estimates={estimatesList}
             serviceRecords={serviceRecordsList}
           />
+        )}
+
+        {/* --- PRICING CONTROL WIDGET --- */}
+        {isSectionVisible('PRICING_CONTROL') && (
+          <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm">
+            <PricingControlWidget />
+          </div>
         )}
 
       </div>

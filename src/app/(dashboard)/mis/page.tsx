@@ -1024,6 +1024,8 @@ const triggerEmailBroadcast = async () => {
                     <option value="Construction" className="text-slate-900 font-bold">NEW CONSTRUCTION</option>
                     <option value="Renovation" className="text-slate-900 font-bold">RENOVATION</option>
                     <option value="Route" className="text-slate-900 font-bold">ROUTE MAP</option>
+                    <option value="Route" className="text-slate-900 font-bold">CONSTRUCTION PLAN</option>
+                    <option value="Route" className="text-slate-900 font-bold">DEED DRAFTING</option>
                   </select>
                 </th>
 

@@ -4,6 +4,11 @@ import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import QRCode from 'qrcode';
+
+import { useStateWiseOffer } from './components/useStateWiseOffer';
+import OfferPopup from './components/OfferPopup';
+import GuestEstimateModal from './components/GuestEstimateModal';
 
 export default function VerifyEstimate() {
   const [filterRefNo, setFilterRefNo] = useState('');
@@ -11,14 +16,19 @@ export default function VerifyEstimate() {
   const [filterCaseType, setFilterCaseType] = useState('ALL');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showOfferPopup, setShowOfferPopup] = useState(false);
   const [showAboutPopup, setShowAboutPopup] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
 
-  // ✅ YouTube Carousel + Dismiss State
+  const [showOfferPopup, setShowOfferPopup] = useState(false);
+  const [urlRef, setUrlRef] = useState<string | undefined>(undefined);
+
+  const { offerData } = useStateWiseOffer(urlRef);
+
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [showYoutubeBanner, setShowYoutubeBanner] = useState(true);
+
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   const YOUTUBE_CHANNEL_URL = 'https://www.youtube.com/channel/UC1mP_vOnzepkvsZuIfB5SXQ';
 
@@ -31,14 +41,8 @@ export default function VerifyEstimate() {
   ];
 
   const [counts, setCounts] = useState({
-    total: 0,
-    estimate: 0,
-    constructionPlan: 0,
-    deedDraft: 0,
-    subDivisionLayout: 0,
-    locationPlan: 0,
-    keyPlan: 0,
-    other: 0,
+    total: 0, estimate: 0, constructionPlan: 0, deedDraft: 0,
+    subDivisionLayout: 0, locationPlan: 0, keyPlan: 0, other: 0,
   });
 
   useEffect(() => {
@@ -46,25 +50,28 @@ export default function VerifyEstimate() {
     const ref = params.get('ref');
     const caseParam = params.get('case');
 
-    if (ref) setFilterRefNo(ref);
+    if (ref) {
+      setFilterRefNo(ref);
+      setUrlRef(ref);
+    }
     if (caseParam) setFilterCaseType(caseParam.toUpperCase());
 
     handleSearch();
-
-    const timer = setTimeout(() => {
-      setShowOfferPopup(true);
-    }, 1500);
-
-    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    if (!showYoutubeBanner) return;
+    if (offerData && offerData.discount_enabled) {
+      setShowOfferPopup(true);
+    } else {
+      setShowOfferPopup(false);
+    }
+  }, [offerData]);
 
+  useEffect(() => {
+    if (!showYoutubeBanner) return;
     const interval = setInterval(() => {
       setCurrentVideoIndex((prev) => (prev + 1) % youtubeVideos.length);
     }, 10000);
-
     return () => clearInterval(interval);
   }, [youtubeVideos.length, showYoutubeBanner]);
 
@@ -72,7 +79,6 @@ export default function VerifyEstimate() {
     const delayDebounceFn = setTimeout(() => {
       handleSearch();
     }, 500);
-
     return () => clearTimeout(delayDebounceFn);
   }, [filterRefNo, filterCustomer, filterCaseType]);
 
@@ -101,9 +107,6 @@ export default function VerifyEstimate() {
         estimatesQuery.order('created_at', { ascending: false }),
         serviceQuery.order('created_at', { ascending: false }),
       ]);
-
-      if (estRes.error) console.error('[ESTIMATES FETCH]', estRes.error.message);
-      if (srvRes.error) console.error('[SERVICE RECORDS FETCH]', srvRes.error.message);
 
       const normalizedEstimates = (estRes.data || []).map((item: any) => {
         const snapshot = item.estimate_snapshot || {};
@@ -156,7 +159,7 @@ export default function VerifyEstimate() {
       );
 
       const allRecords = [...merged];
-      const newCounts = {
+      setCounts({
         total: allRecords.length,
         estimate: allRecords.filter((r) => r._source === 'ESTIMATE').length,
         constructionPlan: allRecords.filter((r) => r.case_type === 'CONSTRUCTION_PLAN').length,
@@ -169,8 +172,7 @@ export default function VerifyEstimate() {
             r._source !== 'ESTIMATE' &&
             !['CONSTRUCTION_PLAN', 'DEED_DRAFT', 'SUB_DIVISION_LAYOUT', 'LOCATION_PLAN', 'KEY_PLAN', 'MAP'].includes(r.case_type)
         ).length,
-      };
-      setCounts(newCounts);
+      });
 
       if (filterCaseType === 'ESTIMATE') {
         merged = merged.filter((r) => r._source === 'ESTIMATE');
@@ -524,6 +526,51 @@ export default function VerifyEstimate() {
     const splitDisclaimer = doc.splitTextToSize(disclaimerText, 182);
     doc.text(splitDisclaimer, 14, currentY + 10);
 
+    // ============================================================
+    // ✅ QR CODE (bottom-right corner)
+    // ============================================================
+    try {
+      const origin = typeof window !== "undefined"
+        ? window.location.origin
+        : "https://your-production-domain.com";
+
+      const qrValue = `${origin}/verify-estimate?ref=${encodeURIComponent(item.ref_no || "PENDING")}`;
+
+      const qrDataUrl = await QRCode.toDataURL(qrValue, {
+        width: 300,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff" },
+        errorCorrectionLevel: "M",
+      });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const qrSize = 30;
+      const qrX = pageWidth - 14 - qrSize;
+      const qrY = pageHeight - 14 - qrSize - 8;
+
+      doc.addImage(qrDataUrl, "PNG", qrX, qrY, qrSize, qrSize);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6.5);
+      doc.setTextColor(20, 48, 114);
+      doc.text("SCAN TO VERIFY", qrX + qrSize / 2, qrY + qrSize + 3.5, {
+        align: "center",
+      });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(5);
+      doc.setTextColor(120, 120, 120);
+      doc.text(
+        `${origin}/verify-estimate`,
+        qrX + qrSize / 2,
+        qrY + qrSize + 6.5,
+        { align: "center" }
+      );
+    } catch (qrErr) {
+      console.warn("QR generation failed:", qrErr);
+    }
+
     const fileName = `${item.case_type || 'Report'}_${item.ref_no || 'report'}.pdf`;
     doc.save(fileName);
   };
@@ -580,33 +627,17 @@ export default function VerifyEstimate() {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-            <Link
-              href="/login"
-              className="text-blue-900 text-[10px] sm:text-xs font-bold px-2 sm:px-4 py-1.5 sm:py-2.5 hover:bg-blue-50 rounded-lg transition-all border border-blue-900 sm:border-2 whitespace-nowrap"
-            >
+            <Link href="/login" className="text-blue-900 text-[10px] sm:text-xs font-bold px-2 sm:px-4 py-1.5 sm:py-2.5 hover:bg-blue-50 rounded-lg transition-all border border-blue-900 sm:border-2 whitespace-nowrap">
               SIGN IN
             </Link>
-
-            <Link
-              href="/signup"
-              className="bg-gradient-to-r from-blue-900 to-blue-700 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-4 py-1.5 sm:py-2.5 rounded-lg hover:from-blue-800 hover:to-blue-600 shadow-md transition-all whitespace-nowrap"
-            >
+            <Link href="/signup" className="bg-gradient-to-r from-blue-900 to-blue-700 text-white text-[10px] sm:text-xs font-bold px-2 sm:px-4 py-1.5 sm:py-2.5 rounded-lg hover:from-blue-800 hover:to-blue-600 shadow-md transition-all whitespace-nowrap">
               SIGN UP
             </Link>
-
-            <button
-              onClick={() => setShowMobileMenu(!showMobileMenu)}
-              className="lg:hidden p-1.5 sm:p-2 text-blue-900 hover:bg-blue-50 rounded-lg transition ml-0.5"
-              aria-label="Toggle menu"
-            >
+            <button onClick={() => setShowMobileMenu(!showMobileMenu)} className="lg:hidden p-1.5 sm:p-2 text-blue-900 hover:bg-blue-50 rounded-lg transition ml-0.5" aria-label="Toggle menu">
               {showMobileMenu ? (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                </svg>
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               ) : (
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                </svg>
+                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
               )}
             </button>
           </div>
@@ -618,20 +649,13 @@ export default function VerifyEstimate() {
             <a href="#insights" onClick={() => setShowMobileMenu(false)} className="block py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition">Insights</a>
             <a href="#properties" onClick={() => setShowMobileMenu(false)} className="block py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition">Properties</a>
             <a href="#careers" onClick={() => setShowMobileMenu(false)} className="block py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition">Careers</a>
-            <button
-              onClick={() => { setShowAboutPopup(true); setShowMobileMenu(false); }}
-              className="block w-full text-left py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition"
-            >
-              About Us
-            </button>
+            <button onClick={() => { setShowAboutPopup(true); setShowMobileMenu(false); }} className="block w-full text-left py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition">About Us</button>
             <a href="#contact" onClick={() => setShowMobileMenu(false)} className="block py-2.5 text-sm font-bold text-gray-700 uppercase hover:text-blue-600 hover:bg-blue-50 px-3 rounded-lg transition">Contact</a>
           </div>
         )}
       </nav>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* HERO — Corporate Style with YouTube Banner (Dismissible) */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* HERO */}
       <div className="relative bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 text-white overflow-hidden">
         <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'radial-gradient(circle, #fff 2px, transparent 2px)', backgroundSize: '40px 40px' }}></div>
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl opacity-10"></div>
@@ -639,7 +663,7 @@ export default function VerifyEstimate() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
             
-            {/* LEFT: Hero Content (2 Columns) */}
+            {/* LEFT: Hero Content */}
             <div className="lg:col-span-2">
               <span className="inline-block bg-yellow-400 text-slate-900 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full mb-4">
                 11+ Years Experience
@@ -674,81 +698,125 @@ export default function VerifyEstimate() {
               </div>
             </div>
 
-            {/* ═══════════════════════════════════════════════════════════ */}
-            {/* RIGHT: YouTube Carousel Card (Dismissible) */}
-            {/* ═══════════════════════════════════════════════════════════ */}
-            {showYoutubeBanner && (
-              <div className="lg:col-span-1 relative animate-fadeIn">
-                <div className="bg-white/5 backdrop-blur-md border border-white/20 rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden">
-                  
-                  {/* Cancel / Close Button */}
-                  <button
-                    onClick={() => setShowYoutubeBanner(false)}
-                    className="absolute top-2 right-2 z-10 bg-black/40 hover:bg-black/70 text-white rounded-full p-1.5 transition-all"
-                    aria-label="Dismiss YouTube banner"
-                    title="Cancel / Hide this banner"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                  </button>
+            {/* RIGHT: Guest Service Card + YouTube Carousel (STACKED) */}
+            <div className="lg:col-span-1 space-y-4">
+              
+              {/* 🆕 GUEST SERVICE CARD */}
+              <button
+                onClick={() => setShowGuestModal(true)}
+                className="w-full bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-2xl p-5 shadow-2xl border border-emerald-400/30 group transition-all duration-300 hover:scale-[1.02] relative overflow-hidden text-left"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2" />
+                <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full translate-y-1/2 -translate-x-1/2" />
 
-                  {/* NEW Badge */}
-                  <div className="absolute top-2 left-2 z-10">
-                    <span className="bg-red-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">
-                      ● Live
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="inline-flex items-center gap-1 bg-white/20 backdrop-blur-sm px-2.5 py-1 rounded-full border border-white/30">
+                      <svg className="w-3 h-3 text-yellow-300" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
+                      </svg>
+                      <span className="text-[9px] font-black uppercase tracking-wider">No Registration</span>
                     </span>
+
+                    <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center group-hover:scale-110 group-hover:rotate-90 transition-transform duration-300">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 4v16m8-8H4" />
+                      </svg>
+                    </div>
                   </div>
 
-                  <a
-                    href={youtubeVideos[currentVideoIndex].url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block group mt-4"
-                  >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center text-white shrink-0 group-hover:scale-110 transition-transform shadow-lg">
-                        <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-red-300 uppercase tracking-wide">▶ Watch on YouTube</p>
-                        <p className="text-[10px] text-blue-200">Our Official Channel</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-black/30 rounded-lg p-3 border border-white/10 group-hover:border-red-400/50 transition-all">
-                      <p className="text-sm font-bold text-white mb-1 line-clamp-2">
-                        {youtubeVideos[currentVideoIndex].title}
-                      </p>
-                      <p className="text-[10px] text-blue-200">
-                        Tap to watch tutorials, tips & construction guides
-                      </p>
-                    </div>
-
-                    {/* Slider dots */}
-                    <div className="flex items-center justify-center gap-1.5 mt-3">
-                      {youtubeVideos.map((_, idx) => (
-                        <span
-                          key={idx}
-                          className={`rounded-full transition-all ${
-                            idx === currentVideoIndex ? 'bg-red-500 w-6 h-1.5' : 'bg-white/30 w-1.5 h-1.5'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </a>
-
-                  {/* Bottom CTA */}
-                  <div className="mt-3 pt-3 border-t border-white/10 text-center">
-                    <p className="text-[9px] text-blue-200">
-                      
+                  <div className="mb-4">
+                    <h3 className="text-xl font-black uppercase tracking-tight leading-tight mb-1">
+                      🆕 Book Guest Service
+                    </h3>
+                    <p className="text-[11px] text-emerald-50 leading-snug">
+                      Pay & get report instantly — no login required
                     </p>
                   </div>
+
+                  <div className="space-y-1.5 mb-4">
+                    {[
+                      { label: 'Estimate', price: '₹1000' },
+                      { label: 'Map / Location Plan', price: '₹1500' },
+                      { label: 'Deed Drafting', price: '₹300' },
+                    ].map((item) => (
+                      <div key={item.label} className="flex items-center justify-between bg-white/10 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-white/20">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-50">{item.label}</span>
+                        <span className="text-xs font-black text-white">{item.price}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-white/20">
+                    <span className="text-[10px] font-bold uppercase tracking-wider">Start Now</span>
+                    <span className="text-2xl font-black group-hover:translate-x-1 transition-transform">→</span>
+                  </div>
                 </div>
-              </div>
-            )}
+              </button>
+
+              {/* YOUTUBE CAROUSEL */}
+              {showYoutubeBanner && (
+                <div className="relative animate-fadeIn">
+                  <div className="bg-white/5 backdrop-blur-md border border-white/20 rounded-2xl p-4 sm:p-5 shadow-2xl relative overflow-hidden">
+                    
+                    <button
+                      onClick={() => setShowYoutubeBanner(false)}
+                      className="absolute top-2 right-2 z-10 bg-black/40 hover:bg-black/70 text-white rounded-full p-1.5 transition-all"
+                      aria-label="Dismiss YouTube banner"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                      </svg>
+                    </button>
+
+                    <div className="absolute top-2 left-2 z-10">
+                      <span className="bg-red-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">
+                        ● Live
+                      </span>
+                    </div>
+
+                    <a
+                      href={youtubeVideos[currentVideoIndex].url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block group mt-4"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-12 h-12 bg-red-600 rounded-xl flex items-center justify-center text-white shrink-0 group-hover:scale-110 transition-transform shadow-lg">
+                          <svg className="w-6 h-6 ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-red-300 uppercase tracking-wide">▶ Watch on YouTube</p>
+                          <p className="text-[10px] text-blue-200">Our Official Channel</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-black/30 rounded-lg p-3 border border-white/10 group-hover:border-red-400/50 transition-all">
+                        <p className="text-sm font-bold text-white mb-1 line-clamp-2">
+                          {youtubeVideos[currentVideoIndex].title}
+                        </p>
+                        <p className="text-[10px] text-blue-200">
+                          Tap to watch tutorials, tips & construction guides
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-1.5 mt-3">
+                        {youtubeVideos.map((_, idx) => (
+                          <span
+                            key={idx}
+                            className={`rounded-full transition-all ${
+                              idx === currentVideoIndex ? 'bg-red-500 w-6 h-1.5' : 'bg-white/30 w-1.5 h-1.5'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -843,7 +911,7 @@ export default function VerifyEstimate() {
         </div>
       </div>
 
-      {/* VERIFICATION PORTAL */}
+      {/* VERIFICATION PORTAL (Guest button REMOVED from here) */}
       <div id="verify" className="max-w-7xl mx-auto px-2 sm:px-6 py-8 sm:py-12 flex-grow w-full">
         <div className="text-center mb-6 sm:mb-8">
           <h2 className="text-2xl sm:text-4xl font-black text-blue-900 uppercase tracking-wide mb-2">
@@ -855,7 +923,6 @@ export default function VerifyEstimate() {
           </p>
         </div>
 
-        {/* How It Works Card — SINGLE ROW (YouTube removed from here) */}
         <div className="mb-6 max-w-md mx-auto sm:mx-0">
           <button
             onClick={() => setShowHowItWorks(true)}
@@ -874,7 +941,6 @@ export default function VerifyEstimate() {
           </button>
         </div>
 
-        {/* COUNT SUMMARY CARDS */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 sm:gap-3 mb-4 sm:mb-6">
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-lg p-2 sm:p-3 text-center">
             <p className="text-lg sm:text-2xl font-black text-blue-900">{counts.total}</p>
@@ -906,7 +972,6 @@ export default function VerifyEstimate() {
           </div>
         </div>
 
-        {/* TABLE */}
         <div className="border-2 border-blue-900 rounded-xl shadow-2xl bg-white overflow-hidden">
           <div className="overflow-x-auto">
             <div className="max-h-[500px] sm:max-h-[600px] overflow-y-auto">
@@ -1159,76 +1224,18 @@ export default function VerifyEstimate() {
         </div>
       )}
 
-      {/* Offer Popup Modal */}
-      {showOfferPopup && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden relative animate-fadeIn max-h-[90vh] overflow-y-auto">
-            <button
-              onClick={() => setShowOfferPopup(false)}
-              className="absolute top-3 right-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full p-2 transition z-10"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-            </button>
+      {/* OFFER POPUP */}
+      <OfferPopup
+        isOpen={showOfferPopup}
+        onClose={() => setShowOfferPopup(false)}
+        offerData={offerData}
+      />
 
-            <div className="bg-gradient-to-r from-blue-900 to-blue-700 text-white p-5 sm:p-6 text-center relative">
-              <span className="inline-block bg-yellow-400 text-blue-900 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full mb-3">
-                Limited Time Offer
-              </span>
-              <h3 className="text-xl sm:text-2xl font-black uppercase tracking-wide">Special Estimate Offer</h3>
-              <p className="text-blue-100 text-xs mt-1">Get your complete estimate report at an unbeatable price!</p>
-            </div>
-
-            <div className="p-4 sm:p-6">
-              <div className="flex flex-col gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200 mb-4">
-                <div className="flex justify-between items-center border-b border-gray-200 pb-3">
-                  <div className="text-center flex-1">
-                    <p className="text-gray-500 text-xs uppercase font-bold">Estimate</p>
-                    <p className="text-lg sm:text-xl font-bold text-gray-700 line-through">₹120</p>
-                  </div>
-                  <div className="text-center flex-1 border-l border-gray-200">
-                    <p className="text-gray-500 text-xs uppercase font-bold">Drafting</p>
-                    <p className="text-lg sm:text-xl font-bold text-gray-700 line-through">₹100</p>
-                  </div>
-                </div>
-                <div className="text-center bg-yellow-50 rounded-lg py-2 border border-yellow-200">
-                  <p className="text-yellow-700 text-xs uppercase font-bold">Offer Price</p>
-                  <p className="text-2xl sm:text-3xl font-black text-green-600">₹21/-</p>
-                  <p className="text-[10px] text-gray-500 mt-1">Both Estimate & Drafting included</p>
-                </div>
-              </div>
-
-              <div className="space-y-3 mb-5 sm:mb-6">
-                <div className="flex items-center gap-3 text-xs sm:text-sm text-gray-700">
-                  <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center text-green-600 shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span>Complete Estimate & Drafting Report</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs sm:text-sm text-gray-700">
-                  <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center text-green-600 shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span>Map & Location Plan</span>
-                </div>
-                <div className="flex items-center gap-3 text-xs sm:text-sm text-gray-700">
-                  <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center text-green-600 shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  </div>
-                  <span>Upcoming Services (Ready in 1 Min)</span>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowOfferPopup(false)}
-                className="w-full bg-blue-900 text-white font-bold py-3 rounded-lg hover:bg-blue-800 transition shadow-lg text-sm uppercase tracking-wide"
-              >
-                Claim Offer Now
-              </button>
-              <p className="text-center text-[10px] text-gray-400 mt-3">*Terms & Conditions Apply</p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* GUEST MODAL */}
+      <GuestEstimateModal
+        isOpen={showGuestModal}
+        onClose={() => setShowGuestModal(false)}
+      />
 
       {/* About Us Popup Modal */}
       {showAboutPopup && (
@@ -1370,7 +1377,7 @@ export default function VerifyEstimate() {
       <style jsx>{`
         @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
         .animate-marquee { animation: marquee 20s linear infinite; }
-        @keyframes fadeIn { from { opacity: 0; opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
         .animate-fadeIn { animation: fadeIn 0.3s ease-out; }
         .line-clamp-2 {
           display: -webkit-box;

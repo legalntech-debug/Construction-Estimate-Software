@@ -64,6 +64,7 @@ export default function CadSectionControls({ cuts, onCutsChange, elevationSides,
                 <div className={cellCls}>
                   <select value={c.axis} onChange={(e) => update(i, { axis: e.target.value as CutAxis })}
                     className="w-full bg-transparent text-center font-black text-[8px] outline-none cursor-pointer">
+                    <option value="AUTO">AUTO (ALONG STAIR)</option>
                     <option value="VERTICAL">LENGTH-WISE (|)</option>
                     <option value="HORIZONTAL">WIDTH-WISE (—)</option>
                   </select>
@@ -71,7 +72,12 @@ export default function CadSectionControls({ cuts, onCutsChange, elevationSides,
                 <div className={cellCls}>
                   <select value={c.look} onChange={(e) => update(i, { look: e.target.value as SectionLook })}
                     className="w-full bg-transparent text-center font-black text-[8px] outline-none cursor-pointer">
-                    {c.axis === "VERTICAL" ? (
+                    {c.axis === "AUTO" ? (
+                      <>
+                        <option value="LEFT">VIEW ← LEFT / ↑ BACK</option>
+                        <option value="RIGHT">VIEW → RIGHT / ↓ FRONT</option>
+                      </>
+                    ) : c.axis === "VERTICAL" ? (
                       <>
                         <option value="LEFT">VIEW ← LEFT</option>
                         <option value="RIGHT">VIEW → RIGHT</option>
@@ -100,7 +106,7 @@ export default function CadSectionControls({ cuts, onCutsChange, elevationSides,
                 </div>
               </div>
               <div className="text-[7.5px] font-bold text-gray-600">
-                {c.axis === "VERTICAL" ? "Distance from LEFT edge of plan" : "Distance from TOP edge of plan"}
+                {c.axis === "AUTO" ? "Cut runs along the stair (auto axis)" : c.axis === "VERTICAL" ? "Distance from LEFT edge of plan" : "Distance from TOP edge of plan"}
               </div>
             </div>
           );

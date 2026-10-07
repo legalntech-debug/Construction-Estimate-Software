@@ -1,6 +1,7 @@
 'use client';
 
 import React from "react";
+import TransliterateInput from "../TransliterateInput";
 
 interface Section3Props {
   formData: any;
@@ -123,17 +124,20 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
           </>
         )}
         
-        {/* Exact Property Address as Textarea for automatic text wrapping & resize support */}
+        {/* ✅ Exact Property Address with auto-transliteration */}
         <div className={`col-span-2 ${isGiftOrRelease ? "md:col-span-4" : "md:col-span-2"}`}>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">EXACT PROPERTY ADDRESS * (Auto-Wrap)</label>
-          <textarea 
-            name="propertyAddress" 
-            required 
+          <TransliterateInput
+            type="textarea"
             rows={2}
-            placeholder="e.g. Plot No 81, Dwarka Valley, Mangliya, Indore, Madhya Pradesh" 
-            value={formData.propertyAddress} 
-            onChange={handleChange} 
-            className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold uppercase resize-y min-h-[50px]" 
+            name="propertyAddress"
+            value={formData.propertyAddress}
+            onChange={handleChange}
+            outputLanguage={formData.outputLanguage}
+            placeholder="e.g. Plot No 81, Dwarka Valley, Mangliya, Indore, Madhya Pradesh"
+            className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold resize-y min-h-[50px]"
+            uppercase
+            required
           />
         </div>
       </div>
@@ -190,25 +194,23 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
                     className="w-full p-2 border rounded text-xs bg-white font-semibold"
                   >
                     <option value="GROUND FLOOR">Ground Floor (भूतल)</option>
-<option value="BASEMENT">Basement (तहखाना)</option>
-<option value="FIRST FLOOR">First Floor (प्रथम तल)</option>
-<option value="SECOND FLOOR">Second Floor (द्वितीय तल)</option>
-<option value="THIRD FLOOR">Third Floor (तृतीय तल)</option>
-<option value="TOWER">Tower (टावर)</option>
-<option value="FOURTH FLOOR">Fourth Floor (चतुर्थ तल)</option>
-<option value="FIFTH FLOOR">Fifth Floor (पंचम तल)</option>
-<option value="SIXTH FLOOR">Sixth Floor (षष्टम तल)</option>
-<option value="SEVENTH FLOOR">Seventh Floor (सप्तम तल)</option>
-<option value="EIGHTH FLOOR">Eighth Floor (अष्टम तल)</option>
-<option value="NINTH FLOOR">Ninth Floor (नवम तल)</option>
-<option value="TENTH FLOOR">Tenth Floor (दशम तल)</option>
-<option value="ELEVENTH FLOOR">Eleventh Floor (ग्यारहवां तल)</option>
-<option value="TWELFTH FLOOR">Twelfth Floor (बारहवां तल)</option>
-<option value="THIRTEENTH FLOOR">Thirteenth Floor (तेरहवां तल)</option>
-<option value="FOURTEENTH FLOOR">Fourteenth Floor (चौदहवां तल)</option>
-<option value="FIFTEENTH FLOOR">Fifteenth Floor (पंद्रहवां तल)</option>
-
-
+                    <option value="BASEMENT">Basement (तहखाना)</option>
+                    <option value="FIRST FLOOR">First Floor (प्रथम तल)</option>
+                    <option value="SECOND FLOOR">Second Floor (द्वितीय तल)</option>
+                    <option value="THIRD FLOOR">Third Floor (तृतीय तल)</option>
+                    <option value="TOWER">Tower (टावर)</option>
+                    <option value="FOURTH FLOOR">Fourth Floor (चतुर्थ तल)</option>
+                    <option value="FIFTH FLOOR">Fifth Floor (पंचम तल)</option>
+                    <option value="SIXTH FLOOR">Sixth Floor (षष्टम तल)</option>
+                    <option value="SEVENTH FLOOR">Seventh Floor (सप्तम तल)</option>
+                    <option value="EIGHTH FLOOR">Eighth Floor (अष्टम तल)</option>
+                    <option value="NINTH FLOOR">Ninth Floor (नवम तल)</option>
+                    <option value="TENTH FLOOR">Tenth Floor (दशम तल)</option>
+                    <option value="ELEVENTH FLOOR">Eleventh Floor (ग्यारहवां तल)</option>
+                    <option value="TWELFTH FLOOR">Twelfth Floor (बारहवां तल)</option>
+                    <option value="THIRTEENTH FLOOR">Thirteenth Floor (तेरहवां तल)</option>
+                    <option value="FOURTEENTH FLOOR">Fourteenth Floor (चौदहवां तल)</option>
+                    <option value="FIFTEENTH FLOOR">Fifteenth Floor (पंद्रहवां तल)</option>
                   </select>
                 </div>
 
@@ -275,52 +277,71 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
         </label>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3">
+          {/* ✅ EAST boundary with transliteration */}
           <div>
             <label className="block text-[10px] font-bold text-gray-600 mb-1">EAST (पूर्व)</label>
-            <textarea 
-              name="boundaryEast" 
-              required 
+            <TransliterateInput
+              type="textarea"
               rows={2}
-              placeholder="e.g. 9.00 मीटर वाईड रोड / अन्य प्लॉट" 
-              value={formData.boundaryEast} 
-              onChange={handleChange} 
-              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium uppercase resize-y min-h-[46px]" 
+              name="boundaryEast"
+              value={formData.boundaryEast}
+              onChange={handleChange}
+              outputLanguage={formData.outputLanguage}
+              placeholder="e.g. 9.00 मीटर वाईड रोड / अन्य प्लॉट"
+              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium resize-y min-h-[46px]"
+              uppercase
+              required
             />
           </div>
+
+          {/* ✅ WEST boundary with transliteration */}
           <div>
             <label className="block text-[10px] font-bold text-gray-600 mb-1">WEST (पश्चिम)</label>
-            <textarea 
-              name="boundaryWest" 
-              required 
+            <TransliterateInput
+              type="textarea"
               rows={2}
-              placeholder="e.g. अन्य की संपत्ति / प्लॉट नं. 82" 
-              value={formData.boundaryWest} 
-              onChange={handleChange} 
-              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium uppercase resize-y min-h-[46px]" 
+              name="boundaryWest"
+              value={formData.boundaryWest}
+              onChange={handleChange}
+              outputLanguage={formData.outputLanguage}
+              placeholder="e.g. अन्य की संपत्ति / प्लॉट नं. 82"
+              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium resize-y min-h-[46px]"
+              uppercase
+              required
             />
           </div>
+
+          {/* ✅ NORTH boundary with transliteration */}
           <div>
             <label className="block text-[10px] font-bold text-gray-600 mb-1">NORTH (उत्तर)</label>
-            <textarea 
-              name="boundaryNorth" 
-              required 
+            <TransliterateInput
+              type="textarea"
               rows={2}
-              placeholder="e.g. प्लॉट नं. 75" 
-              value={formData.boundaryNorth} 
-              onChange={handleChange} 
-              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium uppercase resize-y min-h-[46px]" 
+              name="boundaryNorth"
+              value={formData.boundaryNorth}
+              onChange={handleChange}
+              outputLanguage={formData.outputLanguage}
+              placeholder="e.g. प्लॉट नं. 75"
+              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium resize-y min-h-[46px]"
+              uppercase
+              required
             />
           </div>
+
+          {/* ✅ SOUTH boundary with transliteration */}
           <div>
             <label className="block text-[10px] font-bold text-gray-600 mb-1">SOUTH (दक्षिण)</label>
-            <textarea 
-              name="boundarySouth" 
-              required 
+            <TransliterateInput
+              type="textarea"
               rows={2}
-              placeholder="e.g. 30 फीट चौड़ा मार्ग" 
-              value={formData.boundarySouth} 
-              onChange={handleChange} 
-              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium uppercase resize-y min-h-[46px]" 
+              name="boundarySouth"
+              value={formData.boundarySouth}
+              onChange={handleChange}
+              outputLanguage={formData.outputLanguage}
+              placeholder="e.g. 30 फीट चौड़ा मार्ग"
+              className="w-full p-2.5 border rounded text-xs sm:text-sm bg-white font-medium resize-y min-h-[46px]"
+              uppercase
+              required
             />
           </div>
         </div>

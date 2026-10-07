@@ -6,72 +6,71 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import "./print.css";
 import { QRCodeSVG } from 'qrcode.react';
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";   // ✅ NEW
+import { getItemRate } from "@/lib/pricing";                              // ✅ NEW
 
 const slabConfig: any = {
-  500: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  600: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  700: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  800: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  900: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  1000: { door: 0.10, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 }, //done//
-  1100: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1150: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1200: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1250: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1300: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24}, //done//
-  1350: { door: 0.14,  paint: 0.14, ms: 0.1,  plumb: 0.195, elec: 0.195, floor: 0.23}, //done//
-  1400: { door: 0.14,  paint: 0.14, ms: 0.11,  plumb: 0.195, elec: 0.195, floor: 0.22}, //done//
-  1500: { door: 0.131, paint: 0.125, ms: 0.13, plumb: 0.187, elec: 0.187, floor: 0.24 }, //done//
-  1550: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.17, ceiling: 0.08,water: 0.129 }, //done//
-  1600: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 }, //done//
-  1650: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 }, //done//
-  1700: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.15, water: 0.13 }, //done//
-  1750: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.28 }, //done//
-  1800: { door: 0.078, paint: 0.08, ms: 0.078, plumb: 0.13, elec: 0.13, floor: 0.135, ceiling: 0.05, kitchen: 0.154, water: 0.1, furnish: 0.065 },//done//
-  1900: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.13, elec: 0.13, floor: 0.13, ceiling: 0.06, kitchen: 0.14,  water: 0.1, furnish: 0.12},//done//
-  2000: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.10, elec: 0.10, floor: 0.11, ceiling: 0.06, kitchen: 0.13, water: 0.11, furnish: 0.16, elev: 0.04 }, //done//
-  2100: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.16, elev: 0.04, cons: 0.02}, //done//
-  2200: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2250: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2300: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2350: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2400: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2450: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.182, elev: 0.035, cons: 0.02, bore: 0.043}, //done//
-  2500: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2550: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2600: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2650: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045}, //done//
-  2700: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335}, //done//
-  2750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335}, //done//
-  2800: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335}, //done//
-  2850: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335}, //done//
-  2900: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34}, //done//
-  3000: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34}, //done//
-  3100: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35}, //done//
-  3150: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35}, //done//
-  3200: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275}, //done//
-  3250: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275}, //done//
-  3500: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.095, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.195, elev: 0.02, cons: 0.023, bore: 0.017, lift: 0.24}, //done//
-  3750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.06, water: 0.023, furnish: 0.206, elev: 0.015, cons: 0.03, bore: 0.012, lift: 0.20}, //done//
-  4000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.356, elev: 0.01, cons: 0.03, bore: 0.005, lift: 0.085}, //done//
-  4250: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085}, //done//
-  4500: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085}, //done//
-
-  4750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.336, elev: 0.01, cons: 0.033, bore: 0.007, lift: 0.1}, //done//
-  5000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.337, elev: 0.01, cons: 0.033, bore: 0.006, lift: 0.1} //done//
+  500: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  600: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  700: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  800: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  900: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  1000: { door: 0.10, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
+  1100: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24},
+  1150: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24},
+  1200: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24},
+  1250: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24},
+  1300: { door: 0.14,  paint: 0.14, ms: 0.08,  plumb: 0.2, elec: 0.2, floor: 0.24},
+  1350: { door: 0.14,  paint: 0.14, ms: 0.1,  plumb: 0.195, elec: 0.195, floor: 0.23},
+  1400: { door: 0.14,  paint: 0.14, ms: 0.11,  plumb: 0.195, elec: 0.195, floor: 0.22},
+  1500: { door: 0.131, paint: 0.125, ms: 0.13, plumb: 0.187, elec: 0.187, floor: 0.24 },
+  1550: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.17, ceiling: 0.08,water: 0.129 },
+  1600: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 },
+  1650: { door: 0.095, paint: 0.111, ms: 0.095, plumb: 0.16, elec: 0.16, floor: 0.18, ceiling: 0.07,water: 0.129 },
+  1700: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.15, water: 0.13 },
+  1750: { door: 0.09, paint: 0.09, ms: 0.09, plumb: 0.13, elec: 0.13, floor: 0.15, ceiling: 0.04, kitchen: 0.28 },
+  1800: { door: 0.078, paint: 0.08, ms: 0.078, plumb: 0.13, elec: 0.13, floor: 0.135, ceiling: 0.05, kitchen: 0.154, water: 0.1, furnish: 0.065 },
+  1900: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.13, elec: 0.13, floor: 0.13, ceiling: 0.06, kitchen: 0.14,  water: 0.1, furnish: 0.12},
+  2000: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.10, elec: 0.10, floor: 0.11, ceiling: 0.06, kitchen: 0.13, water: 0.11, furnish: 0.16, elev: 0.04 },
+  2100: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.16, elev: 0.04, cons: 0.02},
+  2200: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045},
+  2250: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045},
+  2300: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045},
+  2350: { door: 0.06, paint: 0.07, ms: 0.06, plumb: 0.105, elec: 0.105, floor: 0.12, ceiling: 0.06, kitchen: 0.11, water: 0.09, furnish: 0.12, elev: 0.035, cons: 0.02, bore: 0.045},
+  2400: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045},
+  2450: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.182, elev: 0.035, cons: 0.02, bore: 0.043},
+  2500: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045},
+  2550: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045},
+  2600: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045},
+  2650: { door: 0.05, paint: 0.06, ms: 0.05, plumb: 0.09, elec: 0.09, floor: 0.12, ceiling: 0.05, kitchen: 0.12, water: 0.09, furnish: 0.18, elev: 0.035, cons: 0.02, bore: 0.045},
+  2700: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335},
+  2750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.09, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.335},
+  2800: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335},
+  2850: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.06, furnish: 0.1, elev: 0.02, cons: 0.02, bore: 0.025, lift: 0.335},
+  2900: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34},
+  3000: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.045, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.035, lift: 0.34},
+  3100: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35},
+  3150: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.07, elec: 0.07, floor: 0.08, ceiling: 0.04, kitchen: 0.05, water: 0.04, furnish: 0.11, elev: 0.02, cons: 0.02, bore: 0.03, lift: 0.35},
+  3200: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275},
+  3250: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.085, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.17, elev: 0.02, cons: 0.02, bore: 0.02, lift: 0.275},
+  3500: { door: 0.035, paint: 0.05, ms: 0.035, plumb: 0.075, elec: 0.07, floor: 0.095, ceiling: 0.04, kitchen: 0.07, water: 0.035, furnish: 0.195, elev: 0.02, cons: 0.023, bore: 0.017, lift: 0.24},
+  3750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.06, water: 0.023, furnish: 0.206, elev: 0.015, cons: 0.03, bore: 0.012, lift: 0.20},
+  4000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.356, elev: 0.01, cons: 0.03, bore: 0.005, lift: 0.085},
+  4250: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085},
+  4500: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.354, elev: 0.01, cons: 0.03, bore: 0.007, lift: 0.085},
+  4750: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.336, elev: 0.01, cons: 0.033, bore: 0.007, lift: 0.1},
+  5000: { door: 0.04, paint: 0.05, ms: 0.04, plumb: 0.075, elec: 0.072, floor: 0.135, ceiling: 0.042, kitchen: 0.04, water: 0.02, furnish: 0.337, elev: 0.01, cons: 0.033, bore: 0.006, lift: 0.1}
 };
 
 export default function RemainingWorkEstimatePreviewPage() {
   const router = useRouter();
   const { currentUser, setCurrentUser } = useAuth();
 
-  // 1. Core States
   const [estimate, setEstimate] = useState<any>(null);
   const [masterItem, setMasterItem] = useState<any>(null);
   const [selectedPlotMaster, setSelectedPlotMaster] = useState<any>(null);
   const [totalColumnNos, setTotalColumnNos] = useState(0);
 
-  // 2. Control & UI States
   const [isPaid, setIsPaid] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
   const [totalEstimates, setTotalEstimates] = useState(0);
@@ -80,7 +79,6 @@ export default function RemainingWorkEstimatePreviewPage() {
   const [isCheckingHistory, setIsCheckingHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 3. Custom Letterhead System
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
   const [customHeaderTitle, setCustomHeaderTitle] = useState('');
   const [customSubtitle, setCustomSubtitle] = useState('');
@@ -95,8 +93,20 @@ export default function RemainingWorkEstimatePreviewPage() {
   const [finalFee, setFinalFee] = useState(150);
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/...");
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
-  
-    
+
+  // ✅ NEW: Dynamic Pricing States
+  const [gatewayFeeAmount, setGatewayFeeAmount] = useState<number>(21);
+  const [pricingDisplay, setPricingDisplay] = useState({
+    mrp: 120,
+    price: 21,
+    discountEnabled: true,
+    discountPercent: 82,
+    savings: 99,
+    isFromDB: false,
+  });
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [estimateStateName, setEstimateStateName] = useState<string>("MADHYA PRADESH");
+
   const checkEstimatePaymentStatus = async (currentRefNo: string) => {
     if (!currentRefNo) return;
 
@@ -117,6 +127,73 @@ export default function RemainingWorkEstimatePreviewPage() {
     } catch (err) {}
   };
 
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: State-wise dynamic pricing fetch
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    let alive = true;
+
+    const loadPricing = async () => {
+      setPricingLoading(true);
+
+      const targetState =
+        currentUser?.state ||
+        estimateStateName ||
+        estimate?.state_name ||
+        "MADHYA PRADESH";
+
+      try {
+        const row = await fetchPricingRow("estimate", targetState, userCategory);
+        const display = getDisplayPricing(row);
+
+        if (!alive) return;
+
+        if (display.isFromDB && display.price > 0) {
+          setGatewayFeeAmount(display.price);
+          setPricingDisplay({
+            mrp: display.mrp,
+            price: display.price,
+            discountEnabled: display.discountEnabled,
+            discountPercent: display.discountPercent,
+            savings: display.savings,
+            isFromDB: true,
+          });
+          console.log(`💰 [REMAINING WORK DB PRICING] ${targetState} = ₹${display.price}`);
+        } else {
+          const fallbackPrice = getItemRate(targetState, "estimate");
+          setGatewayFeeAmount(fallbackPrice);
+          setPricingDisplay({
+            mrp: fallbackPrice,
+            price: fallbackPrice,
+            discountEnabled: false,
+            discountPercent: 0,
+            savings: 0,
+            isFromDB: false,
+          });
+          console.log(`⚠️ [REMAINING WORK FALLBACK PRICING] ${targetState} = ₹${fallbackPrice}`);
+        }
+      } catch (err) {
+        console.error("[REMAINING WORK PRICING FETCH ERROR]", err);
+        if (!alive) return;
+        const fallbackPrice = getItemRate(targetState, "estimate");
+        setGatewayFeeAmount(fallbackPrice);
+        setPricingDisplay({
+          mrp: fallbackPrice,
+          price: fallbackPrice,
+          discountEnabled: false,
+          discountPercent: 0,
+          savings: 0,
+          isFromDB: false,
+        });
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    };
+
+    loadPricing();
+    return () => { alive = false; };
+  }, [estimateStateName, estimate?.state_name, currentUser?.state, userCategory]);
+
   useEffect(() => {
     const savedData = JSON.parse(localStorage.getItem("estimatePreview") || "{}");
     if (savedData?.ref_no) {
@@ -129,7 +206,7 @@ export default function RemainingWorkEstimatePreviewPage() {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
       if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
         e.preventDefault();
-        alert("Please complete the payment (₹21) before printing or saving the estimate!");
+        alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
       }
     }
   };
@@ -138,7 +215,7 @@ export default function RemainingWorkEstimatePreviewPage() {
   return () => {
     window.removeEventListener('keydown', handleKeyDown);
   };
-}, [isPaid, isAlreadyPaid, userCategory]);
+}, [isPaid, isAlreadyPaid, userCategory, gatewayFeeAmount]);
 
   useEffect(() => {
     const checkExistingPayment = async () => {
@@ -201,7 +278,7 @@ export default function RemainingWorkEstimatePreviewPage() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
           e.preventDefault();
-          alert("Please complete the payment (₹21) before printing or saving the estimate!");
+          alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
           handlePayment();
         }
       }
@@ -211,11 +288,11 @@ export default function RemainingWorkEstimatePreviewPage() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isPaid, isAlreadyPaid, userCategory]);
+  }, [isPaid, isAlreadyPaid, userCategory, gatewayFeeAmount]);
 
   const handleSaveAndPrint = async () => {
     if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-      alert("Please complete the payment (₹21) before printing or saving the estimate!");
+      alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
       handlePayment();
       return;
     }
@@ -261,10 +338,13 @@ export default function RemainingWorkEstimatePreviewPage() {
         });
       }
 
+      // ✅ FIX: Use dynamic price
+      const dynamicAmount = gatewayFeeAmount || 21;
+
       const res = await fetch("/api/analyze/payment/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 21 }),
+        body: JSON.stringify({ amount: dynamicAmount }),
       });
 
       const data = await res.json();
@@ -272,7 +352,7 @@ export default function RemainingWorkEstimatePreviewPage() {
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount: 2100,
+        amount: Math.round(dynamicAmount * 100),
         currency: "INR",
         name: "Construction Estimate",
         order_id: data.id, 
@@ -288,7 +368,7 @@ export default function RemainingWorkEstimatePreviewPage() {
               p_payment_status: 'paid',
               p_order_id: response.razorpay_order_id,
               p_payment_id: response.razorpay_payment_id,
-              p_user_payment: 21
+              p_user_payment: dynamicAmount
             };
 
             setIsPaid(true);
@@ -397,7 +477,7 @@ export default function RemainingWorkEstimatePreviewPage() {
   const handleSaveAndFinalize = async (paymentData?: any) => {
     const isAuthorized = userCategory === 'ADMIN' || isPaid || paymentData;
     if (!isAuthorized) {
-      alert("Payment of ₹21/- is required to save and print.");
+      alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
       handlePayment();
       return;
     }
@@ -509,7 +589,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         p_payment_status: paymentData?.p_payment_status || 'paid',
         p_order_id: paymentData?.p_order_id || null,
         p_payment_id: paymentData?.p_payment_id || null,
-        p_user_payment: Number(paymentData?.p_user_payment || 21)
+        p_user_payment: Number(paymentData?.p_user_payment || gatewayFeeAmount || 21)
       };
 
       const { data, error } = await supabase.rpc('rpc_save_estimate', payload);
@@ -605,6 +685,15 @@ export default function RemainingWorkEstimatePreviewPage() {
       }
 
       setEstimate(workingEstimate);
+
+      // ✅ NEW: Set state from estimate
+      const resolvedState =
+        workingEstimate.state_name ||
+        workingEstimate.state ||
+        workingEstimate.stateName ||
+        currentUser?.state ||
+        "MADHYA PRADESH";
+      setEstimateStateName(resolvedState);
 
       const statusCheck = (workingEstimate.status || "").trim().toUpperCase();
       const paymentStatusCheck = (workingEstimate.payment_status || "").trim().toUpperCase();
@@ -823,7 +912,7 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   estimate.selected_floors?.forEach((floor: string, index: number) => {
     const floorItems = floorWiseItems[floor] || estimate.selected_items || [];
-    if (!floorItems.includes("reinforcement_steel")) return; // Skip steel calculation for this floor if not selected
+    if (!floorItems.includes("reinforcement_steel")) return;
 
     const floorArea = Number(estimate.floor_details?.[floor]?.area || 0);
     let kgPerSqft = 3.6; 
@@ -1256,10 +1345,8 @@ export default function RemainingWorkEstimatePreviewPage() {
     },
   ];
 
-  // Check if item is selected globally or on any active floor
   const isItemSelected = (itemId: string) => {
     if (floorWiseItems && Object.keys(floorWiseItems).length > 0) {
-      // Check if item is selected in any of the selected/active floors
       return sortedFloors.some((floor: string) => {
         const itemsOnFloor = floorWiseItems[floor];
         return itemsOnFloor ? itemsOnFloor.includes(itemId) : selectedItems.includes(itemId);
@@ -1670,6 +1757,15 @@ export default function RemainingWorkEstimatePreviewPage() {
                     </div>
                   </div>
 
+                  {/* ✅ NEW: Manual Signature Image (Jayant Tomar) */}
+                  <div className="flex justify-center items-center mt-3 mb-1">
+                    <img 
+                      src="/signature-jayant-tomar.png" 
+                      alt="Authorised Signatory" 
+                      className="h-32 w-auto object-contain mix-blend-multiply" 
+                    />
+                  </div>
+
                   <div className="border-t border-black pt-2 mt-2 text-center">
                     <p className="font-bold text-sm">AUTHORISED SIGNATORY</p>
                   </div>
@@ -1682,33 +1778,80 @@ export default function RemainingWorkEstimatePreviewPage() {
         </tbody>
       </table>
 
-      <div className="flex flex-wrap items-center justify-start gap-6 mt-8 mb-12 no-print border-t border-slate-200 pt-6">
-        {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
-          <button
-            onClick={handleSaveAndPrint}
-            disabled={isSaving}
-            className="bg-blue-600 text-white px-8 py-3 rounded shadow-md hover:bg-blue-700 transition font-bold"
-          >
-            {isSaving ? "SAVING..." : "PRINT ESTIMATE"}
-          </button>
-        ) : (
-          <button
-            onClick={handleRazorpayPayment}
-            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold"
-          >
-            PAY TO PRINT (₹21)
-          </button>
+      {/* ✅ PaymentBanner Style (Dynamic Pricing) */}
+      <div className="mt-8 mb-12 no-print border-t border-slate-200 pt-6">
+        {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (
+          <div className="mb-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="bg-red-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse">
+                ⚡ LIMITED TIME DEAL
+              </span>
+              <div>
+                <h4 className="text-sm font-extrabold text-slate-900 uppercase">
+                  Professional Remaining Work Estimate & Verified Report
+                </h4>
+                <p className="text-xs text-slate-600 font-medium">
+                  Includes Instant PDF Download, Digital Sealing & Verification QR Code.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
+              <div className="text-right">
+                {pricingLoading ? (
+                  <span className="text-xs text-slate-500 font-bold">Loading price...</span>
+                ) : (
+                  <>
+                    {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
+                      <div className="flex items-center justify-end gap-2">
+                        <span className="text-xs text-gray-400 line-through font-semibold">
+                          ₹ {pricingDisplay.mrp}/-
+                        </span>
+                        <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                          {pricingDisplay.discountPercent}% OFF
+                        </span>
+                      </div>
+                    )}
+                    <div className="text-lg font-black text-emerald-600 leading-tight">
+                      ₹ {pricingDisplay.price}{" "}
+                      <span className="text-xs font-bold text-slate-700">Only</span>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
-        <button
-          onClick={() => {
-            localStorage.removeItem("estimatePreview");
-            router.push("/estimate");
-          }}
-          className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold ml-4" 
-        >
-          BACK TO INPUT
-        </button>
+        <div className="flex flex-wrap items-center justify-start gap-6">
+          {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
+            <button
+              onClick={handleSaveAndPrint}
+              disabled={isSaving}
+              className="bg-blue-600 text-white px-8 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
+            >
+              {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
+            </button>
+          ) : (
+            <button
+              onClick={handleRazorpayPayment}
+              disabled={pricingLoading}
+              className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {pricingLoading ? "⏳ LOADING PRICE..." : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              localStorage.removeItem("estimatePreview");
+              router.push("/estimate");
+            }}
+            className="bg-slate-700 text-white px-8 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
+          >
+            ⬅️ BACK TO INPUT
+          </button>
+        </div>
       </div>
     </div>
   );

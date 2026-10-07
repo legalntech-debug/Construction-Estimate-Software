@@ -1,8 +1,13 @@
 import React from "react";
-import { formatDim, renderHeightDim } from "./CadDimUtils";
+import { formatDim } from "./CadDimUtils";
 import CadFloorPlansView from "./CadFloorPlansView";
-import CadElevationSectionView from "./CadElevationSectionView";
+import CadElevationSectionView, { computeSectionLayout } from "./CadElevationSectionView";
 import CadStructuralTable from "./CadStructuralTable";
+import {
+  SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS,
+  buildSectionContext, resolveCutPositionFt,
+} from "../engine/sectionEngine";
+import { decideStairFace, stairFloorHeightFtFrom } from "../engine/stairFaceDecision";
 
 interface FloorDetail {
   length: number;
@@ -31,6 +36,10 @@ interface CadFloorElevationRendererProps {
   floorRooms?: Record<string, any>;
   frontMos?: number;
   backMos?: number;
+  leftMos?: number;
+  rightMos?: number;
+  sectionCuts?: SectionCutDef[];
+  elevationSides?: ElevationSide[];
 }
 
 // 🎨 LIGHT THEME COLORS (White background + Black lines)
@@ -58,6 +67,10 @@ export default function CadFloorElevationRenderer({
   floorRooms = {},
   frontMos = 10,
   backMos = 5,
+  leftMos = 0,
+  rightMos = 0,
+  sectionCuts,
+  elevationSides,
 }: CadFloorElevationRendererProps) {
 
   const MANUAL_ELEV_Y_OFFSET = -25 * scale;
@@ -240,357 +253,21 @@ export default function CadFloorElevationRenderer({
     ];
   };
 
-  const getTowerRoomData = React.useCallback(() => {
-    const towerFloorName = processedFloors.find(f => f.toUpperCase().includes("TOWER")) || "TOWER";
-    const towerRoomsMap = (floorRooms?.[towerFloorName] || {}) as Record<string, any>;
+  // ---- STAIR: plan view jis face ko use karta hai wahi section bhi use kare (single source of truth) ----
+  const stairFloorHeightFt = stairFloorHeightFtFrom(normalizedFloorData);
+  const stairDecision = decideStairFace(processedFloors, normalizedFloorData as any, {}, stairFloorHeightFt);
 
-    const roomsArray = Array.isArray(towerRoomsMap)
-      ? towerRoomsMap
-      : Object.values(towerRoomsMap);
+  // ---- ek hi context se ELEVATION + SECTION + plan cut-lines (rooms/doors/windows/stairs plan se hi aate hain) ----
+  const ctx = buildSectionContext(
+    processedFloors,
+    normalizedFloorData,
+    floorRooms,
+    baseBuiltUpWidth / scale,
+    baseBuiltUpHeight / scale,
+    { stairFace: stairDecision?.face ?? null, stairFloorHeightFt }
+  );
 
-    if (roomsArray.length === 0) return null;
-
-    let towerRoom = roomsArray.find((r: any) => {
-      const name = String(r?.name || "").toUpperCase().trim();
-      return name === "TOWER" || name === "MUMTY" || name === "TOWER BLOCK";
-    });
-
-    if (!towerRoom) {
-      towerRoom = roomsArray.find((r: any) => {
-        const name = String(r?.name || "").toUpperCase();
-        return name.includes("TOWER") && !name.includes("STAIR") && !name.includes("MUMTY-STAIR");
-      });
-    }
-
-    if (!towerRoom) {
-      const candidates = roomsArray.filter((r: any) => {
-        const name = String(r?.name || "").toUpperCase();
-        return !name.includes("TERRACE") && !name.includes("STAIR");
-      });
-      if (candidates.length > 0) {
-        towerRoom = [...candidates].sort((a: any, b: any) => {
-          const aArea = Number(a.w || 0) * Number(a.h || 0);
-          const bArea = Number(b.w || 0) * Number(b.h || 0);
-          return bArea - aArea;
-        })[0];
-      }
-    }
-
-    if (!towerRoom) return null;
-
-    return {
-      x: Number(towerRoom.x ?? towerRoom.relX ?? 0),
-      y: Number(towerRoom.y ?? towerRoom.relY ?? 0),
-      w: Number(towerRoom.w ?? towerRoom.width ?? 10),
-      h: Number(towerRoom.h ?? towerRoom.length ?? 10),
-      name: String(towerRoom.name || "TOWER"),
-    };
-  }, [processedFloors, floorRooms]);
-
-  const renderRightFloorLabels = (startX: number, width: number) => {
-    const extX = startX + width + 10 * scale;
-    const boxW = 95;
-    const boxH = 15;
-
-    let accumulatedHeight = 0;
-    const totalRenderedLevels = effectiveMainFloorsCount + (hasTowerSelected ? 2 : 1);
-
-    const floorLabelsElements = Array.from({ length: totalRenderedLevels }).map((_, fIdx) => {
-      const isParapet = fIdx === totalRenderedLevels - 1;
-      const isTowerLevel = hasTowerSelected && fIdx === effectiveMainFloorsCount;
-
-      let currentH: number;
-      if (isParapet) {
-        currentH = PARAPET_H;
-      } else if (isTowerLevel) {
-        currentH = 8 * scale;
-      } else {
-        const fName = processedFloors[fIdx] || `FLOOR ${fIdx + 1}`;
-        currentH = getFloorHeightFt(fName) * scale;
-      }
-
-      const slabMidY = -(accumulatedHeight + currentH + 0.5 * scale);
-      accumulatedHeight += currentH + 0.5 * scale;
-
-      const floorLabel = processedFloors[fIdx] || `FLOOR ${fIdx + 1}`;
-      const slabThicknessLabel = isParapet ? "3'-0\" Parapet" : "0'-6\"";
-
-      return (
-        <g key={fIdx}>
-          <line x1={startX + width} y1={slabMidY} x2={extX} y2={slabMidY} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2" />
-          <circle cx={startX + width} cy={slabMidY} r={1.5} fill={LINE_COLOR} />
-          <rect x={extX} y={slabMidY - boxH / 2} width={boxW} height={boxH} fill={LABEL_BG} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" rx="2" />
-          <text x={extX + boxW / 2} y={slabMidY} fill={LABEL_TEXT} fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
-            {isParapet ? `PARAPET (${formatDim(PARAPET_H, scale, measurementUnit)})` : `${floorLabel} (${slabThicknessLabel})`}
-          </text>
-        </g>
-      );
-    });
-
-    const plinthSlabMidY = PLINTH_H / 2;
-    const plinthLabelElement = (
-      <g key="plinth-slab-label">
-        <line x1={startX + width} y1={plinthSlabMidY} x2={extX} y2={plinthSlabMidY} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="2" />
-        <circle cx={startX + width} cy={plinthSlabMidY} r={1.5} fill={LINE_COLOR} />
-        <rect x={extX} y={plinthSlabMidY - boxH / 2} width={boxW} height={boxH} fill={LABEL_BG} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" rx="2" />
-        <text x={extX + boxW / 2} y={plinthSlabMidY} fill={LABEL_TEXT} fontSize="7" fontWeight="bold" textAnchor="middle" dominantBaseline="middle">
-          PLINTH HEIGHT ({formatDim(PLINTH_H, scale, measurementUnit)})
-        </text>
-      </g>
-    );
-
-    return [...floorLabelsElements, plinthLabelElement];
-  };
-
-  const renderBuildingStructure = (startX: number, totalWidth: number, colCount: number, isSection: boolean, showDims: boolean) => {
-    const BEAM_D = (10 / 12) * scale;
-    const COL_W = WALL_THICKNESS;
-    const colBottom = hasBasement ? PLINTH_H + BASEMENT_H + FOOTING_DEPTH : PLINTH_H + FOOTING_DEPTH;
-
-    const elements: React.ReactElement[] = [];
-    let roofTopY = 0;
-    let tempY = 0.5 * scale;
-    for (let i = 0; i < effectiveMainFloorsCount; i++) {
-      const fName = mainBuildingFloors[i] || processedFloors[i] || `FLOOR ${i + 1}`;
-      tempY += getFloorHeightFt(fName) * scale + getSlabThicknessFt(fName) * scale;
-    }
-    roofTopY = -tempY;
-
-    Array.from({ length: colCount }).forEach((_, cIdx) => {
-      const ratio = cIdx / Math.max(1, colCount - 1);
-      const colX = startX + ratio * (totalWidth - COL_W);
-      const colTop = roofTopY + 0.5 * scale;
-
-      if (!isSection) {
-        elements.push(
-          <rect key={`col-${cIdx}-sub`} x={colX} y={0} width={COL_W} height={colBottom - 1.2 * scale} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        );
-
-        let currentColY = 0;
-        Array.from({ length: effectiveMainFloorsCount }).forEach((_, fIdx) => {
-          const fName = mainBuildingFloors[fIdx] || processedFloors[fIdx] || `FLOOR ${fIdx + 1}`;
-          const fH = getFloorHeightFt(fName) * scale;
-          const sH = getSlabThicknessFt(fName) * scale;
-          const colTopY = -(currentColY + fH + sH);
-          elements.push(
-            <rect key={`col-${cIdx}-f${fIdx}`} x={colX} y={colTopY} width={COL_W} height={fH + sH} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          );
-          currentColY += fH + sH;
-        });
-      } else {
-        elements.push(
-          <rect key={`col-${cIdx}`} x={colX} y={colTop} width={COL_W} height={colBottom - colTop - 1.2 * scale} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        );
-      }
-
-      const padTopY = colBottom - 1.2 * scale;
-      const padBottomY = colBottom;
-      const baseW = effectiveMainFloorsCount <= 3 ? 4 * scale : effectiveMainFloorsCount <= 7 ? 5 * scale : 6.5 * scale;
-      const topW = COL_W * 1.6;
-      const baseCenterX = colX + COL_W / 2;
-
-      const x1 = baseCenterX - baseW / 2;
-      const y1 = padBottomY;
-      const x2 = baseCenterX + baseW / 2;
-      const y2 = padBottomY;
-      const x3 = baseCenterX + topW / 2;
-      const y3 = padTopY;
-      const x4 = baseCenterX - topW / 2;
-      const y4 = padTopY;
-
-      elements.push(
-        <rect key={`pcc-${cIdx}`} x={x1 - 0.3 * scale} y={padBottomY} width={baseW + 0.6 * scale} height={0.5 * scale} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      );
-
-      elements.push(
-        <polygon key={`footing-pad-${cIdx}`} points={`${x1},${y1} ${x2},${y2} ${x3},${y3} ${x4},${y4}`} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      );
-    });
-
-    const showTower = hasTowerSelected && isSection;
-    let towerRoofY = roofTopY;
-    let towerWidth = 10 * scale;
-    let towerStartX = startX + (totalWidth / 2) - (towerWidth / 2);
-
-    const towerRoomData = getTowerRoomData();
-
-    if (towerRoomData && showTower) {
-      const planTowerWidthFt = towerRoomData.w;
-      if (planTowerWidthFt > 0 && planTowerWidthFt * scale <= totalWidth) {
-        towerWidth = planTowerWidthFt * scale;
-      }
-
-      if (isSection) {
-        const planY = towerRoomData.y;
-        const computedX = startX + (planY * scale);
-        towerStartX = Math.max(startX, Math.min(computedX, startX + totalWidth - towerWidth));
-      } else {
-        const planX = towerRoomData.x;
-        const computedX = startX + (planX * scale);
-        towerStartX = Math.max(startX, Math.min(computedX, startX + totalWidth - towerWidth));
-      }
-    }
-
-    if (showTower && towerWidth > 0) {
-      const towerH = 8 * scale;
-      towerRoofY = roofTopY - towerH - 0.5 * scale;
-
-      Array.from({ length: colCount }).forEach((_, cIdx) => {
-        const ratio = cIdx / Math.max(1, colCount - 1);
-        const colX = startX + ratio * (totalWidth - COL_W);
-        if (colX >= towerStartX - COL_W && colX <= towerStartX + towerWidth) {
-          elements.push(
-            <rect key={`col-tower-${cIdx}`} x={colX} y={towerRoofY + 0.5 * scale} width={COL_W} height={towerH} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          );
-        }
-      });
-
-      elements.push(
-        <line key="tower-left-wall-section" x1={towerStartX} y1={towerRoofY} x2={towerStartX} y2={roofTopY} stroke={LINE_COLOR} strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
-      );
-
-      elements.push(
-        <line key="tower-right-wall-section" x1={towerStartX + towerWidth} y1={towerRoofY} x2={towerStartX + towerWidth} y2={roofTopY} stroke={LINE_COLOR} strokeWidth="1.2" vectorEffect="non-scaling-stroke" />
-      );
-
-      elements.push(
-        <line key="tower-base-slab-section" x1={towerStartX} y1={roofTopY} x2={towerStartX + towerWidth} y2={roofTopY} stroke={LINE_COLOR} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      );
-
-      elements.push(
-        <line key="tower-roof-slab-line-section" x1={towerStartX} y1={towerRoofY} x2={towerStartX + towerWidth} y2={towerRoofY} stroke={LINE_COLOR} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      );
-
-      elements.push(
-        <text key="tower-label-section" x={towerStartX + towerWidth / 2} y={towerRoofY - 6} fill={LINE_COLOR} fontSize="7" fontWeight="bold" textAnchor="middle">
-          TOWER ({formatDim(towerWidth, scale, measurementUnit)} WIDE)
-        </text>
-      );
-    }
-
-    Array.from({ length: colCount - 1 }).forEach((_, cIdx) => {
-      const ratio1 = cIdx / Math.max(1, colCount - 1);
-      const ratio2 = (cIdx + 1) / Math.max(1, colCount - 1);
-      const spanStart = startX + ratio1 * (totalWidth - COL_W) + COL_W;
-      const spanWidth = (startX + ratio2 * (totalWidth - COL_W)) - spanStart;
-
-      elements.push(
-        <line key={`pb-${cIdx}`} x1={spanStart} y1={BEAM_D} x2={spanStart + spanWidth} y2={BEAM_D} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      );
-
-      const brickH = PLINTH_H - BEAM_D;
-      if (brickH > 0) {
-        elements.push(
-          <rect key={`pw-${cIdx}`} x={spanStart} y={BEAM_D} width={spanWidth} height={brickH} fill="url(#wallHatch)" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        );
-      }
-    });
-
-    let currentY = 0;
-    elements.push(
-      <line key="plinth-slab" x1={startX} y1={0} x2={startX + totalWidth} y2={0} stroke={LINE_COLOR} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-    );
-    currentY += 0.5 * scale;
-
-    if (showDims) {
-      elements.push(
-        <g key="dim-plinth">
-          {renderHeightDim(startX, 0, PLINTH_H, formatDim(PLINTH_H, scale, measurementUnit), 'left', LINE_COLOR, scale)}
-        </g>
-      );
-    }
-
-    Array.from({ length: effectiveMainFloorsCount }).forEach((_, fIdx) => {
-      const fName = mainBuildingFloors[fIdx] || processedFloors[fIdx] || `FLOOR ${fIdx + 1}`;
-      const fH = getFloorHeightFt(fName) * scale;
-      const sH = getSlabThicknessFt(fName) * scale;
-
-      const floorTopY = -(currentY + fH + sH);
-      currentY += fH + sH;
-
-      const fPoints = getFloorPoints(fName);
-
-      const floorSpanWidth = isSection
-        ? Math.abs(fPoints[3].y - fPoints[0].y)
-        : Math.abs(fPoints[1].x - fPoints[0].x);
-
-      const fInfo = getFloorDataItem(fName);
-      let floorXOffset = startX;
-
-      if (isSection) {
-        const floorOffset = fInfo?.y !== undefined ? fInfo.y * scale : 0;
-        floorXOffset = (startX + totalWidth) - floorOffset - floorSpanWidth;
-      } else {
-        const floorOffset = fInfo?.x !== undefined ? fInfo.x * scale : 0;
-        floorXOffset = startX + (totalWidth / 2) - (floorSpanWidth / 2) + floorOffset;
-      }
-
-      if (showDims && !isSection) {
-        elements.push(
-          <g key={`dim-fl-${fIdx}`}>
-            {renderHeightDim(startX, floorTopY + sH, floorTopY + fH + sH, formatDim(fH, scale, measurementUnit), 'left', LINE_COLOR, scale)}
-          </g>
-        );
-      }
-
-      elements.push(
-        <line key={`slab-${fIdx}`} x1={floorXOffset} y1={floorTopY} x2={floorXOffset + floorSpanWidth} y2={floorTopY} stroke={LINE_COLOR} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      );
-
-      Array.from({ length: colCount - 1 }).forEach((_, cIdx) => {
-        const ratio1 = cIdx / Math.max(1, colCount - 1);
-        const ratio2 = (cIdx + 1) / Math.max(1, colCount - 1);
-        const spanStart = floorXOffset + ratio1 * (floorSpanWidth - COL_W) + COL_W;
-        const spanWidth = (floorXOffset + ratio2 * (floorSpanWidth - COL_W)) - spanStart;
-
-        const hangH = BEAM_D - sH;
-        if (hangH > 0 && spanWidth > 0) {
-          elements.push(
-            <line key={`fb-${fIdx}-${cIdx}`} x1={spanStart} y1={floorTopY + BEAM_D} x2={spanStart + spanWidth} y2={floorTopY + BEAM_D} stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-          );
-        }
-      });
-    });
-
-    if (showTower && towerWidth > 0) {
-      if (towerStartX > startX + 0.5) {
-        elements.push(
-          <rect key="parapet-left-of-tower-section" x={startX} y={roofTopY - PARAPET_H} width={towerStartX - startX} height={PARAPET_H} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        );
-      }
-
-      if (towerStartX + towerWidth < startX + totalWidth - 0.5) {
-        elements.push(
-          <rect key="parapet-right-of-tower-section" x={towerStartX + towerWidth} y={roofTopY - PARAPET_H} width={(startX + totalWidth) - (towerStartX + towerWidth)} height={PARAPET_H} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-        );
-      }
-    } else {
-      elements.push(
-        <rect key="standard-parapet-section" x={startX} y={roofTopY - PARAPET_H} width={totalWidth} height={PARAPET_H} fill="none" stroke={LINE_COLOR} strokeWidth="1" vectorEffect="non-scaling-stroke" />
-      );
-    }
-
-    return <g>{elements}</g>;
-  };
-
-  let elevationHeight = 0;
-  for (let i = 0; i < effectiveMainFloorsCount; i++) {
-    const fName = mainBuildingFloors[i] || processedFloors[i] || `FLOOR ${i + 1}`;
-    elevationHeight += getFloorHeightFt(fName) * scale + getSlabThicknessFt(fName) * scale;
-  }
-  elevationHeight += PARAPET_H;
-
-  let sectionHeight = 0;
-  for (let i = 0; i < effectiveMainFloorsCount; i++) {
-    const fName = mainBuildingFloors[i] || processedFloors[i] || `FLOOR ${i + 1}`;
-    sectionHeight += getFloorHeightFt(fName) * scale + getSlabThicknessFt(fName) * scale;
-  }
-  if (hasTowerSelected) {
-    sectionHeight += (8 * scale) + 0.5 * scale + PARAPET_H;
-  } else {
-    sectionHeight += PARAPET_H;
-  }
-
+  // ---- where the drawing row starts (aligned with the floor plans) ----
   let leftmostX = Infinity;
   let topmostY = Infinity;
 
@@ -619,11 +296,16 @@ export default function CadFloorElevationRenderer({
   });
 
   const elevationStartX = leftmostX;
-  const sectionStartX = elevationStartX + baseBuiltUpWidth + 40 * scale;
   const elevationRowStartY = topmostY + MANUAL_ELEV_Y_OFFSET;
 
+  // ---- dynamic elevations + sections ----
+  const cuts = sectionCuts ?? DEFAULT_SECTION_CUTS;
+  const sides: ElevationSide[] = elevationSides && elevationSides.length > 0 ? elevationSides : ["FRONT"];
+  const layout = computeSectionLayout(ctx, sides, cuts, scale, elevationStartX);
+  const sectionMarkers = cuts.map((c) => ({ cut: c, posOuterFt: resolveCutPositionFt(c, ctx).posOuter }));
+
   const tableTotalWidth = baseBuiltUpWidth + 50 * scale;
-  const dynamicTableXOffset = baseBuiltUpWidth + baseBuiltUpHeight + 70 * scale;
+  const dynamicTableXOffset = layout.totalWidthPx + 60 * scale;
 
   const footingSpec = effectiveMainFloorsCount <= 3
     ? "4'-0\" x 4'-0\" (Sloped Isolated RCC Footing)"
@@ -637,13 +319,15 @@ export default function CadFloorElevationRenderer({
     ? `9\" x 15\" @ 10'-0\" C/C (${widthColumnCount} Columns)`
     : `12\" x 18\" @ 10'-0\" C/C (${widthColumnCount} Columns)`;
 
+  const lv0 = layout.levels.floors[0];
+  const fmtFt = (ft: number) => formatDim(ft * scale, scale, measurementUnit);
   const tableItems = [
     { label: "FOUNDATION / FOOTING SIZE", val: footingSpec },
     { label: "COLUMN SIZE & SPACING", val: columnSpec },
     { label: "PLINTH & FLOOR BEAM SIZE", val: "9\" x 12\" (M20 Grade Concrete)" },
-    { label: "EXTERNAL & INTERNAL WALL", val: "External: 8\" Thick | Internal Partition: 4\" Thick" },
-    { label: "SLAB & PARAPET DETAILS", val: `Roof & Floor Slabs: 0'-6\" Thick | Parapet: 3'-0\" Height` },
-    { label: "PLINTH & FLOOR HEIGHTS", val: `Plinth: 1'-6\" Above GL | Floor-to-Floor: 10'-0\"` },
+    { label: "EXTERNAL & INTERNAL WALL", val: "External: 4\" Thick | Internal Partition: 4\" Thick" },
+    { label: "SLAB & PARAPET DETAILS", val: `Roof & Floor Slabs: ${fmtFt(lv0?.slabFt ?? 0.5)} Thick | Parapet: ${fmtFt(layout.levels.parapetTop - layout.levels.roofSlabTop)} Height` },
+    { label: "PLINTH & FLOOR HEIGHTS", val: `Plinth: ${fmtFt(layout.levels.plinthFt)} Above GL | Floor-to-Floor: ${fmtFt(lv0?.heightFt ?? 10)}` },
   ];
 
   const tableHeaderH = 15 * scale;
@@ -680,32 +364,17 @@ export default function CadFloorElevationRenderer({
         measurementUnit={measurementUnit}
         MANUAL_TOWER_DIM_X_OFFSET={MANUAL_TOWER_DIM_X_OFFSET}
         MANUAL_TOWER_DIM_Y_OFFSET={MANUAL_TOWER_DIM_Y_OFFSET}
+        sectionMarkers={sectionMarkers}
       />
 
-      <g transform={`translate(0, ${elevationRowStartY})`}>
+      <g transform={`translate(0, ${elevationRowStartY - 6 * scale})`}>
         <CadElevationSectionView
-          elevationStartX={elevationStartX}
-          sectionStartX={sectionStartX}
-          elevationHeight={elevationHeight}
-          sectionHeight={sectionHeight}
-          baseBuiltUpWidth={baseBuiltUpWidth}
-          baseBuiltUpHeight={baseBuiltUpHeight}
+          layout={layout}
           scale={scale}
-          processedFloors={processedFloors}
-          floorData={normalizedFloorData}
-          hasBasement={hasBasement}
-          basementHeight={basementHeight}
-          frontMos={frontMos}
-          backMos={backMos}
-          widthColumnCount={widthColumnCount}
-          depthColumnCount={depthColumnCount}
-          effectiveMainFloorsCount={effectiveMainFloorsCount}
-          hasTowerSelected={hasTowerSelected}
           measurementUnit={measurementUnit}
-          sectionLineX={2}
-          floorRooms={floorRooms}
-          renderBuildingStructure={renderBuildingStructure}
-          renderRightFloorLabels={renderRightFloorLabels}
+          hasBasement={hasBasement}
+          basementFt={basementHeight !== undefined ? basementHeight / scale : 8}
+          mos={{ front: frontMos || 0, back: backMos || 0, left: leftMos || 0, right: rightMos || 0 }}
         />
       </g>
 

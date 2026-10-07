@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import "./print.css";
 import { QRCodeSVG } from 'qrcode.react';
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
+import { getItemRate } from "@/lib/pricing";
+import PaymentBanner from "./components/PaymentBanner";
 
 const slabConfig: any = {
   1000: { door: 0.20, plumb: 0.335, elec: 0.335, paint: 0.13 },
@@ -84,11 +87,91 @@ export default function ExtensionEstimatePreviewPage() {
   const [finalFee, setFinalFee] = useState(150);
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/...");
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
+
+  // ✅ NEW: Dynamic Pricing States
+  const [gatewayFeeAmount, setGatewayFeeAmount] = useState<number>(21);
+  const [pricingDisplay, setPricingDisplay] = useState({
+    mrp: 120,
+    price: 21,
+    discountEnabled: true,
+    discountPercent: 82,
+    savings: 99,
+    isFromDB: false,
+  });
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [estimateStateName, setEstimateStateName] = useState<string>("MADHYA PRADESH");
   
   const isGroundFloorOnly = estimate?.floors === 1 || false;
   const groundFloorArea = estimate?.groundFloorArea || 0;
   const firstFloorArea = estimate?.firstFloorArea || 0;
   const totalCombinedArea = groundFloorArea + firstFloorArea;
+
+  // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: State-wise dynamic pricing fetch
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    let alive = true;
+
+    const loadPricing = async () => {
+      setPricingLoading(true);
+
+      const targetState =
+        currentUser?.state ||
+        estimateStateName ||
+        estimate?.state_name ||
+        "MADHYA PRADESH";
+
+      try {
+        const row = await fetchPricingRow("estimate", targetState, userCategory);
+        const display = getDisplayPricing(row);
+
+        if (!alive) return;
+
+        if (display.isFromDB && display.price > 0) {
+          setGatewayFeeAmount(display.price);
+          setPricingDisplay({
+            mrp: display.mrp,
+            price: display.price,
+            discountEnabled: display.discountEnabled,
+            discountPercent: display.discountPercent,
+            savings: display.savings,
+            isFromDB: true,
+          });
+          console.log(`💰 [EXTENSION DB PRICING] ${targetState} = ₹${display.price}`);
+        } else {
+          const fallbackPrice = getItemRate(targetState, "estimate");
+          setGatewayFeeAmount(fallbackPrice);
+          setPricingDisplay({
+            mrp: fallbackPrice,
+            price: fallbackPrice,
+            discountEnabled: false,
+            discountPercent: 0,
+            savings: 0,
+            isFromDB: false,
+          });
+          console.log(`⚠️ [EXTENSION FALLBACK PRICING] ${targetState} = ₹${fallbackPrice}`);
+        }
+      } catch (err) {
+        console.error("[EXTENSION PRICING FETCH ERROR]", err);
+        if (!alive) return;
+        const fallbackPrice = getItemRate(targetState, "estimate");
+        setGatewayFeeAmount(fallbackPrice);
+        setPricingDisplay({
+          mrp: fallbackPrice,
+          price: fallbackPrice,
+          discountEnabled: false,
+          discountPercent: 0,
+          savings: 0,
+          isFromDB: false,
+        });
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    };
+
+    loadPricing();
+    return () => { alive = false; };
+  }, [estimateStateName, estimate?.state_name, currentUser?.state, userCategory]);
 
   const checkEstimatePaymentStatus = async (currentRefNo: string) => {
     if (!currentRefNo) return;
@@ -118,6 +201,16 @@ export default function ExtensionEstimatePreviewPage() {
     try {
       const parsedData = JSON.parse(data);
       setEstimate(parsedData);
+
+      // ✅ NEW: Set state from estimate
+      const resolvedState =
+        parsedData.state_name ||
+        parsedData.state ||
+        parsedData.stateName ||
+        currentUser?.state ||
+        "MADHYA PRADESH";
+      setEstimateStateName(resolvedState);
+
       if (parsedData?.rate_per_sqft) {
         loadMasterItem(Number(parsedData.rate_per_sqft));
       }
@@ -230,10 +323,13 @@ export default function ExtensionEstimatePreviewPage() {
         });
       }
 
+      // ✅ FIX: Use dynamic price
+      const dynamicAmount = gatewayFeeAmount || 21;
+
       const res = await fetch("/api/analyze/payment/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 21 }),
+        body: JSON.stringify({ amount: dynamicAmount }),
       });
 
       const data = await res.json();
@@ -241,7 +337,7 @@ export default function ExtensionEstimatePreviewPage() {
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount: 2100,
+        amount: Math.round(dynamicAmount * 100),
         currency: "INR",
         name: "Construction Estimate",
         order_id: data.id,
@@ -251,7 +347,7 @@ export default function ExtensionEstimatePreviewPage() {
               p_payment_status: 'paid',
               p_order_id: response.razorpay_order_id,
               p_payment_id: response.razorpay_payment_id,
-              p_user_payment: 21
+              p_user_payment: dynamicAmount
             };
 
             setIsPaid(true);
@@ -352,7 +448,7 @@ export default function ExtensionEstimatePreviewPage() {
   const handleSaveAndFinalize = async (paymentData?: any) => {
     const isAuthorized = userCategory === 'ADMIN' || isPaid || paymentData;
     if (!isAuthorized) {
-      alert("Payment of ₹21/- is required to save and print.");
+      alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
       handlePayment();
       return;
     }
@@ -463,7 +559,7 @@ export default function ExtensionEstimatePreviewPage() {
         p_payment_status: paymentData?.p_payment_status || 'paid',
         p_order_id: paymentData?.p_order_id || null,
         p_payment_id: paymentData?.p_payment_id || null,
-        p_user_payment: Number(paymentData?.p_user_payment || 21)
+        p_user_payment: Number(paymentData?.p_user_payment || gatewayFeeAmount || 21)
       };
 
       const { data, error } = await supabase.rpc('rpc_save_estimate', payload);
@@ -518,7 +614,6 @@ export default function ExtensionEstimatePreviewPage() {
         }
       }
 
-      // Agar ground floor proposed hai toh columns double honge, nahi toh sirf upper/other floors ke columns rahenge
       const finalTotal = isGroundFloorProposed ? (groundCols * 2) + otherFloorsCols : otherFloorsCols;
       if (isMounted && totalColumnNos !== finalTotal) {
         setTotalColumnNos(finalTotal);
@@ -785,7 +880,6 @@ export default function ExtensionEstimatePreviewPage() {
     column_length_meter: 0, column_height: 0 
   };
 
-  // Agar Ground Floor proposed nahi hai, toh foundation work ki quantities zero ho jayengi
   const earthworkQty = isGroundFloorProposed ? (Number(spm.footing_width_meter || 0) + 0.6) * 
     (Number(spm.footing_length_meter || 0) + 0.6) * 
     (Number(spm.footing_height_meter || 0) + 0.6) * 
@@ -1129,9 +1223,9 @@ export default function ExtensionEstimatePreviewPage() {
             ) : (
               <>
                 <p>203, MAYUR COMPLEX, 49 SUTAR GALI,</p>
-        <p>JAIL ROAD, INDORE (M.P)</p>
-        <p>CONTACT NO. 8103804355 / 79875-61396 </p>
-        <p>Gmail: legalntech@gmail.com</p>
+                <p>JAIL ROAD, INDORE (M.P)</p>
+                <p>CONTACT NO. 8103804355 / 79875-61396 </p>
+                <p>Gmail: legalntech@gmail.com</p>
               </>
             )}
           </div>
@@ -1352,6 +1446,15 @@ export default function ExtensionEstimatePreviewPage() {
                     </div>
                   </div>
 
+                  {/* ✅ Manual Signature Image (Jayant Tomar) */}
+                  <div className="flex justify-center items-center mt-3 mb-1">
+                    <img 
+                      src="/signature-jayant-tomar.png" 
+                      alt="Authorised Signatory" 
+                      className="h-24 w-auto object-contain mix-blend-multiply" 
+                    />
+                  </div>
+
                   <div className="border-t border-black pt-2 mt-2 text-center">
                     <p className="font-bold text-sm">AUTHORISED SIGNATORY</p>
                   </div>
@@ -1364,34 +1467,22 @@ export default function ExtensionEstimatePreviewPage() {
         </tbody>
       </table>
 
-      <div className="flex flex-wrap items-center justify-start gap-6 mt-8 mb-12 no-print border-t border-slate-200 pt-6">
-        {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
-          <button
-            onClick={handleSaveAndPrint}
-            disabled={isSaving}
-            className="bg-blue-600 text-white px-8 py-3 rounded shadow-md hover:bg-blue-700 transition font-bold"
-          >
-            {isSaving ? "SAVING..." : "PRINT ESTIMATE"}
-          </button>
-        ) : (
-          <button
-            onClick={handleRazorpayPayment}
-            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold"
-          >
-            PAY TO PRINT (₹21)
-          </button>
-        )}
-
-        <button
-          onClick={() => {
-            localStorage.removeItem("extensionEstimatePreview");
-            router.push("/extension-estimate");
-          }}
-          className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold ml-4" 
-        >
-          BACK TO INPUT
-        </button>
-      </div>
+      {/* ✅ NEW: PaymentBanner Component (Dynamic Pricing + Buttons) */}
+      <PaymentBanner
+        isPaid={isPaid}
+        isAlreadyPaid={isAlreadyPaid}
+        userCategory={userCategory}
+        isSaving={isSaving}
+        pricingLoading={pricingLoading}
+        gatewayFeeAmount={gatewayFeeAmount}
+        pricingDisplay={pricingDisplay}
+        onPrint={handleSaveAndPrint}
+        onPay={handleRazorpayPayment}
+        onBack={() => {
+          localStorage.removeItem("extensionEstimatePreview");
+          router.push("/extension-estimate");
+        }}
+      />
     </div>
   );
 }

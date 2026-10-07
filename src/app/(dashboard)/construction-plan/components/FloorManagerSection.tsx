@@ -1127,7 +1127,7 @@ export default function FloorManagerSection({
                 <button
                   type="button"
                   onClick={() => setMosEditorFloor(isMosOpen ? null : floor)}
-                  className="w-full bg-amber-600 text-white px-3 py-1.5 text-[10px] font-black uppercase"
+                  className="w-full bg-amber-600 text-white px-3 py-1.5 text-[9px] font-black uppercase"
                 >
                   {isMosOpen ? "CLOSE MOS" : "EDIT MOS"}
                 </button>
@@ -1354,11 +1354,11 @@ export default function FloorManagerSection({
                         <div className="border border-amber-600 p-3 bg-white grid grid-cols-2 sm:grid-cols-4 gap-3 items-center">
                           <div className="text-xs font-black text-amber-900 col-span-2 sm:col-span-4 uppercase border-b border-amber-300 pb-1 flex justify-between items-center">
                             <span>MOS & Position for {floor}</span>
-                            <span className="text-[10px] text-gray-600">Max: {plotFrontWidth}×{plotDepth} FT</span>
+                            <span className="text-[9px] text-gray-600">Max: {plotFrontWidth}×{plotDepth} FT</span>
                           </div>
                           {["front", "rear", "left", "right"].map((side) => (
                             <div key={side} className="flex flex-col gap-1">
-                              <span className="text-[10px] font-black">{side.toUpperCase()} MOS (FT)</span>
+                              <span className="text-[9px] font-black">{side.toUpperCase()} MOS (FT)</span>
                               <input
                                 type="number"
                                 min={0}

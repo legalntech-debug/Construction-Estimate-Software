@@ -8,6 +8,7 @@ import { getRoadOrientation } from "../engine/roadOrientation";
 import CadFloorElevationRenderer from "./CadFloorElevationRenderer";
 import CadToolbarSection from "./CadToolbarSection";
 import CadSidebarDimensions from "./CadSidebarDimensions";
+import { SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS } from "../engine/sectionEngine";
 
 export interface CadObject {
   id: string;
@@ -22,6 +23,10 @@ type CadTool =
   | "MOVE" | "COPY" | "ROTATE" | "DELETE" | "DIMENSION" | "TEXT" | "HATCH";
 
 interface CadModalViewProps {
+  sectionCuts?: SectionCutDef[];
+  setSectionCuts?: (cuts: SectionCutDef[]) => void;
+  elevationSides?: ElevationSide[];
+  setElevationSides?: (sides: ElevationSide[]) => void;
   isCadModalOpen: boolean;
   setIsCadModalOpen: (open: boolean) => void;
   plotShape: string;
@@ -98,6 +103,10 @@ interface CadModalViewProps {
 }
 
 export default function CadModalView({
+  sectionCuts: sectionCutsProp,
+  setSectionCuts: setSectionCutsProp,
+  elevationSides: elevationSidesProp,
+  setElevationSides: setElevationSidesProp,
   isCadModalOpen,
   setIsCadModalOpen,
   plotShape,
@@ -230,6 +239,13 @@ export default function CadModalView({
   }
   
   const [editModeToggle, setEditModeToggle] = useState<"PLOT" | "MOS">("PLOT");
+  // Section cuts (A-A, B-B ...) + which elevations to draw. Controlled by parent (so the PREVIEW gets them) or local fallback.
+  const [localCuts, setLocalCuts] = useState<SectionCutDef[]>(DEFAULT_SECTION_CUTS);
+  const [localSides, setLocalSides] = useState<ElevationSide[]>(["FRONT"]);
+  const sectionCuts = sectionCutsProp ?? localCuts;
+  const setSectionCuts = setSectionCutsProp ?? setLocalCuts;
+  const elevationSides = elevationSidesProp ?? localSides;
+  const setElevationSides = setElevationSidesProp ?? setLocalSides;
   const [localPan, setLocalPan] = useState<{ x: number; y: number }>(panOffset || { x: 0, y: 0 });
 
   // ✅ Ref to always hold latest localPan (for event handlers / effects with fixed deps)
@@ -844,6 +860,10 @@ export default function CadModalView({
                       floorRooms={floorRooms}
                       frontMos={sideMos.A ?? frontMos}
                       backMos={sideMos.B ?? rearMos}
+                      leftMos={sideMos.C ?? leftMos}
+                      rightMos={sideMos.D ?? rightMos}
+                      sectionCuts={sectionCuts}
+                      elevationSides={elevationSides}
                       measurementUnit={measurementUnit}
                     />
 
@@ -1133,6 +1153,10 @@ export default function CadModalView({
               handleSouthRoadChange={activeSouth ? handleSouthRoadChange : undefined}
               handleEastRoadChange={activeEast ? handleEastRoadChange : undefined}
               handleWestRoadChange={activeWest ? handleWestRoadChange : undefined}
+            sectionCuts={sectionCuts}
+            setSectionCuts={setSectionCuts}
+            elevationSides={elevationSides}
+            setElevationSides={setElevationSides}
             />
           </div>
         </div>

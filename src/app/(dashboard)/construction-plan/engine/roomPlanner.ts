@@ -359,6 +359,8 @@ type StairPlacement = {
   violations?: string[];
   /** Total deficiency score (0 = clean). Narrow plots me kam deficiency wala option jeet-ta hai */
   weight?: number;
+  /** Stair ke liye jin doors ko wall par khiskana padega (absolute plan coord, same door id sab rooms me) */
+  relocations?: Array<{ id: string; abs: number; axis: 'x' | 'y' }>;
 };
 
 /** Door / pehli riser ke samne kam se kam itna free chahiye (ft) */
@@ -398,7 +400,7 @@ function collectLivingAccess(living: FloorRoom, rooms: FloorRoom[]) {
   const L = asRect(living);
   const D = STAIR_CLEAR_DEPTH_FT;
   const T = 0.2;
-  const doorZones: Array<{ id: string; rect: Rect; seg: Rect }> = [];
+  const doorZones: Array<{ id: string; rect: Rect; seg: Rect; owner: FloorRoom; door: any }> = [];
   const openEdges: Array<{ id: string; seg: Rect; band: Rect; vertical: boolean }> = [];
 
   const bandFor = (seg: Rect): Rect | null => {
@@ -442,7 +444,7 @@ function collectLivingAccess(living: FloorRoom, rooms: FloorRoom[]) {
       if (!seg) continue;
       const rect = bandFor(seg);
       if (!rect) continue;
-      doorZones.push({ id: `${r.name}:${(d as any).id || (d as any).entryRole || d.wall}`, rect, seg });
+      doorZones.push({ id: `${r.name}:${(d as any).id || (d as any).entryRole || d.wall}`, rect, seg, owner: r, door: d });
     }
   }
 
@@ -472,6 +474,69 @@ function collectLivingAccess(living: FloorRoom, rooms: FloorRoom[]) {
  * Koi bhi corner pass na kare to sabse kam violation wala chuna jaata hai aur usable=false hota hai
  * (taaki warning dikhe, chup-chaap galat jagah stair na bane).
  */
+/**
+ * DOOR RELOCATION (smart planning): stair kisi door ke 3 ft zone me aaye to door ko usi wall par khisaka do.
+ * Door ke saare copies (jaise PARKING + LIVING ka shared door) ek hi absolute jagah par jaate hain.
+ * Free jagah mile to null nahi, relocation return hota hai; warna null (tab door "block" maana jayega).
+ */
+function tryRelocateDoor(
+  dz: { id: string; rect: Rect; seg: Rect; owner: FloorRoom; door: any },
+  stair: Rect,
+  zones: Array<{ id: string; rect: Rect; seg: Rect; owner: FloorRoom; door: any }>,
+  L: Rect,
+): { id: string; abs: number; axis: 'x' | 'y' } | null {
+  const doorId = dz.door && dz.door.id ? String(dz.door.id) : '';
+  if (!doorId) return null;
+  const horizontalWall = dz.seg.h === 0;
+  const axis: 'x' | 'y' = horizontalWall ? 'x' : 'y';
+  const wd = horizontalWall ? dz.seg.w : dz.seg.h;
+  const group = zones.filter(z => z.door && String(z.door.id) === doorId);
+  let lo = -Infinity, hi = Infinity;
+  for (const z of group) {
+    const R = asRect(z.owner);
+    const o0 = horizontalWall ? R.x : R.y, o1 = o0 + (horizontalWall ? R.w : R.h);
+    lo = Math.max(lo, o0); hi = Math.min(hi, o1);
+  }
+  const l0 = horizontalWall ? L.x : L.y, l1 = l0 + (horizontalWall ? L.w : L.h);
+  lo = Math.max(lo, l0) + 0.5; hi = Math.min(hi, l1) - 0.5 - wd;
+  if (hi < lo) return null;
+  const cur = horizontalWall ? dz.seg.x : dz.seg.y;
+  const bandAt = (a0: number): Rect => horizontalWall
+    ? { x: a0, y: dz.rect.y, w: wd, h: dz.rect.h }
+    : { x: dz.rect.x, y: a0, w: dz.rect.w, h: wd };
+  const segAt = (a0: number): Rect => horizontalWall ? { x: a0, y: dz.seg.y, w: wd, h: 0 } : { x: dz.seg.x, y: a0, w: 0, h: wd };
+  const cands: number[] = [];
+  for (let a = lo; a <= hi + 1e-6; a += 0.25) cands.push(Number(a.toFixed(2)));
+  cands.sort((p, q) => Math.abs(p - cur) - Math.abs(q - cur));
+  for (const a0 of cands) {
+    if (rectsOverlap(stair, bandAt(a0))) continue;
+    const sg = segAt(a0);
+    let clash = false;
+    for (const z of zones) {
+      if (z.door && String(z.door.id) === doorId) continue;
+      if (rectGap(sg, z.seg) < 0.6) { clash = true; break; }
+    }
+    if (!clash) return { id: doorId, abs: a0, axis };
+  }
+  return null;
+}
+
+/** chosen stair placement ki relocations ko rooms ke doors par apply karo (same door id = sab copies) */
+function applyDoorRelocations(rooms: FloorRoom[], placement: StairPlacement | null | undefined) {
+  if (!placement || !placement.relocations || !placement.relocations.length) return;
+  for (const rl of placement.relocations) {
+    for (const room of rooms) {
+      for (const d of (room.doors || [])) {
+        if (String((d as any).id) !== rl.id) continue;
+        const origin = rl.axis === 'x' ? (room.x || 0) : (room.y || 0);
+        (d as any).offsetFeet = Number((rl.abs - origin).toFixed(2));
+        (d as any).relocatedForStair = true;
+      }
+    }
+  }
+  console.log('[STAIR] doors relocated', placement.relocations);
+}
+
 function chooseStaircaseCorner(
   livingRoom: FloorRoom,
   stairW: number,
@@ -484,6 +549,8 @@ function chooseStaircaseCorner(
     rotated?: boolean;
     /** Upper floors par isi y par stair aa sake (front/rear bedroom depth + 4 ft passage) -> in corners ko tie-break me priority */
     upperRange?: { H: number; minBed: number; topP: number; botP: number };
+    /** true => stair ke raste me aane wale internal doors ko wall par khisaka sakte hain (universal ground builder) */
+    relocateDoors?: boolean;
   } = {},
 ): StairPlacement | null {
   void existingDoors; void stairType;
@@ -520,8 +587,17 @@ function chooseStaircaseCorner(
     for (const p of passages) {
       if (rectsOverlap(stair, asRect(p))) { violations.push('overlaps PASSAGE'); weight += 100; }
     }
+    const reloc: Array<{ id: string; abs: number; axis: 'x' | 'y' }> = [];
+    const relocDone = new Set<string>();
     for (const dz of doorZones) {
-      if (rectsOverlap(stair, dz.rect)) { violations.push(`blocks door ${dz.id}`); weight += 50; }
+      if (!rectsOverlap(stair, dz.rect)) continue;
+      const did = dz.door && dz.door.id ? String(dz.door.id) : '';
+      if (opts.relocateDoors && did) {
+        if (relocDone.has(did)) continue;
+        const rl = tryRelocateDoor(dz, stair, doorZones, L);
+        if (rl) { reloc.push(rl); relocDone.add(did); weight += 3; continue; }
+      }
+      violations.push(`blocks door ${dz.id}`); weight += 50;
     }
     for (const oe of openEdges) {
       if (!rectsOverlap(stair, oe.band)) continue;
@@ -582,6 +658,7 @@ function chooseStaircaseCorner(
         : violations.join('; '),
       entryClearance: entry,
       violations,
+      relocations: reloc,
     };
     // Upper floors par ye y feasible hai? (front bedroom >= minBed + passage, rear bedroom >= minBed + passage)
     let yPenalty = 0;
@@ -1105,6 +1182,8 @@ function buildUniversalGroundFloor(
   const isBigGround = ruleArea > 600;
   // ✅ Chhoti length (clear < 34 ft, jaise 15x30): service / bedroom depth thodi kam, living stair ke liye min 8.5
   const compactH = H < 34;
+  // ✅ SIZE-ADAPTIVE: bedrooms=[] => ground par bedroom zone nahi; living poori leftover depth leta hai (stair ke liye landing/access)
+  const noBedroom = bedrooms.length === 0;
 
   // ✅ FIX: Common toilet thoda bada + passage kam se kam 4 ft (W=10 -> toilet 6 x 5.5, passage 4)
   const MIN_PASSAGE_FT = 4;
@@ -1177,6 +1256,7 @@ function buildUniversalGroundFloor(
       }
     }
   }
+  if (noBedroom) livingH = Number((H - sizes.parking.h - ctH).toFixed(2));
   // ✅ Parking->Living door: SINGLE FRAME, parking width se 1 ft chhota (0.5 ft wall ke dono taraf),
 // kabhi 3.5 ft se bada nahi -> kitchen wali partition tak nahi jaata.
 const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).toFixed(2))));
@@ -1403,6 +1483,9 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
     console.warn('[ATTACHED TOILET] ground bedroom me bathroom ke baad furniture ka rectangle nahi bacha', narrowToilet.freeRect);
   }
 
+  const skipBedroom = noBedroom && rearH < 1.5;
+  let bedroomRoom: FloorRoom | undefined;
+  if (!skipBedroom) {
   addRoom(primaryBedroomKey, 0, rearY, bedW, rearH, {
     dimensionsFitted: true,
     privateZone: true, furnitureValidated: true,
@@ -1418,7 +1501,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
       },
     ],
   });
-  const bedroomRoom = rooms[rooms.length - 1];
+  bedroomRoom = rooms[rooms.length - 1];
 
   if (isMaster && hasAttached && bedroomRoom) {
     if (stackedAtt) {
@@ -1486,6 +1569,8 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
     }
   }
 
+  } // end if (!skipBedroom)
+
   // ============================================================
   // STEP 8: STAIR (Living Room ke andar) — ab PASSAGE/KITCHEN/PARKING bante ke BAAD
   // (pehle stair pehle place hoti thi, isliye passage/doors ka pata hi nahi tha -> access block)
@@ -1539,7 +1624,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
             if (solved.plan.shortTreads !== 0) continue;
             const nW = Number(solved.plan.usedCrossFt.toFixed(3));
             const nH = Number(solved.plan.usedRunFt.toFixed(3));
-            const pl = chooseStaircaseCorner(living, nW, nH, rooms, [], solved.spec.staircaseType, { upperRange });
+            const pl = chooseStaircaseCorner(living, nW, nH, rooms, [], solved.spec.staircaseType, { upperRange, relocateDoors: true });
             if (pl && pl.usable) {
               return {
                 fit: { ...base, spec: solved.spec, staircaseType: solved.spec.staircaseType },
@@ -1572,7 +1657,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
               const sW = Math.min(fit.spec.requiredWidthFt, lw);
               const sH = Math.min(fit.spec.requiredLengthFt, lh);
               if (sW < 3 || sH < 6) continue;
-              const placement = chooseStaircaseCorner(living, sW, sH, rooms, [], t, { upperRange });
+              const placement = chooseStaircaseCorner(living, sW, sH, rooms, [], t, { upperRange, relocateDoors: true });
               if (!placement) continue;
               const vNew = placement.weight ?? 9999;
               const vOld = best?.placement.weight ?? 9999;
@@ -1607,7 +1692,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
                 if (rW < 6 || rH < 3) continue;
                 // poori width wali rotated stair (wall-to-wall) tab hi allowed jab koi portrait option bacha hi na ho
                 if (rW > lw - STAIR_ENTRY_MIN_FT + 0.01) continue;   // rotated stair ke ek taraf 3.5 ft entry zaroori
-                const placement = chooseStaircaseCorner(living, rW, rH, rooms, [], t, { rotated: true, upperRange });
+                const placement = chooseStaircaseCorner(living, rW, rH, rooms, [], t, { rotated: true, upperRange, relocateDoors: true });
                 if (!placement) continue;
                 const vNew = placement.weight ?? 9999;
                 const vOld = best?.placement.weight ?? 9999;
@@ -1643,7 +1728,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
           if (solved.plan.shortTreads === 0) {
             const nCross = Number(solved.plan.usedCrossFt.toFixed(3)), nRun = Number(solved.plan.usedRunFt.toFixed(3));
             const nW = rot ? nRun : nCross, nH = rot ? nCross : nRun;
-            const np = chooseStaircaseCorner(living, nW, nH, rooms, [], solved.spec.staircaseType, { rotated: rot, upperRange });
+            const np = chooseStaircaseCorner(living, nW, nH, rooms, [], solved.spec.staircaseType, { rotated: rot, upperRange, relocateDoors: true });
             // naya (exact) footprint bhi usable ho tabhi lo; warna purana rect + sirf tread redistribution
             if (np && (np.usable || !b0.placement.usable)) {
               best = { ...b0, fit: { ...b0.fit, spec: solved.spec, staircaseType: solved.spec.staircaseType }, placement: np, sW: nW, sH: nH };
@@ -1669,6 +1754,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
           }
         }
         const { fit, placement, sW, sH } = best as Pick;
+        applyDoorRelocations(rooms, placement);
         console.log('[STAIR FIT]', {
           type: fit.staircaseType, extension: fit.extension,
           required: { w: fit.spec.requiredWidthFt, h: fit.spec.requiredLengthFt },
@@ -1707,7 +1793,139 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
 // ============================================================
 // 19. MAIN LAYOUT BUILDER
 // ============================================================
+
+/* =========================================================
+   SIZE-ADAPTIVE BEDROOM SPLIT (wide plots)
+   ---------------------------------------------------------
+   24 ft se chaude bedroom (jaise 39 ft ka master) genuine nahi lagta. Usse equal parts me todte hain:
+   har part ko apna circulation door (neighbor me counterpart door ke saath) + apna ATTACHED TOILET.
+   ========================================================= */
+const MAX_BEDROOM_W_FT = 24;
+function splitOversizedBedrooms(roomsIn: FloorRoom[], W: number, H: number, isTower: boolean): FloorRoom[] {
+  if (isTower) return roomsIn;
+  const rooms = roomsIn.slice();
+  const isBed = (r: any) => /BEDROOM/.test(String(r.name)) && !r.isSubRoom && !r.subZoneOf;
+  let serial = 800;
+  let bedNo = rooms.filter(isBed).length;
+  const snap = (v: number) => Math.round(v * 4) / 4;
+
+  for (const R of rooms.filter(isBed) as any[]) {
+    if (R.w <= MAX_BEDROOM_W_FT || R.h < 8) continue;
+    const n = Math.min(4, Math.ceil(R.w / MAX_BEDROOM_W_FT));
+    const x0 = R.x, wTot = R.w;
+    const edges: number[] = [x0];
+    for (let k = 1; k < n; k++) edges.push(snap(x0 + (wTot * k) / n));
+    edges.push(x0 + wTot);
+
+    // circulation door of the original room (BOTTOM / TOP wall) -> uska wall + width
+    const circDoors = (R.doors || []).filter((d: any) => d.wall === 'BOTTOM' || d.wall === 'TOP');
+    const circWall: 'BOTTOM' | 'TOP' = circDoors.length ? circDoors[0].wall : 'BOTTOM';
+    const origAttached = rooms.filter((t: any) => t.attachedTo === R.id || t.subZoneOf === R.id);
+    const hadToilet = origAttached.some((t: any) => /TOILET/.test(String(t.name)));
+    const doorsAll: any[] = (R.doors || []).slice();
+
+    const parts: any[] = [];
+    for (let k = 0; k < n; k++) {
+      const px = edges[k], pw = Number((edges[k + 1] - edges[k]).toFixed(3));
+      if (k === 0) {
+        R.w = pw; R.areaPerRoom = Number((pw * R.h).toFixed(2)); R.furniture = furnitureAssumptions(R.name, pw, R.h);
+        R.doors = []; parts.push(R);
+      } else {
+        const nm = /MASTER/.test(R.name) ? `BEDROOM ${++bedNo}` : `${R.name} ${k + 1}`;
+        const part: any = makeRoom(nm, serial++, px, R.y, pw, R.h, {
+          dimensionsFitted: true, privateZone: true, furnitureValidated: true, splitFrom: R.id, doors: [],
+        });
+        rooms.push(part); parts.push(part);
+      }
+    }
+
+    // --- circulation doors: purane door ko sahi part ko do, jis part me door nahi bacha usme naya
+    const lastRight: any[] = [];
+    for (const d of doorsAll) {
+      if (d.wall === 'LEFT') { parts[0].doors.push(d); continue; }
+      if (d.wall === 'RIGHT') { lastRight.push(d); continue; }
+      const cx = x0 + (d.offsetFeet || 0) + (d.widthFeet || 3) / 2;
+      let kk = parts.findIndex((pt: any) => cx >= pt.x - 1e-6 && cx < pt.x + pt.w - 1e-6);
+      if (kk < 0) kk = parts.length - 1;
+      const pt = parts[kk];
+      const off = Number(Math.max(0.3, Math.min((x0 + (d.offsetFeet || 0)) - pt.x, pt.w - (d.widthFeet || 3) - 0.3)).toFixed(2));
+      pt.doors.push({ ...d, offsetFeet: off });
+    }
+    parts[parts.length - 1].doors.push(...lastRight);
+
+    const passage: any = rooms.find((r: any) => r.name === 'PASSAGE');
+    for (let k = 0; k < parts.length; k++) {
+      const pt = parts[k];
+      if (pt.doors.some((d: any) => d.wall === circWall)) continue;
+      const dw = 3.0;
+      let absX = pt.x + Math.max(0.6, Math.min(pt.w / 2 - dw / 2, pt.w - dw - 0.6));
+      if (passage && pt.h) {
+        const lo = passage.x + 0.3, hi = passage.x + passage.w - dw - 0.3;
+        if (hi >= lo) absX = Math.max(lo, Math.min(absX, hi));
+        absX = Math.max(pt.x + 0.4, Math.min(absX, pt.x + pt.w - dw - 0.4));
+      }
+      const did = `${R.id}_split_door_${k}`;
+      const wallY = circWall === 'BOTTOM' ? pt.y + pt.h : pt.y;
+      pt.doors.push({ id: did, wall: circWall, widthFeet: dw, offsetFeet: Number((absX - pt.x).toFixed(2)),
+        doorType: 'INTERNAL', renderSymbol: true, swingInside: true, sharedOpeningId: did,
+        hingeSide: absX + dw / 2 > pt.x + pt.w / 2 ? 'END' : 'START' });
+      // counterpart (neighbor ke taraf) taaki wall me door ka gap dono taraf bane
+      const nb: any = rooms.find((r: any) => r !== pt && !/TOILET|DUCT|DRESSING/.test(String(r.name)) && (!r.isSubRoom || r.name === 'PASSAGE') &&
+        (circWall === 'BOTTOM' ? Math.abs((r.y || 0) - wallY) < 0.4 : Math.abs((r.y || 0) + (r.h || 0) - wallY) < 0.4) &&
+        absX + dw / 2 >= (r.x || 0) && absX + dw / 2 <= (r.x || 0) + (r.w || 0));
+      if (nb) {
+        nb.doors = nb.doors || [];
+        nb.doors.push({ id: did, wall: circWall === 'BOTTOM' ? 'TOP' : 'BOTTOM', widthFeet: dw, offsetFeet: Number((absX - (nb.x || 0)).toFixed(2)),
+          doorType: 'OPENING', renderSymbol: false, swingDirection: 'NONE', sharedOpeningId: did });
+      }
+    }
+
+    // --- attached toilets / dressing: x-center ke hisaab se part ko; jis part me toilet nahi, naya
+    const owner = (t: any) => {
+      const c = t.x + t.w / 2;
+      const kk = parts.findIndex((pt: any) => c >= pt.x - 1e-6 && c < pt.x + pt.w - 1e-6);
+      return parts[kk < 0 ? 0 : kk];
+    };
+    for (const t of origAttached as any[]) { const o = owner(t); t.attachedTo = o.id; t.subZoneOf = o.id; }
+    if (hadToilet) {
+      for (let k = 0; k < parts.length; k++) {
+        const pt = parts[k];
+        const has = rooms.some((t: any) => t.attachedTo === pt.id && /TOILET/.test(String(t.name)));
+        if (has) continue;
+        const tw = pt.w < 12 ? 5.5 : 6.5;
+        const th = Number(Math.max(5, Math.min(8, pt.h - 4.5)).toFixed(2));
+        if (pt.h - th < 4 || pt.w < 9) continue;
+        const atRight = k === parts.length - 1 || k > 0 && k < parts.length - 1 ? true : false;
+        const tx = atRight ? pt.x + pt.w - tw : pt.x;
+        const atTop = circWall === 'BOTTOM';
+        const ty = atTop ? pt.y : pt.y + pt.h - th;
+        const tid = `att_door_split_${k}_${serial}`;
+        const toilet: any = makeRoom('ATTACHED TOILET', serial++, tx, ty, tw, th, {
+          dimensionsFitted: true, attachedTo: pt.id, subZoneOf: pt.id, isSubRoom: true, serviceCore: true,
+          ventilationRequired: true, orientation: 'HORIZONTAL', placementRule: 'SPLIT_BEDROOM_CORNER',
+          doors: [{ id: tid, wall: atRight ? 'LEFT' : 'RIGHT', widthFeet: 2.5, offsetFeet: atTop ? 0.5 : Number((th - 3.0).toFixed(2)), doorType: 'TOILET', renderSymbol: true, swingInside: true }],
+          windows: [{ id: `att_vent_split_${k}`, wall: atTop ? 'TOP' : 'BOTTOM', lengthFeet: 2, offsetFeet: Number(Math.max(0.5, tw / 2 - 1).toFixed(2)) }],
+        });
+        rooms.push(toilet);
+      }
+    }
+  }
+  return rooms;
+}
+
 export function buildResidentialLayout(
+  ...args: Parameters<typeof buildResidentialLayoutCore>
+): FloorRoom[] {
+  const out = buildResidentialLayoutCore(...args);
+  try {
+    return splitOversizedBedrooms(out, args[2], args[3], !!args[10]);
+  } catch (e) {
+    console.warn('[SPLIT BEDROOMS] skipped', e);
+    return out;
+  }
+}
+
+function buildResidentialLayoutCore(
   program: string[],
   specs: RoomSpec[],
   W: number,
@@ -1847,15 +2065,20 @@ export function buildResidentialLayout(
     hasParking &&
     hasLiving &&
     W >= 8 &&
-    W <= 32 &&
+    W <= 90 &&
     // ✅ FIX: 15x30 / 10x30 me 4\" walls ke baad clear length = 29.33 ft -> pehle (H >= 30) koi branch match nahi hota tha (blank plan)
-    H >= 28 &&
-    H <= 60
+    H >= 16 &&
+    H <= 120
   ) {
+    // ✅ SIZE-ADAPTIVE ROOM PROGRAM: jagah kam ho to pehle ground bedroom (+attached toilet) hatao,
+    // taaki living deep ho jaye aur stair ke samne landing / access bache (architect ka standard reduce order)
+    const shortPlot = H < 28;
+    const narrowCompact = W < 16.5 && H < 36;
+    const reduce = shortPlot || narrowCompact;
     const result = buildUniversalGroundFloor(
       W, H,
-      hasParking, hasLiving, hasKitchen, hasKD, hasCommon, hasAttached,
-      bedrooms, stairSpec, parkingMode, stairEmbeddedInLiving,
+      hasParking, hasLiving, hasKitchen, hasKD, hasCommon && H >= 22, reduce ? false : hasAttached,
+      reduce ? [] : bedrooms, stairSpec, parkingMode, stairEmbeddedInLiving,
       addRoom, rooms, specs,
     );
     if (result) return result;
@@ -2099,7 +2322,7 @@ export function buildResidentialLayout(
   // ==========================================================
   // BRANCH 3: UPPER-FLOOR — BUNGALOW LAYOUT
   // ==========================================================
-   if (!hasParking && (hasStair || stairEmbeddedInLiving) && bedrooms.length >= 1 && W >= 6 && H >= 28) {
+   if (!hasParking && (hasStair || stairEmbeddedInLiving) && bedrooms.length >= 1 && W >= 6 && H >= 15) {
     console.log('[BUILD RESIDENTIAL LAYOUT] → BRANCH 3 (UPPER BUNGALOW)');
     let groundLivingY: number | null = null;
     if (groundStairPosition && groundStairRelativeOffset) {
@@ -2303,11 +2526,38 @@ export function buildResidentialLayout(
       return { Z: Zc, useFlush: flushOn, bothFlush: bothOn };
     };
 
-    let accessTier = 'STRICT_3_5FT';
+    let accessTier: string = 'STRICT_3_5FT';
     let zoning = planZoning(STAIR_ENTRY_MIN_FT);
     if (!zoning) { accessTier = 'MIN_3FT'; zoning = planZoning(STAIR_CLEAR_DEPTH_FT); }
     if (!zoning) { accessTier = 'LEGACY_NO_GUARANTEE'; zoning = planZoning(0)!; }
     let { Z, useFlush, bothFlush } = zoning;
+
+    // ------------------------------------------------------------
+    // ✅ COMPACT UPPER FLOOR (size-adaptive): 2 bedrooms + stair + passages fit hi nahi hote (H < ~35 ft)
+    // Tab: stair ground wali y par (alignment pakki), ek bedroom (+attached toilet) jahan >= 7.4 ft depth mile,
+    // baaki bachi jagah ko technical naam: road side = BALCONY, rear side = STUDY / UTILITY / WASH AREA.
+    // Entry side par 3.5 ft landing guaranteed.
+    // ------------------------------------------------------------
+    let compactUpper = false;
+    const COMPACT_MIN_BED = 7.4;
+    if (accessTier === 'LEGACY_NO_GUARANTEE' && !(bedrooms.length >= 4 && W >= 18)) {
+      const syC = wantedStairY !== null ? wantedStairY : (H - stairH) / 2;
+      const LAND = 3.5;
+      const tpC = (!stairRotatedUp && arrivalFace === 'TOP') ? LAND : 0;
+      const bpC = (!stairRotatedUp && arrivalFace !== 'TOP') ? LAND : 0;
+      let zy0 = Math.max(0, syC - tpC);
+      let zy1 = Math.min(H, syC + stairH + bpC);
+      if (zy0 < 3.5) zy0 = 0;                 // patli sliver lounge me absorb
+      if (H - zy1 < 3.5) zy1 = H;
+      Z = {
+        topP: tpC, botP: bpC, minBedDepth: COMPACT_MIN_BED, minY: zy0, maxY: zy0, stairY: syC,
+        zoneY0: Number(zy0.toFixed(3)), zoneH: Number((zy1 - zy0).toFixed(3)), rearY0: Number(zy1.toFixed(3)),
+        frontH: Number(zy0.toFixed(3)), rearH: Number((H - zy1).toFixed(3)), exact: true, feasible: true,
+      } as ZoneSol;
+      useFlush = false; bothFlush = false; compactUpper = true;
+      accessTier = 'COMPACT_LANDING_3_5FT';
+      console.log('[UPPER COMPACT] 1 bedroom + lounge layout', { W, H, stairY: syC, frontH: Z.frontH, rearH: Z.rearH });
+    }
     const entryClearFt = Number(entryDepthOf(Z).toFixed(2));
     const stairAccessWarning = entryClearFt < STAIR_CLEAR_DEPTH_FT - 0.01;
     if (stairAccessWarning) {
@@ -2446,13 +2696,47 @@ export function buildResidentialLayout(
       }
     };
 
+    // ---- compact upper: kaun si zone bedroom, kaun si leftover (technical naam)
+    const bothBedsC = compactUpper && bedrooms.length >= 2 && frontH >= COMPACT_MIN_BED && rearH >= COMPACT_MIN_BED;
+    const frontIsBedC = compactUpper && frontH >= COMPACT_MIN_BED && (bothBedsC || rearH < COMPACT_MIN_BED || frontH >= rearH);
+    const rearIsBedC = compactUpper && rearH >= COMPACT_MIN_BED && (bothBedsC || !frontIsBedC);
+    const stairX0C = stairXPre ?? 0;
+    // door ko stair ke bagal wali free strip me rakho (stair se flush zone ke liye)
+    const stripDoor = (dw: number): { gx: number } => {
+      const L = stairX0C, R = W - (stairX0C + stairW);
+      const useRight = R >= L;
+      const s0 = useRight ? stairX0C + stairW : 0, s1 = useRight ? W : stairX0C;
+      const gx = s1 - s0 >= dw + 0.3 ? s0 + (s1 - s0 - dw) / 2 : (useRight ? s0 : Math.max(0, s1 - dw));
+      return { gx: Math.max(0.2, Math.min(gx, W - dw - 0.2)) };
+    };
+    const flushBandC = (flushToStair: boolean) => {
+      if (!flushToStair) return undefined;
+      const dw = 2.8; const { gx } = stripDoor(dw);
+      return { band: [gx, gx + dw] as [number, number], doorW: dw };
+    };
+    const addLeftoverC = (name: string, y: number, h: number, doorWall: 'TOP' | 'BOTTOM', flushToStair: boolean) => {
+      if (h < 3.4) return;
+      const dw = 3.0; const gx = flushToStair ? stripDoor(dw).gx : Math.max(0.5, (W - dw) / 2);
+      addRoom(name, 0, y, W, h, {
+        dimensionsFitted: true, upperLeftover: true,
+        leftoverReason: 'COMPACT_PLOT_REMAINING_AREA',
+        doors: [{ id: `leftover_door_${name.toLowerCase().replace(/[^a-z]+/g, '_')}`, wall: doorWall, widthFeet: dw, offsetFeet: Number(gx.toFixed(2)), doorType: 'INTERNAL', renderSymbol: true, swingInside: true }],
+      });
+    };
+    // top zone (y=0 side) flush = entry BOTTOM (stair ka far end wall se laga); bottom zone flush = entry TOP / rotated
+    const topFlushC = Z.topP < 0.1, botFlushC = Z.botP < 0.1;
+
     // 1) FRONT BEDROOM (door wall = neeche, passage ki taraf)
     if (fourBeds) {
       const half = Number((W / 2).toFixed(3));
       buildUpperBedroom(bedrooms[0], 0, frontH, 'BOTTOM', 'FRONT_BUNGALOW_L', 'BUNGALOW_FRONT_ATTACHED', 0, half, false);
       buildUpperBedroom(bedrooms[1], 0, frontH, 'BOTTOM', 'FRONT_BUNGALOW_R', 'BUNGALOW_FRONT_ATTACHED', half, Number((W - half).toFixed(3)), true);
-    } else {
+    } else if (!compactUpper) {
       buildUpperBedroom(frontBedKey, 0, frontH, 'BOTTOM', 'FRONT_BUNGALOW', 'BUNGALOW_FRONT_ATTACHED', 0, W, false, flushSpec(true));
+    } else if (frontIsBedC) {
+      buildUpperBedroom(frontBedKey, 0, frontH, 'BOTTOM', 'FRONT_BUNGALOW', 'BUNGALOW_FRONT_ATTACHED', 0, W, false, flushBandC(topFlushC));
+    } else {
+      addLeftoverC(frontH >= 6 ? 'STUDY' : 'UTILITY / WASH AREA', 0, frontH, 'BOTTOM', topFlushC);
     }
 
     // 2) STAIR ZONE (living) — full width
@@ -2511,8 +2795,12 @@ export function buildResidentialLayout(
       const half = Number((W / 2).toFixed(3));
       buildUpperBedroom(bedrooms[2], rearY0, rearH, 'TOP', 'REAR_BUNGALOW_L', 'BUNGALOW_REAR_ATTACHED', 0, half, false);
       buildUpperBedroom(bedrooms[3], rearY0, rearH, 'TOP', 'REAR_BUNGALOW_R', 'BUNGALOW_REAR_ATTACHED', half, Number((W - half).toFixed(3)), true);
-    } else {
+    } else if (!compactUpper) {
       buildUpperBedroom(rearBedKey, rearY0, rearH, 'TOP', 'REAR_BUNGALOW', 'BUNGALOW_REAR_ATTACHED', 0, W, false, flushSpec(false));
+    } else if (rearIsBedC) {
+      buildUpperBedroom(rearBedKey, rearY0, rearH, 'TOP', 'REAR_BUNGALOW', 'BUNGALOW_REAR_ATTACHED', 0, W, false, flushBandC(botFlushC));
+    } else {
+      addLeftoverC('BALCONY', rearY0, rearH, 'TOP', botFlushC);
     }
 
     console.log('[UPPER FLOOR ZONING]', {

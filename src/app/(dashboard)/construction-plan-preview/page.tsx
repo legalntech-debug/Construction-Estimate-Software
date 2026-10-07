@@ -47,10 +47,46 @@ export default function ConstructionPlanPreview() {
     }
   }, []);
 
+   // ============================================================
+  // ✅ REOPEN DETECTION — ab 60-day / 15% rule bhi handle karta hai
+  //    (Exact hash match nahi — refNo DRAFT nahi hoga agar savedRef hai.
+  //    PaymentGateway khud checkReprintStatus() se verify karega.)
+  // ============================================================
   useEffect(() => {
-    try { localStorage.removeItem("constructionPlanRefNo"); } catch {}
-    setRefNo("DRAFT");
-  }, []);
+    if (!planData) return;
+    try {
+      const savedRefNo = localStorage.getItem("constructionPlanRefNo");
+      const reopenFlag = localStorage.getItem("constructionPlanReopen");
+
+      console.log("[REOPEN CHECK]", { savedRefNo, reopenFlag });
+
+      // ✅ CASE 1: Explicit reopen flag (verify/dashboard page se aaya) → ref restore
+      if (reopenFlag === "true" && savedRefNo && savedRefNo !== "DRAFT") {
+        console.log("[REOPEN] Explicit flag detected. Restoring refNo:", savedRefNo);
+        setRefNo(savedRefNo);
+        localStorage.removeItem("constructionPlanReopen");
+        return;
+      }
+
+      // ✅ CASE 2: savedRef maujood hai → usi ko use karo.
+      //    PaymentGateway.tsx me checkReprintStatus() khud decide karega:
+      //      - same data / ≤15% change / 60 din ke andar → direct print (no charge)
+      //      - >15% change ya 60+ din → naya payment
+      //    Isliye yahan ref delete MAT karo, warna reuse check skip ho jayega.
+      if (savedRefNo && savedRefNo !== "DRAFT") {
+        console.log("[REOPEN] Ref preserved for reuse check:", savedRefNo);
+        setRefNo(savedRefNo);
+        return;
+      }
+
+      // ✅ CASE 3: Koi saved ref nahi → fresh DRAFT
+      console.log("[NEW PLAN] No saved ref. Resetting to DRAFT");
+      setRefNo("DRAFT");
+    } catch (err) {
+      console.error("[REOPEN CHECK ERROR]", err);
+      setRefNo("DRAFT");
+    }
+  }, [planData]);
 
   // ============================================================
   // FETCH USER PROFILE
@@ -157,10 +193,24 @@ export default function ConstructionPlanPreview() {
 
   const safePlotArea = Number(plotArea) > 0 ? Number(plotArea) : (dimA * dimC);
 
-  const fMos = Number(frontMos || planData?.sideMos?.A || 0);
-  const rMos = Number(rearMos || planData?.sideMos?.B || 0);
-  const lMos = Number(leftMos || planData?.sideMos?.C || 0);
-  const rtMos = Number(rightMos || planData?.sideMos?.D || 0);
+  const pickNum = (...vals: any[]): number => {
+    for (const v of vals) { const n = Number(v); if (Number.isFinite(n) && n > 0) return n; }
+    return 0;
+  };
+  let fMos = pickNum(frontMos, planData?.sideMos?.A, planData?.mos?.A, planData?.mos?.front, planData?.frontMOS, planData?.front_mos, planData?.plotDimensions?.frontMos);
+  const rMos = pickNum(rearMos, planData?.sideMos?.B, planData?.mos?.B, planData?.mos?.rear, planData?.rearMOS, planData?.rear_mos, planData?.plotDimensions?.rearMos);
+  const lMos = pickNum(leftMos, planData?.sideMos?.C, planData?.mos?.C, planData?.mos?.left, planData?.leftMOS, planData?.left_mos, planData?.plotDimensions?.leftMos);
+  const rtMos = pickNum(rightMos, planData?.sideMos?.D, planData?.mos?.D, planData?.mos?.right, planData?.rightMOS, planData?.right_mos, planData?.plotDimensions?.rightMos);
+  // FALLBACK: MOS data localStorage me save nahi hua, par ground floor plot se chhota hai -> front MOS maano
+  if (fMos === 0 && rMos === 0 && lMos === 0 && rtMos === 0) {
+    const gfRaw = planData?.floorData?.["GROUND FLOOR"] || {};
+    let gW = Number(gfRaw.width) || 0, gL = Number(gfRaw.length) || 0;
+    if (gW > gL) { const t = gW; gW = gL; gL = t; }
+    if (gL > 0 && gL < dimC - 0.01) fMos = Math.round((dimC - gL) * 100) / 100;
+  }
+  if (typeof window !== "undefined" && planData) {
+    console.log("[MOS DEBUG]", { frontMos, rearMos, leftMos, rightMos, sideMos: planData?.sideMos, resolved: { fMos, rMos, lMos, rtMos }, keys: Object.keys(planData) });
+  }
 
   const builtWidth = dimA - lMos - rtMos;
   const builtLength = dimC - fMos - rMos;
@@ -212,10 +262,7 @@ export default function ConstructionPlanPreview() {
     const interFloorGap = 15 * scale;
     const rowHeightGap = plotH + 25 * scale;
     const MANUAL_ELEV_Y_OFFSET = -25 * scale;
-    const MANUAL_TABLE_Y_OFFSET = -55 * scale;
     const sectionGap = 40 * scale;
-    const tableGap = 70 * scale;
-    const tableWidth = plotW + 50 * scale;
     const floorCount = (selectedFloors || []).length || 1;
     const itemsPerRow = floorCount > 6 ? 4 : 3;
 
@@ -235,18 +282,16 @@ export default function ConstructionPlanPreview() {
     const elevationStartX = leftmostX;
     const elevationRowStartY = topmostY + MANUAL_ELEV_Y_OFFSET;
     const plotLeftX = elevationStartX - 30;
-    const tableRightX = elevationStartX + plotW + sectionGap + plotH + tableGap + tableWidth + 30;
-    const tableTopY = elevationRowStartY + MANUAL_TABLE_Y_OFFSET - 30;
+    const tableRightX = elevationStartX + plotW + sectionGap + plotH + 30; // structural table hata di gayi
+    const tableTopY = elevationRowStartY - 30;
     const maxRows = Math.ceil(floorCount / itemsPerRow);
     const plotBottomY = topmostY + (maxRows - 1) * rowHeightGap + plotH / 2 + 40;
     const drawingW = tableRightX - plotLeftX;
     const drawingH = plotBottomY - tableTopY;
     const drawingCenterX = (plotLeftX + tableRightX) / 2;
     const drawingCenterY = (tableTopY + plotBottomY) / 2;
-    const horizontalBiasX = drawingW * 0.1;
-    const verticalBiasY = drawingH * -0.15;
-    const finalCenterX = drawingCenterX - horizontalBiasX;
-    const finalCenterY = drawingCenterY - verticalBiasY;
+    const finalCenterX = drawingCenterX;
+    const finalCenterY = drawingCenterY;
     const targetAspect = 1.18;
     const currentAspect = drawingW / drawingH;
     let finalW = drawingW;
@@ -481,12 +526,15 @@ export default function ConstructionPlanPreview() {
     }
   }, [refNo, payment.isAdminUser]);
 
-  const handlePrintClick = useCallback(async () => {
+    const handlePrintClick = useCallback(async () => {
+    // ✅ Reuse check pending ho to wait karo
+    if (payment.reuseChecking) return;
+
     if (!canPrint) { payment.handlePayment(); return; }
     const verified = await verifyPaidOnServer();
     if (!verified) { alert("🔒 Server verification failed."); return; }
     setTimeout(() => window.print(), 200);
-  }, [canPrint, payment, verifyPaidOnServer]);
+  }, [payment.reuseChecking, canPrint, payment, verifyPaidOnServer]);
 
   // ============================================================
   // PRINT FIT
@@ -497,46 +545,100 @@ export default function ConstructionPlanPreview() {
   useEffect(() => {
     if (loading) return;
     let alive = true;
+    let raf = 0;
     const measure = () => {
       if (!alive) return;
       const g = drawingRef.current;
       if (!g) return;
       try {
-        const b = g.getBBox();
-        if (![b.x, b.y, b.width, b.height].every(Number.isFinite) || b.width <= 0 || b.height <= 0) return;
-        if (b.width > autoFitViewBox.w * 3 || b.height > autoFitViewBox.h * 3 || b.width < autoFitViewBox.w * 0.15) return;
+        const rootCtm = g.getCTM();
+        if (!rootCtm) return;
+        const inv = rootCtm.inverse();
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        const els = g.querySelectorAll("line,path,polyline,polygon,rect,circle,ellipse,text,image");
+        els.forEach((node) => {
+          const el = node as unknown as SVGGraphicsElement;
+          // hatch lines clip hote hain par bbox badha dete hain -> ignore
+          if (el.tagName.toLowerCase() === "line" && el.closest("[clip-path]")) return;
+          if (el.closest("defs,clipPath,pattern,marker,mask")) return;
+          let bb: DOMRect;
+          try { bb = el.getBBox(); } catch { return; }
+          if (!Number.isFinite(bb.x) || (bb.width === 0 && bb.height === 0)) return;
+          const ctm = el.getCTM();
+          if (!ctm) return;
+          const m = inv.multiply(ctm);
+          const pts = [
+            [bb.x, bb.y], [bb.x + bb.width, bb.y],
+            [bb.x, bb.y + bb.height], [bb.x + bb.width, bb.y + bb.height],
+          ];
+          pts.forEach(([px, py]) => {
+            const tx = m.a * px + m.c * py + m.e;
+            const ty = m.b * px + m.d * py + m.f;
+            if (tx < x0) x0 = tx; if (tx > x1) x1 = tx;
+            if (ty < y0) y0 = ty; if (ty > y1) y1 = ty;
+          });
+        });
+        const w = x1 - x0, h = y1 - y0;
+        if (![x0, y0, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return;
         setContentBox((prev) =>
-          prev && Math.abs(prev.x - b.x) < 0.5 && Math.abs(prev.y - b.y) < 0.5 &&
-          Math.abs(prev.w - b.width) < 0.5 && Math.abs(prev.h - b.height) < 0.5
-            ? prev : { x: b.x, y: b.y, w: b.width, h: b.height }
+          prev && Math.abs(prev.x - x0) < 0.5 && Math.abs(prev.y - y0) < 0.5 &&
+          Math.abs(prev.w - w) < 0.5 && Math.abs(prev.h - h) < 0.5
+            ? prev : { x: x0, y: y0, w, h }
         );
       } catch {}
     };
-    const raf = requestAnimationFrame(measure);
-    const t1 = setTimeout(measure, 250);
-    const t2 = setTimeout(measure, 1000);
+    const schedule = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    };
+    schedule();
+    const timers = [150, 400, 900, 1800, 3500].map((t) => setTimeout(measure, t));
+    // renderer baad me draw kare to bhi dobara measure ho
+    let mo: MutationObserver | null = null;
+    if (drawingRef.current && typeof MutationObserver !== "undefined") {
+      mo = new MutationObserver(schedule);
+      mo.observe(drawingRef.current, { childList: true, subtree: true, attributes: true });
+    }
     window.addEventListener("beforeprint", measure);
     return () => {
       alive = false;
       cancelAnimationFrame(raf);
-      clearTimeout(t1);
-      clearTimeout(t2);
+      timers.forEach(clearTimeout);
+      mo?.disconnect();
       window.removeEventListener("beforeprint", measure);
     };
-  }, [loading, planData, floorRooms, normalizedSelectedFloors, normalizedFloorData, autoFitViewBox, canPrint, measurementUnit]);
+  }, [loading, planData, floorRooms, normalizedSelectedFloors, normalizedFloorData, canPrint, measurementUnit]);
 
   const viewBoxFit = useMemo(() => {
     if (!contentBox) return autoFitViewBox;
     const pad = Math.max(8, Math.max(contentBox.w, contentBox.h) * 0.012);
-    return { x: contentBox.x - pad, y: contentBox.y - pad, w: contentBox.w + pad * 2, h: contentBox.h + pad * 2 };
-  }, [contentBox, autoFitViewBox]);
+    const baseH = contentBox.h + pad * 2;
+    // header bar (top) drawing ke upar na aaye; unpaid me red footer bar bhi alag jagah le
+    const topExtra = baseH * 0.06;
+    const bottomExtra = canPrint ? 0 : baseH * 0.07;
+    return {
+      x: contentBox.x - pad,
+      y: contentBox.y - pad - topExtra,
+      w: contentBox.w + pad * 2,
+      h: baseH + topExtra + bottomExtra,
+    };
+  }, [contentBox, autoFitViewBox, canPrint]);
 
   // ============================================================
   // DYNAMIC SHEET SIZE
   // ============================================================
   const sheet = useMemo(() => {
     const MARGIN = 4, GAP = 3, PAD = 2, SIDEBAR = 66;
-    const MIN_W = 297, MIN_SHEET_H_MM = 175, TARGET_MM_PER_UNIT = 0.18;
+    const MIN_W = 297, TARGET_MM_PER_UNIT = 0.18;
+    // sidebar ki content (wrapped name/address, floors, boundaries) poori aaye isliye height estimate
+    const LINE_CH = 24;
+    const nameLines = Math.max(1, Math.ceil(String(customerName || "").length / LINE_CH));
+    const addrLines = Math.max(1, Math.ceil(String(propertyAddress || "").length / LINE_CH));
+    const extraLines = cityDistrictFromData ? 1 : 0;
+    const boundLines = 0;
+    const floorsCount = (normalizedSelectedFloors || []).length || 1;
+    const sidebarNeedMM = 140 + floorsCount * 5.5 + (nameLines + addrLines + extraLines + boundLines) * 3.6;
+    const MIN_SHEET_H_MM = Math.max(210, Math.ceil(sidebarNeedMM + 2 * MARGIN + 2 * PAD));
     const MAX_W = 841, MAX_H = 1189;
     let sheetW = MIN_W;
     let drawW = sheetW - 2 * MARGIN - SIDEBAR - GAP - 2 * PAD;
@@ -554,7 +656,7 @@ export default function ConstructionPlanPreview() {
       innerW: r(sheetW - 2 * MARGIN), innerH: r(sheetH - 2 * MARGIN),
       canvasW: r(sheetW - 2 * MARGIN - SIDEBAR - GAP),
     };
-  }, [viewBoxFit]);
+  }, [viewBoxFit, customerName, propertyAddress, cityDistrictFromData, selectedClientNameFromData, representativeFromData, boundaries, normalizedSelectedFloors]);
 
   // ============================================================
   // 🛡️ UNIQUE DRAFT WATERMARK TEXT
@@ -564,6 +666,16 @@ export default function ConstructionPlanPreview() {
     const user = currentUser?.email || "GUEST";
     return `DRAFT • NOT FOR CONSTRUCTION • ${user} • ${date}`;
   }, [currentUser]);
+
+  // ============================================================
+  // ✅ QR CODE VALUE (safe for SSR)
+  // ============================================================
+  const qrVerifyUrl = useMemo(() => {
+    const origin = typeof window !== "undefined"
+      ? window.location.origin
+      : "https://your-production-domain.com";
+    return `${origin}/verify-estimate?ref=${encodeURIComponent(refNo || "PENDING")}`;
+  }, [refNo]);
 
   if (loading) {
     return (
@@ -679,29 +791,52 @@ export default function ConstructionPlanPreview() {
         </div>
       )}
 
-      {/* ACTION HEADER */}
+            {/* ACTION HEADER */}
       <div className={`${isMobile ? "max-w-full" : "max-w-[1600px] mx-auto"} flex flex-wrap justify-between items-center bg-slate-800 text-white ${isMobile ? "p-1.5 gap-1" : "p-2.5 mb-2 gap-2"} rounded shadow print:hidden border border-slate-700`}>
-        <button onClick={() => router.back()} className={`bg-slate-700 hover:bg-slate-600 text-white ${isMobile ? "px-2 py-1 text-[10px]" : "px-3 py-1.5 text-xs"} font-bold transition rounded cursor-pointer`}>
+        <button
+          onClick={() => router.back()}
+          className={`bg-slate-700 hover:bg-slate-600 text-white ${isMobile ? "px-2 py-1 text-[10px]" : "px-3 py-1.5 text-xs"} font-bold transition rounded cursor-pointer`}
+        >
           ← BACK
         </button>
+
         <h1 className={`${isMobile ? "text-[10px]" : "text-xs"} font-black tracking-wider text-amber-400`}>
           CONSTRUCTION CAD PLAN PREVIEW
         </h1>
+
         <button
           onClick={handlePrintClick}
-          disabled={payment.paymentLoading || (!payment.scriptLoaded && !canPrint) || payment.pricingLoading}
+          disabled={
+            payment.reuseChecking ||
+            payment.paymentLoading ||
+            (!payment.scriptLoaded && !canPrint) ||
+            payment.pricingLoading
+          }
           className={`${isMobile ? "px-2 py-1 text-[10px]" : "px-4 py-1.5 text-xs"} font-bold transition rounded cursor-pointer ${
-            payment.paymentLoading || (!payment.scriptLoaded && !canPrint) || payment.pricingLoading
+            payment.reuseChecking ||
+            payment.paymentLoading ||
+            (!payment.scriptLoaded && !canPrint) ||
+            payment.pricingLoading
               ? "bg-gray-400 cursor-not-allowed"
-              : canPrint ? "bg-blue-600 hover:bg-blue-700"
-              : payment.isAdminUser ? "bg-purple-600 hover:bg-purple-700"
+              : canPrint
+              ? "bg-blue-600 hover:bg-blue-700"
+              : payment.isAdminUser
+              ? "bg-purple-600 hover:bg-purple-700"
               : "bg-emerald-600 hover:bg-emerald-700"
           } text-white`}
         >
-          {payment.pricingLoading ? "LOADING PRICE..."
-            : payment.paymentLoading ? "PROCESSING..."
-            : canPrint ? "🖨️ PRINT NOW"
-            : payment.isAdminUser ? "🖨️ FREE (ADMIN)"
+          {payment.reuseChecking
+            ? "CHECKING PREVIOUS RECORD..."
+            : payment.pricingLoading
+            ? "LOADING PRICE..."
+            : payment.paymentLoading
+            ? "PROCESSING..."
+            : canPrint
+            ? payment.reuseStatus?.type === "reuse_same" || payment.reuseStatus?.type === "reuse_minor"
+              ? "🖨️ PRINT (NO CHARGE)"
+              : "🖨️ PRINT NOW"
+            : payment.isAdminUser
+            ? "🖨️ FREE (ADMIN)"
             : `💳 PAY ₹${payment.price || 0} & PRINT`}
         </button>
       </div>
@@ -783,6 +918,51 @@ export default function ConstructionPlanPreview() {
                   handlePolygonClick={() => {}}
                 />
 
+                {/* MOS dimension + labels (CAD ke SITE LAYOUT jaisa) */}
+                {!(fMos === 0 && rMos === 0 && lMos === 0 && rtMos === 0) && (() => {
+                  const [bTL, bTR, bBR, bBL] = builtUpPoints;
+                  const lbl = (txt: string, x: number, y: number, rot = false) => (
+                    <text x={x} y={y} fill="#000" fontSize="7" fontWeight="900" textAnchor="middle" dominantBaseline="middle"
+                      transform={rot ? `rotate(-90, ${x}, ${y})` : undefined}>{txt}</text>
+                  );
+                  return (
+                    <g>
+                      {rMos > 0 && (() => { const dx = pTopLeft.x - 5.5, my = (pTopLeft.y + bTL.y) / 2; return (
+                        <g>
+                          <line x1={dx} y1={pTopLeft.y} x2={dx} y2={bTL.y} stroke="#000" strokeWidth="1" />
+                          <polygon points={`${dx},${pTopLeft.y} ${dx - 3},${pTopLeft.y + 6} ${dx + 3},${pTopLeft.y + 6}`} fill="#000" />
+                          <polygon points={`${dx},${bTL.y} ${dx - 3},${bTL.y - 6} ${dx + 3},${bTL.y - 6}`} fill="#000" />
+                          <text x={dx - 10} y={my} fill="#000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dx - 10}, ${my})`}>{rMos}'</text>
+                          {lbl("REAR MOS", (bTL.x + bTR.x) / 2, my)}
+                        </g>); })()}
+                      {fMos > 0 && (() => { const dx = pBottomLeft.x - 5.5, my = (pBottomLeft.y + bBL.y) / 2; return (
+                        <g>
+                          <line x1={dx} y1={pBottomLeft.y} x2={dx} y2={bBL.y} stroke="#000" strokeWidth="1" />
+                          <polygon points={`${dx},${pBottomLeft.y} ${dx - 3},${pBottomLeft.y - 6} ${dx + 3},${pBottomLeft.y - 6}`} fill="#000" />
+                          <polygon points={`${dx},${bBL.y} ${dx - 3},${bBL.y + 6} ${dx + 3},${bBL.y + 6}`} fill="#000" />
+                          <text x={dx - 10} y={my} fill="#000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle" transform={`rotate(-90, ${dx - 10}, ${my})`}>{fMos}'</text>
+                          {lbl("FRONT MOS", (bBL.x + bBR.x) / 2, my)}
+                        </g>); })()}
+                      {lMos > 0 && (() => { const dy = pTopLeft.y - 5.5, mx = (pTopLeft.x + bTL.x) / 2; return (
+                        <g>
+                          <line x1={pTopLeft.x} y1={dy} x2={bTL.x} y2={dy} stroke="#000" strokeWidth="1" />
+                          <polygon points={`${pTopLeft.x},${dy} ${pTopLeft.x + 6},${dy - 3} ${pTopLeft.x + 6},${dy + 3}`} fill="#000" />
+                          <polygon points={`${bTL.x},${dy} ${bTL.x - 6},${dy - 3} ${bTL.x - 6},${dy + 3}`} fill="#000" />
+                          <text x={mx} y={dy - 8} fill="#000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">{lMos}'</text>
+                          {lbl("LEFT MOS", mx, (bTL.y + bBL.y) / 2, true)}
+                        </g>); })()}
+                      {rtMos > 0 && (() => { const dy = pTopRight.y - 5.5, mx = (pTopRight.x + bTR.x) / 2; return (
+                        <g>
+                          <line x1={pTopRight.x} y1={dy} x2={bTR.x} y2={dy} stroke="#000" strokeWidth="1" />
+                          <polygon points={`${pTopRight.x},${dy} ${pTopRight.x + 6},${dy - 3} ${pTopRight.x + 6},${dy + 3}`} fill="#000" />
+                          <polygon points={`${bTR.x},${dy} ${bTR.x - 6},${dy - 3} ${bTR.x - 6},${dy + 3}`} fill="#000" />
+                          <text x={mx} y={dy - 8} fill="#000" fontSize="8" fontWeight="900" textAnchor="middle" dominantBaseline="middle">{rtMos}'</text>
+                          {lbl("RIGHT MOS", mx, (bTR.y + bBR.y) / 2, true)}
+                        </g>); })()}
+                    </g>
+                  );
+                })()}
+
                 {(() => {
                   const builtUpCenterX = builtUpPoints.reduce((sum, p) => sum + p.x, 0) / builtUpPoints.length;
                   const builtUpCenterY = builtUpPoints.reduce((sum, p) => sum + p.y, 0) / builtUpPoints.length;
@@ -826,6 +1006,10 @@ export default function ConstructionPlanPreview() {
                   floorRooms={floorRooms || planData?.floorRooms || {}}
                   frontMos={fMos}
                   backMos={rMos}
+                  leftMos={lMos}
+                  rightMos={rtMos}
+                  sectionCuts={planData?.sectionCuts}
+                  elevationSides={planData?.elevationSides}
                   measurementUnit={measurementUnit}
                 />
 
@@ -987,10 +1171,6 @@ export default function ConstructionPlanPreview() {
               </g>
             </svg>
           </div>
-
-          <div className={`border-t border-black pt-1 text-center ${isMobile ? "text-[8px]" : "text-[9px]"} text-gray-600 font-bold print:hidden`}>
-            AUTOMATICALLY GENERATED DYNAMIC CAD DRAWING SHEET
-          </div>
         </div>
 
         {/* RIGHT SIDEBAR */}
@@ -1015,8 +1195,11 @@ export default function ConstructionPlanPreview() {
 
             <div className={`border border-black ${isMobile ? "p-1.5" : "p-2.5"} mb-2 bg-gray-50`}>
               <div className={`font-bold border-b border-black pb-1 mb-1 ${isMobile ? "text-[10px]" : "text-xs"}`}>CUSTOMER & LOCATION DETAILS</div>
-              <div className="truncate"><strong>NAME:</strong> {customerName}</div>
-              <div className="truncate"><strong>ADDRESS:</strong> {propertyAddress}</div>
+              <div className="break-words whitespace-normal leading-snug"><strong>NAME:</strong> {customerName}</div>
+              <div className="break-words whitespace-normal leading-snug mt-0.5"><strong>ADDRESS:</strong> {propertyAddress}</div>
+              {cityDistrictFromData && (
+                <div className="break-words whitespace-normal leading-snug mt-0.5"><strong>CITY / DISTRICT:</strong> {cityDistrictFromData}</div>
+              )}
             </div>
 
             <div className={`border border-black ${isMobile ? "p-1.5" : "p-2.5"} mb-2 bg-gray-50`}>
@@ -1058,10 +1241,13 @@ export default function ConstructionPlanPreview() {
               <>
                 <div className="flex flex-row items-center justify-between gap-2 p-1">
                   <div className="flex flex-col items-center shrink-0">
+                    {/* ✅ FIXED QR CODE — Uses window.location.origin + correct route */}
                     <QRCodeSVG
-                      value={`https://construction-estimate-software.vercel.app/verify-plan?ref=${encodeURIComponent(refNo || "PENDING")}`}
+                      value={qrVerifyUrl}
                       size={isMobile ? 55 : 75}
                       level="M"
+                      bgColor="#ffffff"
+                      fgColor="#000000"
                     />
                     <p className={`${isMobile ? "text-[6px]" : "text-[7px]"} mt-1 text-gray-500 font-bold text-center`}>SCAN TO VERIFY</p>
                   </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS } from "../engine/sectionEngine";
 import { useRouter } from "next/navigation";
 import ClientDetailsSection from "../components/ClientDetailsSection";
 import PlotConfigSection from "../components/PlotConfigSection";
@@ -39,6 +40,9 @@ const FLOOR_SEQUENCE = [
 export default function ConstructionPlanInput() {
   const router = useRouter();
   const [caseType, setCaseType] = useState("CONSTRUCTION PLAN");
+  // Section / Elevation configuration (shared by CAD modal AND saved to the preview)
+  const [sectionCuts, setSectionCuts] = useState<SectionCutDef[]>(DEFAULT_SECTION_CUTS);
+  const [elevationSides, setElevationSides] = useState<ElevationSide[]>(["FRONT"]);
   const [feeMode, setFeeMode] = useState<"AUTO" | "MANUAL">("AUTO");
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
@@ -735,6 +739,8 @@ export default function ConstructionPlanInput() {
       });
 
       const inputPayload = {
+        sectionCuts,
+        elevationSides,
         caseType,
         feeMode,
         manualFee,
@@ -1107,6 +1113,10 @@ export default function ConstructionPlanInput() {
         selectedFloors={selectedFloors}
         floorBuiltUpAreas={floorBuiltUpAreas}
         floorData={enrichedFloorData}
+        sectionCuts={sectionCuts}
+        setSectionCuts={setSectionCuts}
+        elevationSides={elevationSides}
+        setElevationSides={setElevationSides}
         
         frontMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.front}
         rearMos={coverageType === "100_PERCENT" ? 0 : setbackInputs.rear}

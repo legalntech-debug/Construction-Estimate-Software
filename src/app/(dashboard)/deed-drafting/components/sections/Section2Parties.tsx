@@ -1,6 +1,7 @@
 'use client';
 
 import React from "react";
+import TransliterateInput from "../TransliterateInput";
 
 interface Section2Props {
   formData: any;
@@ -126,31 +127,39 @@ export default function Section2Parties({ formData, setFormData }: Section2Props
                 )}
               </div>
               
-              {/* Name field converted to resizable textarea for multi-name support */}
-              <textarea 
-                placeholder={labels.namePlaceholder} 
-                value={seller.name} 
+              {/* ✅ Name field with auto-transliteration */}
+              <TransliterateInput
+                type="textarea"
+                rows={1}
+                name="name"
+                value={seller.name}
                 onChange={(e) => {
                   const updated = [...formData.sellers];
                   updated[index].name = e.target.value;
                   setFormData((prev: any) => ({ ...prev, sellers: updated }));
-                }} 
-                className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold uppercase resize-y min-h-[42px]" 
-                rows={1}
-                required 
+                }}
+                outputLanguage={formData.outputLanguage}
+                placeholder={labels.namePlaceholder}
+                className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold resize-y min-h-[42px]"
+                uppercase
+                required
               />
               
-              {/* Details field with vertical resize enabled */}
-              <textarea 
-                placeholder={labels.detailsPlaceholder} 
-                value={seller.details} 
+              {/* ✅ Details field with auto-transliteration */}
+              <TransliterateInput
+                type="textarea"
+                rows={2}
+                name="details"
+                value={seller.details}
                 onChange={(e) => {
                   const updated = [...formData.sellers];
                   updated[index].details = e.target.value;
                   setFormData((prev: any) => ({ ...prev, sellers: updated }));
-                }} 
-                className="w-full p-2 border rounded text-xs sm:text-sm bg-white resize-y min-h-[64px] uppercase" 
-                rows={2}
+                }}
+                outputLanguage={formData.outputLanguage}
+                placeholder={labels.detailsPlaceholder}
+                className="w-full p-2 border rounded text-xs sm:text-sm bg-white resize-y min-h-[64px]"
+                uppercase
               />
             </div>
           ))}
@@ -180,31 +189,39 @@ export default function Section2Parties({ formData, setFormData }: Section2Props
                 )}
               </div>
 
-              {/* Name field converted to resizable textarea for multi-name support */}
-              <textarea 
-                placeholder={labels.namePlaceholder} 
-                value={buyer.name} 
+              {/* ✅ Name field with auto-transliteration */}
+              <TransliterateInput
+                type="textarea"
+                rows={1}
+                name="name"
+                value={buyer.name}
                 onChange={(e) => {
                   const updated = [...formData.buyers];
                   updated[index].name = e.target.value;
                   setFormData((prev: any) => ({ ...prev, buyers: updated }));
-                }} 
-                className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold uppercase resize-y min-h-[42px]" 
-                rows={1}
-                required 
+                }}
+                outputLanguage={formData.outputLanguage}
+                placeholder={labels.namePlaceholder}
+                className="w-full p-2 border rounded text-xs sm:text-sm bg-white font-semibold resize-y min-h-[42px]"
+                uppercase
+                required
               />
 
-              {/* Details field with vertical resize enabled */}
-              <textarea 
-                placeholder={labels.detailsPlaceholder} 
-                value={buyer.details} 
+              {/* ✅ Details field with auto-transliteration */}
+              <TransliterateInput
+                type="textarea"
+                rows={2}
+                name="details"
+                value={buyer.details}
                 onChange={(e) => {
                   const updated = [...formData.buyers];
                   updated[index].details = e.target.value;
                   setFormData((prev: any) => ({ ...prev, buyers: updated }));
-                }} 
-                className="w-full p-2 border rounded text-xs sm:text-sm bg-white resize-y min-h-[64px] uppercase" 
-                rows={2}
+                }}
+                outputLanguage={formData.outputLanguage}
+                placeholder={labels.detailsPlaceholder}
+                className="w-full p-2 border rounded text-xs sm:text-sm bg-white resize-y min-h-[64px]"
+                uppercase
               />
             </div>
           ))}

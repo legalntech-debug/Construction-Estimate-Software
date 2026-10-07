@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import "./print.css";
 import { QRCodeSVG } from 'qrcode.react';
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
+import { getItemRate } from "@/lib/pricing";
 
 
 const slabConfig: any = {
@@ -95,6 +97,25 @@ export default function EstimatePreviewPage() {
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
   // Smart Change Tracking Ref
   const initialEstimateRef = useRef<any>(null);
+  // ✅ NEW: State-wise dynamic pricing (from pricing_config DB)
+  const [gatewayFeeAmount, setGatewayFeeAmount] = useState<number>(21); // fallback
+  const [pricingDisplay, setPricingDisplay] = useState<{
+    mrp: number;
+    price: number;
+    discountEnabled: boolean;
+    discountPercent: number;
+    savings: number;
+    isFromDB: boolean;
+  }>({
+    mrp: 120,
+    price: 21,
+    discountEnabled: true,
+    discountPercent: 82,
+    savings: 99,
+    isFromDB: false,
+  });
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [estimateStateName, setEstimateStateName] = useState<string>("MADHYA PRADESH");
 
   const checkEstimatePaymentStatus = async (currentRefNo: string) => {
     if (!currentRefNo) return;
@@ -117,6 +138,79 @@ export default function EstimatePreviewPage() {
       
     }
   };
+
+    // ═══════════════════════════════════════════════════════════
+  // ✅ NEW: Fetch pricing from pricing_config based on estimate state
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    let alive = true;
+
+    const loadPricing = async () => {
+      setPricingLoading(true);
+      
+      // State priority: estimate.state → user state → default
+      const targetState = 
+  currentUser?.state ||           // ✅ USER PROFILE STATE (highest priority)
+  estimateStateName || 
+  estimate?.state_name || 
+  "MADHYA PRADESH";
+
+      try {
+        const row = await fetchPricingRow("estimate", targetState, userCategory);
+        const display = getDisplayPricing(row);
+
+        if (!alive) return;
+
+        if (display.isFromDB && display.price > 0) {
+          // ✅ DB se aayi value
+          setGatewayFeeAmount(display.price);
+          setPricingDisplay({
+            mrp: display.mrp,
+            price: display.price,
+            discountEnabled: display.discountEnabled,
+            discountPercent: display.discountPercent,
+            savings: display.savings,
+            isFromDB: true,
+          });
+          console.log(`💰 [ESTIMATE DB PRICING] ${targetState} = ₹${display.price}`);
+        } else {
+          // ✅ Fallback: hardcoded pricing.ts
+          const fallbackPrice = getItemRate(targetState, "estimate");
+          setGatewayFeeAmount(fallbackPrice);
+          setPricingDisplay({
+            mrp: fallbackPrice,
+            price: fallbackPrice,
+            discountEnabled: false,
+            discountPercent: 0,
+            savings: 0,
+            isFromDB: false,
+          });
+          console.log(`⚠️ [ESTIMATE FALLBACK PRICING] ${targetState} = ₹${fallbackPrice}`);
+        }
+      } catch (err) {
+        console.error("[ESTIMATE PRICING FETCH ERROR]", err);
+        if (!alive) return;
+        const fallbackPrice = getItemRate(targetState, "estimate");
+        setGatewayFeeAmount(fallbackPrice);
+        setPricingDisplay({
+          mrp: fallbackPrice,
+          price: fallbackPrice,
+          discountEnabled: false,
+          discountPercent: 0,
+          savings: 0,
+          isFromDB: false,
+        });
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    };
+
+    loadPricing();
+
+    return () => {
+      alive = false;
+    };
+  }, [estimateStateName, estimate?.state_name, currentUser?.state, userCategory]);
 
   // Component load hote hi localStorage se ref_no uthakar verify karna
   useEffect(() => {
@@ -248,10 +342,13 @@ const handleSaveAndPrint = async () => {
         });
       }
 
+          // ✅ FIX: Use dynamic price from DB instead of hardcoded 21
+      const dynamicAmount = gatewayFeeAmount || 21;
+      
       const res = await fetch("/api/analyze/payment/create-order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 21 }),
+        body: JSON.stringify({ amount: dynamicAmount }),
       });
 
       const data = await res.json();
@@ -259,7 +356,7 @@ const handleSaveAndPrint = async () => {
 
       const options = {
         key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-        amount: 2100,
+        amount: Math.round(dynamicAmount * 100), // ✅ paise
         currency: "INR",
         name: "Construction Estimate",
         order_id: data.id, 
@@ -277,7 +374,7 @@ const handleSaveAndPrint = async () => {
               p_payment_status: 'paid',
               p_order_id: response.razorpay_order_id,
               p_payment_id: response.razorpay_payment_id,
-              p_user_payment: 21
+              p_user_payment: dynamicAmount  // ✅ dynamic
             };
 
             setIsPaid(true);
@@ -415,7 +512,7 @@ const handleSaveAndFinalize = async (paymentData?: any) => {
   // 1. Authorization
   const isAuthorized = userCategory === 'ADMIN' || isPaid || paymentData;
   if (!isAuthorized) {
-    alert("Payment of ₹21/- is required to save and print.");
+   alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
     handlePayment();
     return;
   }
@@ -539,7 +636,7 @@ const handleSaveAndFinalize = async (paymentData?: any) => {
       p_payment_status: paymentData?.p_payment_status || 'paid',
       p_order_id: paymentData?.p_order_id || null,
       p_payment_id: paymentData?.p_payment_id || null,
-      p_user_payment: Number(paymentData?.p_user_payment || 21)
+      p_user_payment: Number(paymentData?.p_user_payment || gatewayFeeAmount || 21)
     };
 
     // 6. DB Call
@@ -646,7 +743,23 @@ const handlePrint = () => {
         }
       }
 
-      setEstimate(workingEstimate);
+            setEstimate(workingEstimate);
+
+// ✅ FIX: State priority — estimate → user profile → default
+const resolvedState = 
+  workingEstimate.state_name ||
+  workingEstimate.state ||
+  workingEstimate.stateName ||
+  currentUser?.state ||
+  "MADHYA PRADESH";
+
+setEstimateStateName(resolvedState);
+
+console.log('🎯 [STATE RESOLVED]', {
+  from_estimate: workingEstimate.state_name || workingEstimate.state || workingEstimate.stateName,
+  from_user: currentUser?.state,
+  final: resolvedState
+});
 
       // ✅ Robust check for payment/received status from MIS or Reopen Case
       const statusCheck = (workingEstimate.status || "").trim().toUpperCase();
@@ -1754,7 +1867,7 @@ return (
           </div>
         )}
       </td>
-      <td className="border border-black p-4 w-[35%] align-top">
+         <td className="border border-black p-4 w-[35%] align-top">
         {!useCustomLetterhead && (isPaid || isAlreadyPaid || userCategory === 'ADMIN' || signatureDetails) ? (
           <>
             {/* Horizontal Layout: QR Left, Details Right */}
@@ -1775,6 +1888,15 @@ return (
               <p className="font-bold">Er. J.TOMAR</p>
               <p className="mt-1 break-words">{signatureDetails || "Digitally Verified & Approved"}</p>
             </div>
+          </div>
+
+                   {/* ✅ NEW: Manual Signature Image (Jayant Tomar) */}
+          <div className="flex justify-center items-center mt-1 mb-1">
+            <img 
+              src="/signature-jayant-tomar.png" 
+              alt="Authorised Signatory" 
+              className="h-32 w-auto object-contain mix-blend-multiply" 
+            />
           </div>
 
           {/* Neeche Authorised Signatory ka label */}
@@ -1813,18 +1935,28 @@ return (
         </div>
       </div>
 
-      {/* Right side: Amazon/Flipkart Style Price Box */}
+            {/* Right side: Amazon/Flipkart Style Price Box - DYNAMIC */}
       <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
         <div className="text-right">
-          <div className="flex items-center justify-end gap-2">
-            <span className="text-xs text-gray-400 line-through font-semibold">₹ 120/-</span>
-            <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
-              82% OFF
-            </span>
-          </div>
-          <div className="text-lg font-black text-emerald-600 leading-tight">
-            ₹ 21 <span className="text-xs font-bold text-slate-700">Only</span>
-          </div>
+          {pricingLoading ? (
+            <span className="text-xs text-slate-500 font-bold">Loading price...</span>
+          ) : (
+            <>
+              {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
+                <div className="flex items-center justify-end gap-2">
+                  <span className="text-xs text-gray-400 line-through font-semibold">
+                    ₹ {pricingDisplay.mrp}/-
+                  </span>
+                  <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                    {pricingDisplay.discountPercent}% OFF
+                  </span>
+                </div>
+              )}
+              <div className="text-lg font-black text-emerald-600 leading-tight">
+                ₹ {pricingDisplay.price} <span className="text-xs font-bold text-slate-700">Only</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1842,11 +1974,12 @@ return (
         {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
       </button>
     ) : (
-      <button
+            <button
         onClick={handleRazorpayPayment}
-        className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce"
+        disabled={pricingLoading}
+        className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        🚀 PAY TO PRINT (₹21)
+        {pricingLoading ? "⏳ LOADING PRICE..." : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
       </button>
     )}
 

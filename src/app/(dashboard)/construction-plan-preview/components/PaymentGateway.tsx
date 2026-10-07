@@ -1,23 +1,38 @@
 // src/app/(dashboard)/construction-plan-preview/components/PaymentGateway.tsx
-
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { fetchPricingRow, getDisplayPricing, formatPrice, PricingRow, PricingDisplay } from "@/lib/pricingFetch";
+import {
+  fetchPricingRow,
+  getDisplayPricing,
+  PricingRow,
+  PricingDisplay,
+} from "@/lib/pricingFetch";
 import {
   createOrUpdateServiceRecord,
-  updatePaymentStatus,
   isAlreadyPaid,
-  fetchPaidRecordByRef,
   checkReprintStatus,
   autoUpdatePaidRecord,
   ServiceRecordPayload,
 } from "@/lib/service-records";
 
 // ============================================================
+// CONSTANTS — 60-day / 15% policy (yaha badlo, poori app me apply hoga)
+// ============================================================
+const REUSE_WINDOW_DAYS = 60;
+const MAX_CHANGE_PERCENT = 15;
+
+// ============================================================
 // TYPES
 // ============================================================
+type ReuseStatus =
+  | { type: "reuse_same"; refNo: string }
+  | { type: "reuse_minor"; refNo: string; nameChange?: number; addressChange?: number }
+  | { type: "admin_override"; refNo: string }
+  | { type: "new"; reason: "major_change" | "expired" | "none"; nameChange?: number; addressChange?: number; refNo?: string }
+  | null;
+
 interface PaymentGatewayProps {
   refNo: string;
   refNoGenerator?: () => Promise<string>;
@@ -70,15 +85,17 @@ export default function PaymentGateway({
   const [isPaid, setIsPaid] = useState(false);
   const [paymentError, setPaymentError] = useState<string>("");
 
+  // ✅ NEW: reuse/reprint status — page.tsx me banner dikhane ke liye
+  const [reuseStatus, setReuseStatus] = useState<ReuseStatus>(null);
+  const [reuseChecking, setReuseChecking] = useState(false);
+  const [effectiveRefNo, setEffectiveRefNo] = useState<string>(refNo || "DRAFT");
+
   // ============================================================
-  // ✅ NEW: DB Pricing State
+  // DB Pricing State
   // ============================================================
   const [pricingRow, setPricingRow] = useState<PricingRow | null>(null);
   const [pricingLoading, setPricingLoading] = useState(true);
 
-  // ============================================================
-  // ✅ NEW: Fetch pricing from DB
-  // ============================================================
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -97,10 +114,7 @@ export default function PaymentGateway({
     };
   }, [pricingItem, stateName, userCategory]);
 
-  // ✅ Display values from DB
   const display: PricingDisplay = getDisplayPricing(pricingRow);
-
-  // ✅ Final price (jo user pay karega) — DB se, fallback override
   const amount = amountOverride ?? display.price ?? 0;
   const gatewayFee = amount;
   const userServiceFee = 0;
@@ -113,7 +127,6 @@ export default function PaymentGateway({
       setScriptLoaded(true);
       return;
     }
-
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
@@ -129,55 +142,155 @@ export default function PaymentGateway({
   }, []);
 
   // ============================================================
-  // CHECK IF ALREADY PAID
+  // ✅ FRESH REPRINT CHECK ON MOUNT (60-day / 15% rule)
+  //    - refNo DRAFT ho to localStorage ka saved ref use karo
+  //    - checkReprintStatus se decide karo: reuse vs new payment
   // ============================================================
   useEffect(() => {
-    const check = async () => {
-      if (!refNo || refNo === "DRAFT") return;
-      const paid = await isAlreadyPaid(refNo);
-      if (paid) setIsPaid(true);
-    };
-    check();
-  }, [refNo]);
+    let alive = true;
 
-  // ============================================================
-  // ✅ NEW: HANDLE PAYMENT (with reprint logic)
-  // ============================================================
-  const handlePayment = useCallback(async () => {
-    // ============================================================
-    // STEP 1: Agar already paid hai (same session me) → success callback
-    // ============================================================
-    if (isPaid) {
-      onPaymentSuccess?.("already_paid", "already_paid", refNo);
-      return;
-    }
-
-    // ============================================================
-    // STEP 2: Reprint Check (agar refNo valid hai)
-    //   - 5 scenarios handle karo: NEW, PAID_SAME, MINOR, MAJOR, EXPIRED, ADMIN
-    // ============================================================
-    let reprintStatus: any = null;
-
-    if (refNo && refNo !== "DRAFT" && currentUser?.id) {
+    const runReuseCheck = async () => {
+      setReuseChecking(true);
       try {
-        reprintStatus = await checkReprintStatus(
-          refNo,
-          { customer_name: customerName, property_address: propertyAddress },
-          isAdminUser
-        );
+        // 1) refNo param se lo, warna localStorage ka saved ref
+        const savedRef = typeof window !== "undefined"
+          ? localStorage.getItem("constructionPlanRefNo")
+          : null;
 
-        console.log("[REPRINT CHECK]", reprintStatus);
+        const candidateRef =
+          (refNo && refNo !== "DRAFT" ? refNo : null) ||
+          (savedRef && savedRef !== "DRAFT" ? savedRef : null);
 
-        // ✅ CASE 1: Admin Override — print allowed
-        if (reprintStatus.status === 'ADMIN_OVERRIDE') {
-          setIsPaid(true);
-          onPaymentSuccess?.("ADMIN_OVERRIDE", "ADMIN_OVERRIDE", refNo);
+        if (!candidateRef) {
+          if (alive) {
+            setReuseStatus({ type: "new", reason: "none" });
+            setEffectiveRefNo("DRAFT");
+          }
           return;
         }
 
-        // ✅ CASE 2: Minor changes → Auto-update + print
-        if (reprintStatus.status === 'PAID_MINOR_CHANGE') {
-          await autoUpdatePaidRecord(refNo, {
+        // 2) Server side reprint check
+        const status: any = await checkReprintStatus(
+          candidateRef,
+          { customer_name: customerName, property_address: propertyAddress },
+          isAdminUser
+        );
+        if (!alive) return;
+
+        console.log("[PAYMENT GATEWAY / REUSE CHECK]", { candidateRef, status });
+
+        // 3) Map status to our state
+        if (status?.status === "ADMIN_OVERRIDE") {
+          setIsPaid(true);
+          setEffectiveRefNo(candidateRef);
+          setReuseStatus({ type: "admin_override", refNo: candidateRef });
+        } else if (status?.status === "PAID_SAME") {
+          setIsPaid(true);
+          setEffectiveRefNo(candidateRef);
+          setReuseStatus({ type: "reuse_same", refNo: candidateRef });
+        } else if (status?.status === "PAID_MINOR_CHANGE") {
+          setIsPaid(true);
+          setEffectiveRefNo(candidateRef);
+          setReuseStatus({
+            type: "reuse_minor",
+            refNo: candidateRef,
+            nameChange: status.nameChangePercent,
+            addressChange: status.addressChangePercent,
+          });
+        } else if (status?.status === "EXPIRED") {
+          setEffectiveRefNo("DRAFT");
+          setReuseStatus({
+            type: "new",
+            reason: "expired",
+            nameChange: status.nameChangePercent,
+            addressChange: status.addressChangePercent,
+          });
+        } else if (status?.status === "PAID_MAJOR_CHANGE") {
+          setEffectiveRefNo("DRAFT");
+          setReuseStatus({
+            type: "new",
+            reason: "major_change",
+            nameChange: status.nameChangePercent,
+            addressChange: status.addressChangePercent,
+          });
+        } else {
+          // unknown — fail safe to new
+          setEffectiveRefNo("DRAFT");
+          setReuseStatus({ type: "new", reason: "none" });
+        }
+      } catch (err) {
+        console.error("[PAYMENT GATEWAY / REUSE CHECK ERROR]", err);
+        // Fail-closed: error par naya payment maango
+        if (alive) {
+          setEffectiveRefNo("DRAFT");
+          setReuseStatus({ type: "new", reason: "none" });
+        }
+      } finally {
+        if (alive) setReuseChecking(false);
+      }
+    };
+
+    runReuseCheck();
+    return () => {
+      alive = false;
+    };
+  }, [refNo, customerName, propertyAddress, isAdminUser]);
+
+  // ============================================================
+  // CHECK IF ALREADY PAID (fallback for effectiveRefNo)
+  // ============================================================
+  useEffect(() => {
+    const check = async () => {
+      if (!effectiveRefNo || effectiveRefNo === "DRAFT") return;
+      const paid = await isAlreadyPaid(effectiveRefNo);
+      if (paid) setIsPaid(true);
+    };
+    check();
+  }, [effectiveRefNo]);
+
+  // ============================================================
+  // HANDLE PAYMENT
+  // ============================================================
+  const handlePayment = useCallback(async () => {
+    // STEP 1: already paid (reuse_same / minor / admin_override)
+    if (isPaid) {
+      // Minor change ho to record update karo, phir print
+      if (reuseStatus?.type === "reuse_minor") {
+        try {
+          await autoUpdatePaidRecord(reuseStatus.refNo, {
+            customer_name: customerName,
+            property_address: propertyAddress,
+            client_name: clientName,
+            representative: representative,
+            form_snapshot: formSnapshot,
+            ...extraFields,
+          });
+        } catch (err) {
+          console.error("[AUTO UPDATE MINOR CHANGE ERROR]", err);
+        }
+      }
+           const reuseRef = (reuseStatus && "refNo" in reuseStatus ? reuseStatus.refNo : undefined) || effectiveRefNo;
+      onPaymentSuccess?.("already_paid", "already_paid", reuseRef);
+      return;
+    }
+
+    // STEP 2: Fresh reprint check again (in case user ka data badal gaya ho)
+    if (effectiveRefNo && effectiveRefNo !== "DRAFT" && currentUser?.id) {
+      try {
+        const rs: any = await checkReprintStatus(
+          effectiveRefNo,
+          { customer_name: customerName, property_address: propertyAddress },
+          isAdminUser
+        );
+        console.log("[HANDLE PAYMENT / REUSE CHECK]", rs);
+
+        if (rs?.status === "ADMIN_OVERRIDE") {
+          setIsPaid(true);
+          onPaymentSuccess?.("ADMIN_OVERRIDE", "ADMIN_OVERRIDE", effectiveRefNo);
+          return;
+        }
+        if (rs?.status === "PAID_MINOR_CHANGE") {
+          await autoUpdatePaidRecord(effectiveRefNo, {
             customer_name: customerName,
             property_address: propertyAddress,
             client_name: clientName,
@@ -186,36 +299,28 @@ export default function PaymentGateway({
             ...extraFields,
           });
           setIsPaid(true);
-          onPaymentSuccess?.("MINOR_UPDATE", "MINOR_UPDATE", refNo);
+          onPaymentSuccess?.("MINOR_UPDATE", "MINOR_UPDATE", effectiveRefNo);
           return;
         }
-
-        // ✅ CASE 3: PAID_SAME (identical data) → Direct print
-        if (reprintStatus.status === 'PAID_SAME') {
+        if (rs?.status === "PAID_SAME") {
           setIsPaid(true);
-          onPaymentSuccess?.("SAME_DATA", "SAME_DATA", refNo);
+          onPaymentSuccess?.("SAME_DATA", "SAME_DATA", effectiveRefNo);
           return;
         }
-
-        // ❌ CASE 4: EXPIRED or MAJOR_CHANGE → Continue to payment (fresh charge)
-        if (reprintStatus.status === 'EXPIRED') {
+        if (rs?.status === "EXPIRED") {
           console.warn("[REPRINT] Expired — new payment required");
-        } else if (reprintStatus.status === 'PAID_MAJOR_CHANGE') {
-          console.warn("[REPRINT] Major change — new payment required:", reprintStatus.reason);
+        } else if (rs?.status === "PAID_MAJOR_CHANGE") {
+          console.warn("[REPRINT] Major change — new payment required:", rs.reason);
         }
       } catch (err) {
         console.error("[REPRINT CHECK ERROR]", err);
-        // Continue to payment flow on error
       }
     }
 
-    // ============================================================
     // STEP 3: ADMIN BYPASS
-    // ============================================================
     if (isAdminUser) {
       try {
-        const finalRefNo = refNoGenerator ? await refNoGenerator() : refNo;
-
+        const finalRefNo = refNoGenerator ? await refNoGenerator() : refNo || effectiveRefNo;
         await createOrUpdateServiceRecord({
           ref_no: finalRefNo,
           user_id: currentUser?.id || null,
@@ -244,15 +349,12 @@ export default function PaymentGateway({
       return;
     }
 
-    // ============================================================
     // STEP 4: VALIDATIONS
-    // ============================================================
     if (!scriptLoaded) {
       setPaymentError("Payment gateway is loading. Please wait...");
       return;
     }
-
-    if (!refNo) {
+    if (!refNo && !effectiveRefNo) {
       setPaymentError("Reference number is missing.");
       return;
     }
@@ -261,15 +363,12 @@ export default function PaymentGateway({
     setPaymentError("");
 
     try {
-      // ============================================================
-      // RAZORPAY CHECKOUT
-      // ============================================================
       const razorpayKey =
         process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_TK9kvfQQvEx2rQ";
 
       const options = {
         key: razorpayKey,
-        amount: Math.round(amount * 100), // paise
+        amount: Math.round(amount * 100),
         currency: "INR",
         name: "LNT WITH AI 2.0",
         description: `${caseType.replace(/_/g, " ")} — ${stateName}`,
@@ -277,11 +376,8 @@ export default function PaymentGateway({
         handler: async function (response: any) {
           try {
             console.log("[PAYMENT] Razorpay success:", response);
+            const finalRefNo = refNoGenerator ? await refNoGenerator() : (refNo || effectiveRefNo);
 
-            // ✅ Step 1: Generate fresh ref_no
-            const finalRefNo = refNoGenerator ? await refNoGenerator() : refNo;
-
-            // ✅ Step 2: Save service record
             try {
               await createOrUpdateServiceRecord({
                 ref_no: finalRefNo,
@@ -307,6 +403,13 @@ export default function PaymentGateway({
               console.error("[SERVICE RECORD SAVE ERROR]", recErr);
             }
 
+            // localStorage me ref save karo taaki next visit par reuse ho
+            try {
+              if (typeof window !== "undefined" && finalRefNo) {
+                localStorage.setItem("constructionPlanRefNo", finalRefNo);
+              }
+            } catch {}
+
             setIsPaid(true);
             setPaymentLoading(false);
             onPaymentSuccess?.(
@@ -328,14 +431,12 @@ export default function PaymentGateway({
           contact: customerPhone || "",
         },
         notes: {
-          ref_no: refNo,
+          ref_no: effectiveRefNo,
           case_type: caseType,
           mrp: display.mrp,
           discount_percent: display.discountPercent,
         },
-        theme: {
-          color: "#1e3a8a",
-        },
+        theme: { color: "#1e3a8a" },
 
         modal: {
           ondismiss: function () {
@@ -361,9 +462,11 @@ export default function PaymentGateway({
     }
   }, [
     isPaid,
+    reuseStatus,
     isAdminUser,
     scriptLoaded,
     refNo,
+    effectiveRefNo,
     refNoGenerator,
     caseType,
     amount,
@@ -386,7 +489,7 @@ export default function PaymentGateway({
   ]);
 
   // ============================================================
-  // RETURN OBJECT (render prop pattern)
+  // RETURN OBJECT
   // ============================================================
   return {
     // State
@@ -397,31 +500,41 @@ export default function PaymentGateway({
     scriptLoaded,
     pricingLoading,
 
-    // ✅ NEW: Pricing display values
+    // ✅ NEW: reuse state
+    reuseStatus,
+    reuseChecking,
+    effectiveRefNo,
+
+    // Pricing display
     mrp: display.mrp,
     price: display.price,
     discountEnabled: display.discountEnabled,
     discountPercent: display.discountPercent,
     savings: display.savings,
 
-    // Amount (backward compat)
     amount,
     gatewayFee,
     userServiceFee,
 
-    // Handler
     handlePayment,
 
-    // Render helpers
     renderButton: (customText?: string, customClass?: string) => (
       <button
         onClick={handlePayment}
-        disabled={paymentLoading || (!scriptLoaded && !isAdminUser) || pricingLoading}
+        disabled={
+          reuseChecking ||
+          paymentLoading ||
+          (!scriptLoaded && !isAdminUser && !isPaid) ||
+          pricingLoading
+        }
         className={
           customClass ||
           buttonClassName ||
           `px-4 py-1.5 text-xs font-bold transition rounded cursor-pointer ${
-            paymentLoading || (!scriptLoaded && !isAdminUser) || pricingLoading
+            reuseChecking ||
+            paymentLoading ||
+            (!scriptLoaded && !isAdminUser && !isPaid) ||
+            pricingLoading
               ? "bg-gray-400 cursor-not-allowed"
               : isPaid
               ? "bg-blue-600 hover:bg-blue-700"
@@ -431,12 +544,18 @@ export default function PaymentGateway({
           } text-white`
         }
       >
-        {pricingLoading
+        {reuseChecking
+          ? "CHECKING PREVIOUS RECORD..."
+          : pricingLoading
           ? "LOADING PRICE..."
           : paymentLoading
           ? "PROCESSING..."
           : isPaid
-          ? "✅ PAID"
+          ? reuseStatus?.type === "reuse_minor"
+            ? "🖨️ PRINT (NO CHARGE)"
+            : reuseStatus?.type === "reuse_same"
+            ? "🖨️ PRINT (NO CHARGE)"
+            : "🖨️ PRINT NOW"
           : isAdminUser
           ? "🖨️ GENERATE FREE (ADMIN)"
           : customText || buttonText || `💳 PAY ₹${amount} & PRINT`}
@@ -450,9 +569,31 @@ export default function PaymentGateway({
             ⚠️ {paymentError}
           </div>
         )}
-        {isPaid && (
+        {isPaid && reuseStatus?.type === "reuse_same" && (
           <div className="bg-green-100 border border-green-400 text-green-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
-            ✅ Payment successful! You can now print.
+            ✅ Aapne is plan ke liye pehle hi pay kar diya hai (Ref: {reuseStatus.refNo}). Direct print ho jayega — koi extra charge nahi.
+          </div>
+        )}
+        {isPaid && reuseStatus?.type === "reuse_minor" && (
+          <div className="bg-green-100 border border-green-400 text-green-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
+            ✅ Existing paid record mil gaya (Ref: {reuseStatus.refNo}). Name {reuseStatus.nameChange?.toFixed(1) ?? 0}%,
+            address {reuseStatus.addressChange?.toFixed(1) ?? 0}% change hai — limit {MAX_CHANGE_PERCENT}% / {REUSE_WINDOW_DAYS} din.
+            Koi extra charge nahi, direct print ho jayega.
+          </div>
+        )}
+        {isPaid && reuseStatus?.type === "admin_override" && (
+          <div className="bg-purple-100 border border-purple-400 text-purple-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
+            ✅ Admin override — direct print.
+          </div>
+        )}
+        {reuseStatus?.type === "new" && reuseStatus.reason === "expired" && (
+          <div className="bg-amber-100 border border-amber-400 text-amber-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
+            ℹ️ Pichhla record {REUSE_WINDOW_DAYS} din se purana hai — naya payment lagega.
+          </div>
+        )}
+        {reuseStatus?.type === "new" && reuseStatus.reason === "major_change" && (
+          <div className="bg-amber-100 border border-amber-400 text-amber-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
+            
           </div>
         )}
       </>

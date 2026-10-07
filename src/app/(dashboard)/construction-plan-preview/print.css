@@ -1,15 +1,20 @@
 /* ============================================================
    PRINT STYLES — LNT WITH AI 2.0 (SECURED)
+   Hamesha A4 LANDSCAPE (297 x 210 mm), full page, 5mm margin ke saath.
+   Desktop / Mobile / Admin / Paid — sab ke liye same layout.
+   NOTE: page.tsx me bhi yahi CSS (PRINT_CSS) hai. Dono same rakho.
    ============================================================ */
 
 @media print {
-  @page { size: A4 landscape; margin: 4mm; }
+  /* margin 0 => browser ka URL/date header-footer bhi nahi aata.
+     Border/margin neeche #print-grid khud 5mm inset se banata hai */
+  @page { size: 297mm 210mm; margin: 0; }
 
   html, body {
     margin: 0 !important; padding: 0 !important;
     background: #ffffff !important;
-    overflow: visible !important;
-    height: auto !important; width: 100% !important;
+    width: 297mm !important; height: 210mm !important;
+    overflow: hidden !important;
   }
 
   /* ============================================================
@@ -57,54 +62,77 @@
   }
 
   /* ============================================================
-     LAYER 2: PAID USERS → FULL PRINT LAYOUT
+     LAYER 2: PAID / ADMIN → FIXED A4 LANDSCAPE SHEET
      ============================================================ */
+
+  /* baaki poora page (layout, Next.js overlay etc.) chhupao */
   body.paid-user * { visibility: hidden !important; }
 
-  body.paid-user #main-cad-canvas,
-  body.paid-user #main-cad-canvas *,
-  body.paid-user #main-sidebar,
-  body.paid-user #main-sidebar *,
-  body.paid-user #print-grid,
-  body.paid-user #print-grid *,
   body.paid-user #print-root,
-  body.paid-user #print-root * {
+  body.paid-user #print-grid,
+  body.paid-user #print-grid * {
     visibility: visible !important;
   }
 
-  body.paid-user .max-w-\[1600px\] {
-    max-width: 100% !important; width: 100% !important;
-    height: auto !important;
-    margin: 0 !important; padding: 2mm !important;
-    border: none !important; overflow: visible !important;
-  }
-
-  body.paid-user #main-cad-canvas {
-    position: relative !important;
-    left: 0 !important; top: 0 !important;
-    width: 70% !important; height: auto !important;
+  /* mobile ka rotate wrapper print me hata do */
+  html body.paid-user #print-root {
+    position: fixed !important; left: 0 !important; top: 0 !important;
+    width: 297mm !important; height: 210mm !important; min-height: 0 !important;
     margin: 0 !important; padding: 0 !important;
-    border: none !important; overflow: visible !important;
+    transform: none !important; overflow: hidden !important;
+    background: #ffffff !important;
+  }
+  /* header, status messages, offer banner — print me nahi */
+  html body.paid-user #print-root > *:not(#print-grid) { display: none !important; }
+
+  /* A4 ke andar bordered sheet: 5mm margin charo taraf */
+  html body.paid-user #print-grid {
+    position: absolute !important; left: 5mm !important; top: 5mm !important;
+    width: 287mm !important; height: 200mm !important; max-width: none !important;
+    display: flex !important; gap: 3mm !important;
+    margin: 0 !important; padding: 2mm !important;
+    border: 1.5px solid #000 !important; box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important; break-inside: avoid !important;
   }
 
-  body.paid-user #main-cad-canvas svg {
-    width: 100% !important; height: auto !important;
-    max-height: none !important; display: block !important;
+  html body.paid-user #print-grid #main-cad-canvas {
+    flex: 1 1 auto !important; min-width: 0 !important;
+    width: auto !important; height: 100% !important; min-height: 0 !important;
+    margin: 0 !important; padding: 0 !important; border: 0 !important;
+    overflow: hidden !important; display: block !important;
+    position: relative !important; left: auto !important; top: auto !important;
   }
 
-  body.paid-user #main-sidebar {
-    position: relative !important;
-    right: 0 !important; top: 0 !important;
-    width: 28% !important; height: auto !important;
-    font-size: 9px !important;
-    padding: 4px !important; overflow: visible !important;
+  html body.paid-user #print-grid #cad-svg-wrap {
+    position: relative !important; display: block !important;
+    width: 100% !important; height: 100% !important; min-height: 0 !important;
   }
 
-  body.paid-user button { display: none !important; }
+  /* preserveAspectRatio="xMidYMid meet" ki wajah se drawing A4 ke andar apne aap fit hoti hai */
+  html body.paid-user #print-grid #cad-svg {
+    position: absolute !important; left: 0 !important; top: 0 !important;
+    width: 100% !important; height: 100% !important;
+    max-height: none !important; aspect-ratio: auto !important;
+    display: block !important;
+  }
+
+  html body.paid-user #print-grid #main-sidebar {
+    flex: 0 0 66mm !important; width: 66mm !important;
+    height: 100% !important; min-height: 0 !important;
+    margin: 0 !important; padding: 2mm !important;
+    border: 0 !important; border-left: 1.5px solid #000 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important; font-size: 9px !important;
+    position: relative !important; right: auto !important; top: auto !important;
+  }
+
+  /* backgrounds/colours (header bar, sidebar boxes) print me bhi aayein */
+  body.paid-user #print-grid,
+  body.paid-user #print-grid * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
   button { display: none !important; }
-
-  /* Non-paid watermark opacity stronger */
-  body:not(.paid-user) svg text[opacity] {
-    opacity: 0.15 !important;
-  }
 }

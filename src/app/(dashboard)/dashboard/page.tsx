@@ -1,32 +1,120 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, type ComponentType } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import RechargeModal from './components/RechargeModal';
-import AdminRechargeApproval from './components/AdminRechargeApproval';
-import AdminPartnerApproval from './components/AdminPartnerApproval';
 import ApprovalNotificationBell from './components/ApprovalNotificationBell';
-import PartnerNetworkPromoModal from './components/PartnerNetworkPromoModal';
-import CorporateSupportModal from './components/CorporateSupportModal';
 import { BarChart3, LayoutDashboard, Send } from 'lucide-react';
 
 // ✅ Analytics Components
-import AnalyticsHeader from './components/AnalyticsHeader';
-import KpiCards from './components/KpiCards';
-import SalesTrendChart from './components/SalesTrendChart';
-import StateWiseHeatmap from './components/StateWiseHeatmap';
-import ProductWiseBreakdown from './components/ProductWiseBreakdown';
-import FyComparisonChart from './components/FyComparisonChart';
 
-function Card({ title, value, color }: any) {
-  return (
-    <div className="bg-white border rounded-xl p-3 sm:p-4 shadow-sm hover:shadow-md transition">
-      <p className="text-[10px] sm:text-xs text-gray-400 font-bold uppercase tracking-wider">{title}</p>
-      <h2 className={`text-xl sm:text-2xl font-black ${color}`}>{value}</h2>
-    </div>
-  );
+// ✅ Heavy / kam-use wale components ab sirf zarurat par load hote hain (first load fast)
+// ✅ FIX (TS2769): props any rakhe — warna dynamic() component ko `{}` props wala maan leta hai
+const lazy = (loader: () => Promise<any>) =>
+  dynamic(loader, { ssr: false }) as ComponentType<any>;
+const RechargeModal = lazy(() => import('./components/RechargeModal'));
+const CorporateSupportModal = lazy(() => import('./components/CorporateSupportModal'));
+const PartnerNetworkPromoModal = lazy(() => import('./components/PartnerNetworkPromoModal'));
+const AdminRechargeApproval = lazy(() => import('./components/AdminRechargeApproval'));
+const AdminPartnerApproval = lazy(() => import('./components/AdminPartnerApproval'));
+const AnalyticsHeader = lazy(() => import('./components/AnalyticsHeader'));
+const KpiCards = lazy(() => import('./components/KpiCards'));
+const SalesTrendChart = lazy(() => import('./components/SalesTrendChart'));
+const StateWiseHeatmap = lazy(() => import('./components/StateWiseHeatmap'));
+const ProductWiseBreakdown = lazy(() => import('./components/ProductWiseBreakdown'));
+const FyComparisonChart = lazy(() => import('./components/FyComparisonChart'));
+
+// ✅ Sirf zaruri columns — heavy columns (form_snapshot etc.) nahi aate.
+// Agar koi column DB me na mile to automatically select('*') par fallback hota hai.
+const MIS_COLS = 'id, ref_no, customer_name, client_name, representative, case_type, fee_standard, user_payment, status, created_date, user_id';
+const EST_COLS = 'id, ref_no, customer_name, client_name, representative, estimate_type, fee_standard, user_payment, status, created_at, user_id';
+const SVC_COLS = 'id, ref_no, customer_name, client_name, representative, case_type, deed_type, fee_standard, gateway_fee, user_payment, user_service_fee, status, payment_status, created_at, user_id, state_name, city_district, razorpay_payment_id, buyers:form_snapshot->buyers';
+
+// ✅ Jo column DB me nahi hota, wo khud list se hat jata hai aur query dobara chalti hai
+// (poora select('*') nahi). Chuni hui list session me yaad rehti hai.
+const colsCache = new Map<string, string>();
+
+async function queryWithFallback(table: string, cols: string, build: (q: any) => any) {
+  const t0 = performance.now();
+  let list = (colsCache.get(table) ?? cols).split(',').map((c) => c.trim()).filter(Boolean);
+
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const res = await build(supabase.from(table).select(list.join(', ')));
+    if (!res.error) {
+      colsCache.set(table, list.join(', '));
+      console.log(`[dashboard] ${table}: ${Math.round(performance.now() - t0)}ms (${res.data?.length ?? 0} rows)`);
+      return res;
+    }
+    const m = /column [\w]+\.(\w+) does not exist/i.exec(res.error.message || '');
+    if (!m) break;
+    console.warn(`[dashboard] ${table}.${m[1]} DB me nahi hai -> list se hata diya`);
+    list = list.filter((c) => c !== m[1] && !c.endsWith(`:${m[1]}`));
+  }
+
+  console.warn(`[dashboard] ${table}: select('*') fallback`);
+  const res = await build(supabase.from(table).select('*'));
+  console.log(`[dashboard] ${table} (*): ${Math.round(performance.now() - t0)}ms (${res.data?.length ?? 0} rows)`);
+  return res;
 }
+
+const PAGE_SIZE = 100;
+
+// ✅ Instant load: pichla data sessionStorage me (user-wise), fresh data background me aata hai
+const CACHE_PREFIX = 'dash_cache_v1_';
+const clearDashCache = () => {
+  try {
+    Object.keys(sessionStorage).filter((k) => k.startsWith(CACHE_PREFIX)).forEach((k) => sessionStorage.removeItem(k));
+  } catch {}
+};
+
+// ✅ Row memo — typing / column resize par poori table dobara render nahi hoti
+const TxnRow = memo(function TxnRow({ est, onHistory }: { est: any; onHistory: (e: any) => void }) {
+  const dateSource = est.created_date || est.created_at;
+  const dateObj = dateSource ? new Date(dateSource) : null;
+  const formattedDate = dateObj
+    ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`
+    : '-';
+
+  let cleanCustomerName = est.customer_name || '-';
+  const match = cleanCustomerName.match(/^(.*?)\s+(s\/o|d\/o|w\/o|c\/o|S\/O|D\/O|W\/O|C\/O)\b/i);
+  if (match && match[1]) cleanCustomerName = match[1].trim();
+
+  const statusUpper = (est.status || 'PENDING').toUpperCase();
+  const isPaid = statusUpper === 'RECEIVED' || statusUpper === 'PAID' || statusUpper === 'COMPLETED';
+
+  return (
+    <tr className="border-t hover:bg-slate-50 text-xs font-sans tracking-wide">
+      <td className="p-3 font-bold text-blue-600 uppercase text-center">{est.ref_no}</td>
+      <td className="p-3 text-slate-600 text-center whitespace-nowrap">{formattedDate}</td>
+      <td className="p-3 uppercase text-center">
+        <div className="font-extrabold text-slate-800">{cleanCustomerName.replace(/[,.]\s*$/, '')}</div>
+      </td>
+      <td className="p-3 font-bold text-slate-700 uppercase text-center truncate">{est.client_name || '-'}</td>
+      <td className="p-3 font-semibold text-slate-600 uppercase text-center truncate">{est.representative || '-'}</td>
+      <td className="p-3 font-black text-slate-900 uppercase text-center whitespace-nowrap">{est.case_type || 'NEW CONSTRUCTION'}</td>
+      <td className="p-3 font-bold text-slate-800 text-center whitespace-nowrap">₹{Number(est.fee_standard || 0).toLocaleString()}</td>
+      <td className="p-3 text-center">
+        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-wider ${
+          isPaid ? 'bg-emerald-100 text-emerald-600'
+            : statusUpper === 'WAIVED' ? 'bg-slate-100 text-slate-600'
+            : statusUpper === 'FINALIZED' ? 'bg-blue-100 text-blue-600'
+            : 'bg-red-100 text-red-600'
+        }`}>
+          {statusUpper}
+        </span>
+      </td>
+      <td className="p-3 text-center">
+        <button
+          onClick={() => onHistory(est)}
+          className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-3 py-1 rounded-lg text-xs transition border border-blue-200 uppercase cursor-pointer"
+        >
+          History
+        </button>
+      </td>
+    </tr>
+  );
+});
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -55,6 +143,8 @@ export default function DashboardPage() {
 
   // ✅ NEW: Total registered users (from profiles table)
   const [totalRegisteredUsers, setTotalRegisteredUsers] = useState(0);
+  const [dataLoading, setDataLoading] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const [filterType, setFilterType] = useState<'All' | 'Paid' | 'Pending'>('All');
   const [refWidth, setRefWidth] = useState(240);
@@ -84,200 +174,220 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const fetchData = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      const userEmail = user.email || '';
-      const roleStr = (profile?.role || '').toLowerCase();
-      const secondRoleStr = (profile?.second_role || '').toLowerCase();
-
-      const isAdmin =
-        profile?.role === 'admin' ||
-        profile?.user_type === 'Admin' ||
-        userEmail === 'admin@lnt.com' ||
-        roleStr === 'admin';
-
-      const approverRoles = ['admin', 'ceo', 'co-partner', 'co_partner', 'co partner'];
-      const isApprover =
-        isAdmin ||
-        userEmail === 'legalntech@gmail.com' ||
-        approverRoles.some((r) => roleStr.includes(r) || secondRoleStr.includes(r));
-
-      setUserData({
-        email: userEmail,
-        id: profile?.user_code || user.id.slice(0, 8),
-        uuid: user.id,
-        name: profile?.full_name || 'Guest User',
-        wallet: Number(profile?.wallet_balance || 0),
-        planType: profile?.plan_type || 'BASIC ENGINE PLAN',
-        isAdmin, isApprover,
-        role: profile?.role || 'user',
-        secondRole: profile?.second_role || null,
-        approvalStatus: profile?.approval_status || 'PENDING',
-        createdAt: profile?.created_at || profile?.created_date || user.created_at,
-        state: profile?.state || ''
-      });
-
-      // PARTNER PROMO
+      const tStart = performance.now();
       try {
-        const { data: partnerCheck } = await supabase
-          .from('partner_profiles')
-          .select('partner_id, approval_status')
-          .eq('user_id', user.id)
+        // getSession local hai (fast) — data access RLS se hi protected hai
+        let { data: { session } } = await supabase.auth.getSession();
+        let user = session?.user || null;
+        if (!user) {
+          const res = await supabase.auth.getUser();
+          user = res.data.user;
+        }
+        if (!user) return;
+
+        // ✅ Cache turant dikhao (sirf isi user ka) — network ka wait nahi
+        const cacheKey = `${CACHE_PREFIX}${user.id}`;
+        try {
+          const raw = sessionStorage.getItem(cacheKey);
+          if (raw) {
+            const c = JSON.parse(raw);
+            if (Array.isArray(c.list)) {
+              if (c.userData) setUserData(c.userData);
+              setEstimateList(c.list);
+              setTotalRegisteredUsers(c.totalUsers || 0);
+              setRechargeRequests(c.recharges || []);
+              setDataLoading(false);
+            }
+          }
+        } catch {}
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
           .maybeSingle();
 
-        const userIsPartner = !!partnerCheck;
-        setIsPartnerUser(userIsPartner);
+        const userEmail = user.email || '';
+        const roleStr = (profile?.role || '').toLowerCase();
+        const secondRoleStr = (profile?.second_role || '').toLowerCase();
 
-        const promoSeen = localStorage.getItem(`partner_promo_seen_${user.id}`);
-        const promoClicked = localStorage.getItem(`partner_promo_clicked_${user.id}`);
-        const isUserApproved = isAdmin || profile?.approval_status === 'APPROVED';
-        const shouldShowPromo = !userIsPartner && !isAdmin && !promoSeen && !promoClicked && isUserApproved;
+        const isAdmin =
+          profile?.role === 'admin' ||
+          profile?.user_type === 'Admin' ||
+          userEmail === 'admin@lnt.com' ||
+          roleStr === 'admin';
 
-        if (shouldShowPromo) setTimeout(() => setShowPartnerPromo(true), 1500);
-      } catch (err) { console.error(err); }
-      setPromoChecked(true);
+        const approverRoles = ['admin', 'ceo', 'co-partner', 'co_partner', 'co partner'];
+        const isApprover =
+          isAdmin ||
+          userEmail === 'legalntech@gmail.com' ||
+          approverRoles.some((r) => roleStr.includes(r) || secondRoleStr.includes(r));
 
-      /* ============================================================
-         ✅ NEW: FETCH PROFILES — for state mapping (user_id → state)
-         Kyunki estimates/mis_records me state column nahi hai
-         ============================================================ */
-           const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, state, city, full_name, firm_name');
+        // ✅ Header / naam turant dikh jaye
+        const nextUserData = {
+          email: userEmail,
+          id: profile?.user_code || user.id.slice(0, 8),
+          uuid: user.id,
+          name: profile?.full_name || 'Guest User',
+          wallet: Number(profile?.wallet_balance || 0),
+          planType: profile?.plan_type || 'BASIC ENGINE PLAN',
+          isAdmin, isApprover,
+          role: profile?.role || 'user',
+          secondRole: profile?.second_role || null,
+          approvalStatus: profile?.approval_status || 'PENDING',
+          createdAt: profile?.created_at || profile?.created_date || user.created_at,
+          state: profile?.state || ''
+        };
+        setUserData(nextUserData);
 
-      const profileStateMap = new Map<string, string>();
-      const profileCityMap = new Map<string, string>();
-      (profilesData || []).forEach((p: any) => {
-        if (p.id) {
-          profileStateMap.set(p.id, p.state || 'Unknown');
-          profileCityMap.set(p.id, p.city || 'Unknown');
+        // ✅ Baaki sab queries PARALLEL (pehle ek ke baad ek chalti thi)
+        console.log(`[dashboard] auth+profile: ${Math.round(performance.now() - tStart)}ms`);
+        const mine = (q: any) => (isAdmin ? q : q.eq('user_id', user!.id));
+        const [partnerRes, profilesRes, misRes, estRes, svcRes, rechargeRes] = await Promise.all([
+          isAdmin
+            ? Promise.resolve({ data: null })
+            : supabase.from('partner_profiles').select('partner_id, approval_status').eq('user_id', user.id).maybeSingle(),
+          // Saare users ki profiles sirf admin ko chahiye (state mapping + total users)
+          isAdmin
+            ? supabase.from('profiles').select('id, state, city', { count: 'exact' })
+            : Promise.resolve({ data: null, count: null }),
+          queryWithFallback('mis_records', MIS_COLS, (q) => mine(q.order('created_date', { ascending: false }))),
+          queryWithFallback('estimates', EST_COLS, (q) => mine(q.order('created_at', { ascending: false }))),
+          queryWithFallback('service_records', SVC_COLS, (q) => mine(q.order('created_at', { ascending: false }))),
+          // Admin ko sirf PENDING recharge requests chahiye
+          isAdmin
+            ? supabase.from('wallet_recharges').select('*').eq('status', 'PENDING').order('created_at', { ascending: false })
+            : supabase.from('wallet_recharges').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+        ]);
+
+        // PARTNER PROMO
+        try {
+          const userIsPartner = !!(partnerRes as any).data;
+          setIsPartnerUser(userIsPartner);
+          const promoSeen = localStorage.getItem(`partner_promo_seen_${user.id}`);
+          const promoClicked = localStorage.getItem(`partner_promo_clicked_${user.id}`);
+          const isUserApproved = isAdmin || profile?.approval_status === 'APPROVED';
+          const shouldShowPromo = !userIsPartner && !isAdmin && !promoSeen && !promoClicked && isUserApproved;
+          if (shouldShowPromo) setTimeout(() => setShowPartnerPromo(true), 1500);
+        } catch (err) { console.error(err); }
+        setPromoChecked(true);
+
+        // State / city mapping (user_id -> state)
+        const profileStateMap = new Map<string, string>();
+        const profileCityMap = new Map<string, string>();
+        if (isAdmin) {
+          const profilesData: any[] = (profilesRes as any).data || [];
+          profilesData.forEach((p: any) => {
+            if (p.id) {
+              profileStateMap.set(p.id, p.state || 'Unknown');
+              profileCityMap.set(p.id, p.city || 'Unknown');
+            }
+          });
+          setTotalRegisteredUsers((profilesRes as any).count ?? profilesData.length);
+        } else {
+          profileStateMap.set(user.id, profile?.state || 'Unknown');
+          profileCityMap.set(user.id, profile?.city || 'Unknown');
         }
-      });
 
-      // ✅ NEW: Total registered users count (admin ke liye)
-      setTotalRegisteredUsers((profilesData || []).length);
+        /* ---------- MIS_RECORDS (PRIMARY) ---------- */
+        if (misRes.error) console.error('MIS fetch error:', misRes.error);
+        const misData: any[] = misRes.data || [];
+        const misMap = new Map<string, any>();
+        misData.forEach((item: any) => { if (item.ref_no) misMap.set(item.ref_no, item); });
 
-      /* ---------- FETCH 1: MIS_RECORDS (PRIMARY) ---------- */
-      let misQuery = supabase
-        .from('mis_records')
-        .select('*')
-        .order('created_date', { ascending: false });
-
-      if (!isAdmin) misQuery = misQuery.eq('user_id', user.id);
-
-      const { data: misData, error: misError } = await misQuery;
-      if (misError) console.error('MIS fetch error:', misError);
-
-      const misMap = new Map<string, any>();
-      (misData || []).forEach((item: any) => {
-        if (item.ref_no) misMap.set(item.ref_no, item);
-      });
-
-      const formattedMIS = (misData || []).map((item: any) => ({
-        ...item,
-        id: item.id,
-        source_table: 'mis_records' as const,
-        record_category: 'MIS' as const,
-        customer_name: item.customer_name || 'N/A',
-        client_name: item.client_name || '',
-        representative: item.representative || '',
-        case_type: item.case_type || 'NEW CONSTRUCTION',
-        fee_standard: Number(item.fee_standard || 0),
-        user_payment: Number(item.user_payment || 0),
-        status: (item.status || 'PENDING').toUpperCase(),
-        created_date: item.created_date || new Date().toISOString(),
-        // ✅ FIX: State from profiles via user_id
-        state: profileStateMap.get(item.user_id) || 'Unknown',
-        city: profileCityMap.get(item.user_id) || 'Unknown'
-      }));
-
-      /* ---------- FETCH 2: ESTIMATES (SECONDARY) ---------- */
-      let estimatesQuery = supabase
-        .from('estimates')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (!isAdmin) estimatesQuery = estimatesQuery.eq('user_id', user.id);
-
-      const { data: estimatesData, error: estimatesError } = await estimatesQuery;
-      if (estimatesError) console.error('Estimates fetch error:', estimatesError);
-
-      const formattedEstimates = (estimatesData || [])
-        .filter((item: any) => !item.ref_no || !misMap.has(item.ref_no))
-        .map((item: any) => ({
+        const formattedMIS = misData.map((item: any) => ({
           ...item,
-          source_table: 'estimates' as const,
-          record_category: 'ESTIMATE' as const,
+          id: item.id,
+          source_table: 'mis_records' as const,
+          record_category: 'MIS' as const,
           customer_name: item.customer_name || 'N/A',
-          client_name: item.client_name || item.client || '',
+          client_name: item.client_name || '',
           representative: item.representative || '',
-          case_type: item.estimate_type || item.case_type || 'NEW CONSTRUCTION',
+          case_type: item.case_type || 'NEW CONSTRUCTION',
           fee_standard: Number(item.fee_standard || 0),
           user_payment: Number(item.user_payment || 0),
           status: (item.status || 'PENDING').toUpperCase(),
-          created_date: item.created_at || new Date().toISOString(),
-          // ✅ FIX: State from profiles via user_id
+          created_date: item.created_date || new Date().toISOString(),
           state: profileStateMap.get(item.user_id) || 'Unknown',
           city: profileCityMap.get(item.user_id) || 'Unknown'
         }));
 
-      /* ---------- FETCH 3: SERVICE_RECORDS ---------- */
-      let serviceQuery = supabase
-        .from('service_records')
-        .select('*')
-        .order('created_at', { ascending: false });
+        /* ---------- ESTIMATES (SECONDARY) ---------- */
+        if (estRes.error) console.error('Estimates fetch error:', estRes.error);
+        const formattedEstimates = ((estRes.data as any[]) || [])
+          .filter((item: any) => !item.ref_no || !misMap.has(item.ref_no))
+          .map((item: any) => ({
+            ...item,
+            source_table: 'estimates' as const,
+            record_category: 'ESTIMATE' as const,
+            customer_name: item.customer_name || 'N/A',
+            client_name: item.client_name || item.client || '',
+            representative: item.representative || '',
+            case_type: item.estimate_type || item.case_type || 'NEW CONSTRUCTION',
+            fee_standard: Number(item.fee_standard || 0),
+            user_payment: Number(item.user_payment || 0),
+            status: (item.status || 'PENDING').toUpperCase(),
+            created_date: item.created_at || new Date().toISOString(),
+            state: profileStateMap.get(item.user_id) || 'Unknown',
+            city: profileCityMap.get(item.user_id) || 'Unknown'
+          }));
 
-      if (!isAdmin) serviceQuery = serviceQuery.eq('user_id', user.id);
-
-      const { data: serviceData, error: serviceError } = await serviceQuery;
-      if (serviceError) console.error('Service fetch error:', serviceError);
-
-      const formattedServices = (serviceData || []).map((item: any) => {
-        let extractedName = item.customer_name;
-        if (!extractedName && item.form_snapshot) {
-          try {
-            const snapshot = typeof item.form_snapshot === 'string'
-              ? JSON.parse(item.form_snapshot) : item.form_snapshot;
-            if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
-              extractedName = snapshot.buyers[0]?.name;
+        /* ---------- SERVICE_RECORDS ---------- */
+        if (svcRes.error) console.error('Service fetch error:', svcRes.error);
+        const formattedServices = ((svcRes.data as any[]) || []).map((item: any) => {
+          let extractedName = item.customer_name;
+          if (!extractedName) {
+            let buyers = item.buyers;
+            if (!buyers && item.form_snapshot) {
+              try {
+                const snapshot = typeof item.form_snapshot === 'string'
+                  ? JSON.parse(item.form_snapshot) : item.form_snapshot;
+                buyers = snapshot?.buyers;
+              } catch (e) {}
             }
-          } catch (e) {}
-        }
+            if (Array.isArray(buyers) && buyers.length > 0) extractedName = buyers[0]?.name;
+          }
 
-        return {
-          ...item,
-          id: item.id || item.ref_no,
-          source_table: 'service_records' as const,
-          record_category: 'SERVICE' as const,
-          customer_name: extractedName || item.client_name || 'N/A',
-          client_name: item.client_name || '',
-          representative: item.representative || '',
-          case_type: item.case_type || (item.deed_type ? `DEED - ${item.deed_type}` : 'DEED_DRAFT'),
-          fee_standard: Number(item.fee_standard || 0),
-          gateway_fee: Number(item.gateway_fee || 0),
-          user_payment: Number(item.user_payment || 0),
-          user_service_fee: Number(item.user_service_fee || 0),
-          status: (item.status || 'PENDING').toUpperCase(),
-          payment_status: (item.payment_status || 'pending').toUpperCase(),
-          created_date: item.created_at || new Date().toISOString(),
-          // ✅ FIX: service_records me state_name hai, agar nahi toh profiles se
-          state: item.state_name || profileStateMap.get(item.user_id) || 'Unknown',
-          city: item.city_district || profileCityMap.get(item.user_id) || 'Unknown'
-        };
-      });
+          return {
+            ...item,
+            id: item.id || item.ref_no,
+            source_table: 'service_records' as const,
+            record_category: 'SERVICE' as const,
+            customer_name: extractedName || item.client_name || 'N/A',
+            client_name: item.client_name || '',
+            representative: item.representative || '',
+            case_type: item.case_type || (item.deed_type ? `DEED - ${item.deed_type}` : 'DEED_DRAFT'),
+            fee_standard: Number(item.fee_standard || 0),
+            gateway_fee: Number(item.gateway_fee || 0),
+            user_payment: Number(item.user_payment || 0),
+            user_service_fee: Number(item.user_service_fee || 0),
+            status: (item.status || 'PENDING').toUpperCase(),
+            payment_status: (item.payment_status || 'pending').toUpperCase(),
+            created_date: item.created_at || new Date().toISOString(),
+            state: item.state_name || profileStateMap.get(item.user_id) || 'Unknown',
+            city: item.city_district || profileCityMap.get(item.user_id) || 'Unknown'
+          };
+        });
 
-      const combined = [...formattedMIS, ...formattedEstimates, ...formattedServices];
-      combined.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
+        const combined = [...formattedMIS, ...formattedEstimates, ...formattedServices];
+        combined.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
 
-      setEstimateList(combined);
-      fetchRecharges(user.id, isAdmin);
+        console.log(`[dashboard] TOTAL load: ${Math.round(performance.now() - tStart)}ms`);
+        setEstimateList(combined);
+        if (rechargeRes.data) setRechargeRequests(rechargeRes.data);
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            userData: nextUserData,
+            list: combined,
+            totalUsers: isAdmin ? ((profilesRes as any).count ?? 0) : 0,
+            recharges: rechargeRes.data || [],
+          }));
+        } catch {} // storage full ho to ignore
+      } catch (err) {
+        console.error('[dashboard] load error:', err);
+      } finally {
+        setDataLoading(false);
+      }
     };
 
     fetchData();
@@ -285,7 +395,7 @@ export default function DashboardPage() {
 
   const fetchRecharges = async (userId: string, isAdmin: boolean) => {
     let q = supabase.from('wallet_recharges').select('*').order('created_at', { ascending: false });
-    if (!isAdmin) q = q.eq('user_id', userId);
+    q = isAdmin ? q.eq('status', 'PENDING') : q.eq('user_id', userId);
     const { data } = await q;
     if (data) setRechargeRequests(data);
   };
@@ -342,8 +452,8 @@ export default function DashboardPage() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Dedupe
-  const deduplicatedList = (() => {
+  // Dedupe (memo — har render par dobara nahi chalta)
+  const deduplicatedList = useMemo(() => {
     const seen: Record<string, any> = {};
     const priority = { mis_records: 3, estimates: 2, service_records: 1 };
     estimateList.forEach((item) => {
@@ -355,18 +465,18 @@ export default function DashboardPage() {
       if (!seen[key] || currentPriority > existingPriority) seen[key] = item;
     });
     return Object.values(seen);
-  })();
+  }, [estimateList]);
 
-  const totalValue = deduplicatedList.reduce((sum, i) => sum + Number(i.fee_standard || 0), 0);
-
-  const receivedAmount = deduplicatedList
-    .filter((i) => {
-      const s = (i.status || '').toUpperCase();
-      return s === 'RECEIVED' || s === 'PAID' || s === 'COMPLETED';
-    })
-    .reduce((sum, i) => sum + Number(i.fee_standard || 0), 0);
-
-  const pendingAmount = totalValue - receivedAmount;
+  const { totalValue, receivedAmount, pendingAmount } = useMemo(() => {
+    let total = 0, received = 0;
+    deduplicatedList.forEach((i: any) => {
+      const fee = Number(i.fee_standard || 0);
+      total += fee;
+      const st = (i.status || '').toUpperCase();
+      if (st === 'RECEIVED' || st === 'PAID' || st === 'COMPLETED') received += fee;
+    });
+    return { totalValue: total, receivedAmount: received, pendingAmount: total - received };
+  }, [deduplicatedList]);
 
   // ✅ Analytics filtered data (with product filter)
   const filteredAnalyticsData = useMemo(() => {
@@ -385,7 +495,7 @@ export default function DashboardPage() {
     });
   }, [deduplicatedList, analyticsFY, analyticsMonth, analyticsState, analyticsProduct]);
 
-  const filteredList = deduplicatedList.filter((item) => {
+  const filteredList = useMemo(() => deduplicatedList.filter((item) => {
     const currentStatus = (item.status || 'PENDING').toUpperCase();
     const isPaidStatus = currentStatus === 'RECEIVED' || currentStatus === 'PAID' || currentStatus === 'COMPLETED';
 
@@ -402,7 +512,12 @@ export default function DashboardPage() {
     if (representativeSearch && !itemRep.includes(representativeSearch.toLowerCase())) return false;
 
     return true;
-  });
+  }), [deduplicatedList, filterType, refSearch, clientSearch, representativeSearch]);
+
+  // ✅ Filter badalne par list wapas pehle 100 rows par
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterType, refSearch, clientSearch, representativeSearch]);
+  const visibleRows = useMemo(() => filteredList.slice(0, visibleCount), [filteredList, visibleCount]);
+  const openHistory = useCallback((est: any) => { setSelectedTxn(est); setIsModalOpen(true); }, []);
 
   const isPendingApproval = !userData.isAdmin && userData.approvalStatus === 'PENDING';
   const isRejected = !userData.isAdmin && userData.approvalStatus === 'REJECTED';
@@ -428,9 +543,35 @@ export default function DashboardPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
-          <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight">
-            {userData.isAdmin ? 'LNT ADMIN DASHBOARD' : 'LNT DASHBOARD'}
-          </h1>
+          {userData.isAdmin ? (
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => setAdminView('dashboard')}
+                className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  adminView === 'dashboard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => setAdminView('analytics')}
+                className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  adminView === 'analytics'
+                    ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Revenue Analytics</span>
+                <span className="sm:hidden">Revenue</span>
+              </button>
+            </div>
+          ) : (
+            <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight">
+              LNT DASHBOARD
+            </h1>
+          )}
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-3">
@@ -592,7 +733,7 @@ export default function DashboardPage() {
                       onClick={async () => {
                         try {
                           await supabase.from('profiles').update({ is_online: false }).eq('id', userData.uuid);
-                          await supabase.auth.signOut();
+                          clearDashCache(); await supabase.auth.signOut();
                           router.push('/verify-estimate');
                         } catch (err: any) { alert('Logout failed: ' + (err.message || err)); }
                       }}
@@ -671,45 +812,15 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* VIEW SWITCHER */}
-          {userData.isApprover && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setAdminView('dashboard')}
-                    className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 ${
-                      adminView === 'dashboard'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    <LayoutDashboard className="w-3.5 h-3.5" />
-                    Dashboard
-                  </button>
-                  <button
-                    onClick={() => setAdminView('analytics')}
-                    className={`px-4 py-2 rounded-md text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-2 ${
-                      adminView === 'analytics'
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
-                        : 'text-slate-500 hover:text-slate-700'
-                    }`}
-                  >
-                    <BarChart3 className="w-3.5 h-3.5" />
-                    Revenue Analytics
-                  </button>
-                </div>
-
-                {userData.isAdmin && adminView === 'analytics' && (
-                  <button
-                    onClick={() => alert('Review request will be sent to CEO/Co-Partner')}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-[11px] font-bold uppercase tracking-wider shadow-md shadow-emerald-500/20 transition cursor-pointer"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    Send for Review
-                  </button>
-                )}
-              </div>
+          {userData.isAdmin && adminView === 'analytics' && (
+            <div className="flex justify-end">
+              <button
+                onClick={() => alert('Review request will be sent to CEO/Co-Partner')}
+                className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-lg text-[11px] font-bold uppercase tracking-wider shadow-md shadow-emerald-500/20 transition cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Send for Review
+              </button>
             </div>
           )}
 
@@ -718,12 +829,14 @@ export default function DashboardPage() {
               ═══════════════════════════════════════════════════════ */}
           {adminView === 'dashboard' && (
             <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
-                <Card title="TOTAL" value={`₹${totalValue.toLocaleString()}`} color="text-slate-800" />
-                <Card title="RECEIVED" value={`₹${receivedAmount.toLocaleString()}`} color="text-green-600" />
-                <Card title="PENDING" value={`₹${pendingAmount.toLocaleString()}`} color="text-red-600" />
-                <Card title="ENTRIES" value={deduplicatedList.length} color="text-blue-600" />
-              </div>
+              {/* ✅ Recharge approval — sabse upar, sirf jab koi PENDING request ho */}
+              {userData.isAdmin && rechargeRequests.length > 0 && (
+                <AdminRechargeApproval
+                  isAdmin={userData.isAdmin}
+                  rechargeRequests={rechargeRequests}
+                  onRefresh={() => fetchRecharges(userData.uuid, userData.isAdmin)}
+                />
+              )}
 
               {userData.isApprover && (
                 <AdminPartnerApproval
@@ -733,38 +846,108 @@ export default function DashboardPage() {
                 />
               )}
 
-              {userData.isAdmin && (
-                <AdminRechargeApproval
-                  isAdmin={userData.isAdmin}
-                  rechargeRequests={rechargeRequests}
-                  onRefresh={() => fetchRecharges(userData.uuid, userData.isAdmin)}
-                />
-              )}
-
-              <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                <div className="flex gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-                  {['All', 'Paid', 'Pending'].map((type) => (
-                    <button
-                      key={type}
-                      onClick={() => setFilterType(type as any)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 cursor-pointer ${
-                        filterType === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      {type}
-                    </button>
-                  ))}
-                </div>
-                {isApproved ? (
-                  <button onClick={() => router.push('/wallet-ledger')} className="bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold px-3.5 py-2 rounded-lg shadow transition uppercase tracking-wide cursor-pointer text-center">
-                    View Wallet & Ledger Passbook
+              {/* ✅ Simple summary table + filter options (ek hi jagah, kam space) */}
+              <div className="shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <table className="w-full text-center border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900 text-slate-300 text-[10px] sm:text-xs uppercase tracking-wider">
+                      <th className="py-2 font-bold">Total</th>
+                      <th className="py-2 font-bold">Received</th>
+                      <th className="py-2 font-bold">Pending</th>
+                      <th className="py-2 font-bold">Entries</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="text-sm sm:text-xl font-black">
+                      <td className="py-2 text-slate-800">{dataLoading ? '…' : `₹${totalValue.toLocaleString()}`}</td>
+                      <td className="py-2 text-green-600">{dataLoading ? '…' : `₹${receivedAmount.toLocaleString()}`}</td>
+                      <td className="py-2 text-red-600">{dataLoading ? '…' : `₹${pendingAmount.toLocaleString()}`}</td>
+                      <td className="py-2 text-blue-600">{dataLoading ? '…' : deduplicatedList.length}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div className="flex items-center justify-between gap-2 p-2 border-t border-slate-200 bg-slate-50">
+                  <div className="flex gap-1.5 overflow-x-auto">
+                    {['All', 'Paid', 'Pending'].map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => setFilterType(type as any)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 cursor-pointer ${
+                          filterType === type ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => router.push('/wallet-ledger')}
+                    disabled={!isApproved}
+                    title={isApproved ? 'Wallet & Ledger Passbook' : 'Ledger locked pending approval'}
+                    className="bg-slate-900 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-1.5 rounded-lg transition cursor-pointer shrink-0"
+                  >
+                    Ledger
                   </button>
-                ) : (
-                  <span className="text-[10px] text-amber-700 bg-amber-50 px-3 py-2 rounded-lg font-bold border border-amber-200 text-center">
-                    Ledger locked pending approval.
-                  </span>
-                )}
+                </div>
               </div>
+
+          <div className="flex-1 min-h-[320px] overflow-auto bg-white rounded-xl shadow-sm border border-slate-200">
+            <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
+                  <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
+                    <div className="flex flex-col gap-1 items-center">
+                      <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
+                      <input type="text" placeholder="Filter..." value={refSearch} onChange={(e) => setRefSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                    </div>
+                    <div onMouseDown={handleMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                  </th>
+                  <th className="p-3 font-semibold w-24 text-center">DATE</th>
+                  <th className="p-3 font-semibold w-52 text-center">CUSTOMER NAME</th>
+                  <th style={{ width: `${clientWidth}px` }} className="p-2 text-center relative group">
+                    <div className="flex flex-col gap-1 items-center">
+                      <span className="px-1 text-[10px] font-bold text-slate-300">CLIENT</span>
+                      <input type="text" placeholder="Filter..." value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                    </div>
+                    <div onMouseDown={handleClientMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                  </th>
+                  <th className="p-2 w-48 text-center">
+                    <div className="flex flex-col gap-1 items-center">
+                      <span className="px-1 text-[10px] font-bold text-slate-300">REPRESENTATIVE</span>
+                      <input type="text" placeholder="Filter..." value={representativeSearch} onChange={(e) => setRepresentativeSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                    </div>
+                  </th>
+                  <th className="p-3 font-semibold w-48 text-center">CASE TYPE</th>
+                  <th className="p-3 font-semibold w-28 text-center">FEE STANDARD</th>
+                  <th className="p-3 font-semibold w-28 text-center">STATUS</th>
+                  <th className="p-3 font-semibold w-36 text-center">TRANSACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dataLoading && Array.from({ length: 6 }).map((_, i) => (
+                  <tr key={`sk-${i}`} className="border-t">
+                    <td colSpan={9} className="p-3"><div className="h-4 bg-slate-100 rounded animate-pulse" /></td>
+                  </tr>
+                ))}
+                {!dataLoading && visibleRows.map((est) => (
+                  <TxnRow key={`${est.source_table}-${est.id || est.ref_no}`} est={est} onHistory={openHistory} />
+                ))}
+                {!dataLoading && filteredList.length === 0 && (
+                  <tr><td colSpan={9} className="p-6 text-center text-xs text-slate-400 font-bold uppercase">No records found</td></tr>
+                )}
+              </tbody>
+            </table>
+            {!dataLoading && filteredList.length > visibleCount && (
+              <div className="p-3 text-center border-t bg-slate-50">
+                <button
+                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                  className="bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold px-4 py-2 rounded-lg uppercase tracking-wide cursor-pointer"
+                >
+                  Show more ({filteredList.length - visibleCount} baaki)
+                </button>
+              </div>
+            )}
+          </div>
             </>
           )}
 
@@ -808,91 +991,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* TABLE — Only in Dashboard view, scrollable separately */}
-        {adminView === 'dashboard' && (
-          <div className="overflow-auto bg-white rounded-xl shadow-sm border border-slate-200 mt-2 min-h-0 max-h-[60vh]">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
-                  <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
-                      <input type="text" placeholder="Filter..." value={refSearch} onChange={(e) => setRefSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                    <div onMouseDown={handleMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
-                  </th>
-                  <th className="p-3 font-semibold w-24 text-center">DATE</th>
-                  <th className="p-3 font-semibold w-52 text-center">CUSTOMER NAME</th>
-                  <th style={{ width: `${clientWidth}px` }} className="p-2 text-center relative group">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">CLIENT</span>
-                      <input type="text" placeholder="Filter..." value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                    <div onMouseDown={handleClientMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
-                  </th>
-                  <th className="p-2 w-48 text-center">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">REPRESENTATIVE</span>
-                      <input type="text" placeholder="Filter..." value={representativeSearch} onChange={(e) => setRepresentativeSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                  </th>
-                  <th className="p-3 font-semibold w-48 text-center">CASE TYPE</th>
-                  <th className="p-3 font-semibold w-28 text-center">FEE STANDARD</th>
-                  <th className="p-3 font-semibold w-28 text-center">STATUS</th>
-                  <th className="p-3 font-semibold w-36 text-center">TRANSACTION</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredList.map((est) => {
-                  const dateSource = est.created_date || est.created_at;
-                  const dateObj = dateSource ? new Date(dateSource) : null;
-                  const formattedDate = dateObj
-                    ? `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`
-                    : '-';
-
-                  let cleanCustomerName = est.customer_name || '-';
-                  const match = cleanCustomerName.match(/^(.*?)\s+(s\/o|d\/o|w\/o|c\/o|S\/O|D\/O|W\/O|C\/O)\b/i);
-                  if (match && match[1]) cleanCustomerName = match[1].trim();
-
-                  const statusUpper = (est.status || 'PENDING').toUpperCase();
-                  const isPaid = statusUpper === 'RECEIVED' || statusUpper === 'PAID' || statusUpper === 'COMPLETED';
-
-                  return (
-                    <tr key={`${est.source_table}-${est.id || est.ref_no}`} className="border-t hover:bg-slate-50 text-xs font-sans tracking-wide">
-                      <td className="p-3 font-bold text-blue-600 uppercase text-center">{est.ref_no}</td>
-                      <td className="p-3 text-slate-600 text-center whitespace-nowrap">{formattedDate}</td>
-                      <td className="p-3 uppercase text-center">
-                        <div className="font-extrabold text-slate-800">{cleanCustomerName.replace(/[,.]\s*$/, '')}</div>
-                      </td>
-                      <td className="p-3 font-bold text-slate-700 uppercase text-center truncate">{est.client_name || '-'}</td>
-                      <td className="p-3 font-semibold text-slate-600 uppercase text-center truncate">{est.representative || '-'}</td>
-                      <td className="p-3 font-black text-slate-900 uppercase text-center whitespace-nowrap">{est.case_type || 'NEW CONSTRUCTION'}</td>
-                      <td className="p-3 font-bold text-slate-800 text-center whitespace-nowrap">₹{Number(est.fee_standard || 0).toLocaleString()}</td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-wider ${
-                          isPaid ? 'bg-emerald-100 text-emerald-600'
-                            : statusUpper === 'WAIVED' ? 'bg-slate-100 text-slate-600'
-                            : statusUpper === 'FINALIZED' ? 'bg-blue-100 text-blue-600'
-                            : 'bg-red-100 text-red-600'
-                        }`}>
-                          {statusUpper}
-                        </span>
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          onClick={() => { setSelectedTxn(est); setIsModalOpen(true); }}
-                          className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-3 py-1 rounded-lg text-xs transition border border-blue-200 uppercase cursor-pointer"
-                        >
-                          History
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* Overlays + Drawer + Modals */}
@@ -904,7 +1002,7 @@ export default function DashboardPage() {
             <button onClick={() => openSupportModal('approval')} className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-black px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer">
               Contact Admin
             </button>
-            <button onClick={async () => { await supabase.auth.signOut(); router.push('/login'); }} className="bg-slate-700 hover:bg-slate-600 text-white font-black px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer">
+            <button onClick={async () => { clearDashCache(); await supabase.auth.signOut(); router.push('/login'); }} className="bg-slate-700 hover:bg-slate-600 text-white font-black px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer">
               Logout
             </button>
           </div>
@@ -978,7 +1076,7 @@ export default function DashboardPage() {
             </div>
             <div className="p-4 border-t border-slate-100 bg-slate-50">
               <button
-                onClick={async () => { try { await supabase.auth.signOut(); router.push('/verify-estimate'); } catch { alert('Logout failed'); } }}
+                onClick={async () => { try { clearDashCache(); await supabase.auth.signOut(); router.push('/verify-estimate'); } catch { alert('Logout failed'); } }}
                 className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-sm"
               >
                 Logout Session
@@ -989,12 +1087,14 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <RechargeModal
-        isOpen={isRechargeModalOpen}
-        onClose={() => setIsRechargeModalOpen(false)}
-        userData={userData}
-        onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)}
-      />
+      {isRechargeModalOpen && (
+        <RechargeModal
+          isOpen={isRechargeModalOpen}
+          onClose={() => setIsRechargeModalOpen(false)}
+          userData={userData}
+          onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)}
+        />
+      )}
 
       {isModalOpen && selectedTxn && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -1059,12 +1159,14 @@ export default function DashboardPage() {
         />
       )}
 
-      <CorporateSupportModal
-        isOpen={isSupportModalOpen}
-        onClose={() => { setIsSupportModalOpen(false); setSupportDefaultIssue(null); }}
-        userData={userData}
-        defaultIssue={supportDefaultIssue}
-      />
+      {isSupportModalOpen && (
+        <CorporateSupportModal
+          isOpen={isSupportModalOpen}
+          onClose={() => { setIsSupportModalOpen(false); setSupportDefaultIssue(null); }}
+          userData={userData}
+          defaultIssue={supportDefaultIssue}
+        />
+      )}
 
       <div className="text-[10px] sm:text-xs text-gray-400 text-center shrink-0 py-2">
         © 2026 LNT WITH AI 2.0 RIGHTS RESERVED

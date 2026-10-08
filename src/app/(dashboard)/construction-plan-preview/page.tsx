@@ -10,6 +10,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 import PaymentGateway from "./components/PaymentGateway";
+import { buildPlanPdf, downloadBlob, sharePdf } from "./planPdf";
 
 export default function ConstructionPlanPreview() {
   const router = useRouter();
@@ -526,15 +527,79 @@ export default function ConstructionPlanPreview() {
     }
   }, [refNo, payment.isAdminUser]);
 
+  // ============================================================
+  // 📄 PDF (Print / Download / Share) — mobile + desktop me same A4 landscape
+  // ============================================================
+  const [pdfBusy, setPdfBusy] = useState<null | "print" | "download" | "share">(null);
+  const pdfFileName = `Construction_Plan_${String(refNo || "DRAFT").replace(/[^A-Za-z0-9_-]+/g, "_")}.pdf`;
+
+  const makePdf = useCallback(async (): Promise<Blob | null> => {
+    const verified = await verifyPaidOnServer();
+    if (!verified) { alert("🔒 Server verification failed."); return null; }
+    return buildPlanPdf({ isMobile, title: pdfFileName });
+  }, [verifyPaidOnServer, isMobile, pdfFileName]);
+
+  const handleDownloadPdf = useCallback(async () => {
+    if (!canPrint || pdfBusy) return;
+    try {
+      setPdfBusy("download");
+      const blob = await makePdf();
+      if (blob) downloadBlob(blob, pdfFileName);
+    } catch (e) {
+      console.error("[PDF DOWNLOAD]", e);
+      alert("PDF banane me problem aayi, dobara try karein.");
+    } finally { setPdfBusy(null); }
+  }, [canPrint, pdfBusy, makePdf, pdfFileName]);
+
+  const handleSharePdf = useCallback(async () => {
+    if (!canPrint || pdfBusy) return;
+    try {
+      setPdfBusy("share");
+      const blob = await makePdf();
+      if (!blob) return;
+      const res = await sharePdf(
+        blob, pdfFileName, "Construction Plan",
+        `Construction plan (Ref: ${refNo}) — LNT Consultant`
+      );
+      if (res === "unsupported") {
+        // Browser file-share support nahi karta -> PDF download kar do
+        downloadBlob(blob, pdfFileName);
+        alert("PDF download ho gayi hai. Ab isse Gmail / WhatsApp me attach karke bhej dein.");
+      }
+    } catch (e) {
+      console.error("[PDF SHARE]", e);
+      alert("PDF share karne me problem aayi, dobara try karein.");
+    } finally { setPdfBusy(null); }
+  }, [canPrint, pdfBusy, makePdf, pdfFileName, refNo]);
+
+  // Mobile par window.print() page ko A4 me fit nahi karta -> PDF banakar kholte hain
+  // (user viewer se print / save kar sakta hai, drawing desktop jaisi hi aayegi)
+  const handleMobilePrint = useCallback(async () => {
+    const w = window.open("", "_blank"); // user-gesture ke andar hi kholna zaroori hai
+    try {
+      if (w) w.document.write("<p style='font-family:sans-serif;padding:16px'>Preparing PDF…</p>");
+      setPdfBusy("print");
+      const blob = await makePdf();
+      if (!blob) { w?.close(); return; }
+      if (w) w.location.href = URL.createObjectURL(blob);
+      else downloadBlob(blob, pdfFileName);
+    } catch (e) {
+      console.error("[PDF PRINT]", e);
+      w?.close();
+      alert("PDF banane me problem aayi, dobara try karein.");
+    } finally { setPdfBusy(null); }
+  }, [makePdf, pdfFileName]);
+
     const handlePrintClick = useCallback(async () => {
     // ✅ Reuse check pending ho to wait karo
     if (payment.reuseChecking) return;
 
     if (!canPrint) { payment.handlePayment(); return; }
+    if (isMobile) { await handleMobilePrint(); return; }
     const verified = await verifyPaidOnServer();
     if (!verified) { alert("🔒 Server verification failed."); return; }
     setTimeout(() => window.print(), 200);
-  }, [payment.reuseChecking, canPrint, payment, verifyPaidOnServer]);
+  }, [payment.reuseChecking, canPrint, payment, verifyPaidOnServer, isMobile, handleMobilePrint]);
 
   // ============================================================
   // PRINT FIT
@@ -844,6 +909,26 @@ export default function ConstructionPlanPreview() {
       <div className={`${isMobile ? "max-w-full" : "max-w-[1600px] mx-auto"}`}>
         {payment.renderStatusMessage()}
       </div>
+
+      {/* ✅ PAID: DOWNLOAD / SHARE PDF */}
+      {canPrint && (
+        <div className={`${isMobile ? "max-w-full" : "max-w-[1600px] mx-auto"} flex flex-wrap items-center gap-2 mb-2 print:hidden`}>
+          <button
+            onClick={handleDownloadPdf}
+            disabled={!!pdfBusy}
+            className={`${isMobile ? "px-2 py-1 text-[10px]" : "px-4 py-1.5 text-xs"} font-bold rounded text-white ${pdfBusy ? "bg-gray-400 cursor-not-allowed" : "bg-emerald-600 hover:bg-emerald-700 cursor-pointer"}`}
+          >
+            {pdfBusy === "download" ? "PDF BAN RAHI HAI..." : "⬇️ DOWNLOAD PDF"}
+          </button>
+          <button
+            onClick={handleSharePdf}
+            disabled={!!pdfBusy}
+            className={`${isMobile ? "px-2 py-1 text-[10px]" : "px-4 py-1.5 text-xs"} font-bold rounded text-white ${pdfBusy ? "bg-gray-400 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-700 cursor-pointer"}`}
+          >
+            {pdfBusy === "share" ? "PDF BAN RAHI HAI..." : "📤 SHARE (WHATSAPP / MAIL)"}
+          </button>
+        </div>
+      )}
 
       {/* LAUNCH OFFER BANNER */}
       {!canPrint && !payment.isAdminUser && (

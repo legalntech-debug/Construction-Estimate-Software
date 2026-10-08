@@ -370,6 +370,7 @@ const STAIR_ENTRY_MIN_FT = 3.5;
 /** Passage <-> living khula edge: stair ke baad kam se kam itna free chahiye (ft) */
 const MIN_OPEN_EDGE_FREE_FT = 3.5;
 /** Stair ke bagal me circulation ke liye min free width (ft) */
+const STAIR_DEBUG = false;
 const MIN_SIDE_WALK_FT = 3.0;
 /** Hard-fail penalty: entry band / passage opening / wall-to-wall stair ko 'usable' kabhi nahi banne dena */
 const STAIR_HARD_PENALTY = 100000;
@@ -673,8 +674,8 @@ function chooseStaircaseCorner(
   cands.sort((a, b) => a.score - b.score);
   const best = cands[0]?.placement ?? null;
   if (best) {
-    console.log(best.usable ? '[CHOOSE STAIR] ✅' : '[CHOOSE STAIR] ⚠️ NO CLEAN SPOT', best);
-    if (!best.usable) {
+    if (STAIR_DEBUG) console.log(best.usable ? '[CHOOSE STAIR] ✅' : '[CHOOSE STAIR] ⚠️ NO CLEAN SPOT', best);
+    if (!best.usable && STAIR_DEBUG) {
       console.log('[CHOOSE STAIR] all candidates', { living: L, stair: { w: sW, h: sH }, rotated },
         cands.map(c => ({ corner: c.placement.corner, entry: c.placement.entryFace, weight: Math.round(c.weight), why: c.placement.violations })));
     }
@@ -1608,6 +1609,24 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
 
       let usedTier = '';
 
+      // ✅ ARCHITECT OBJECTIVE (global): stair ka shape (U ya C), flight width, type aur location ek hi score par compare hote hain:
+      //   upper floor par bedroom ke liye depth (>= 7.5 ft), balcony/study jaisi chhoti zone, sliver ka waste, stair ka footprint.
+      //   Pehle "first usable wins" tha -> ab har usable option evaluate hota hai (stricter passage tier ko preference).
+      const stairUtil = (pl: StairPlacement, w: number, h: number, rot: boolean): number => {
+        const LAND = 3.5, MINB = 7.5;
+        const y0 = pl.y, y1 = pl.y + h, face = pl.entryFace;
+        const top = y0 - (!rot && face === 'TOP' ? LAND : 0);
+        const bot = H - y1 - (!rot && face === 'BOTTOM' ? LAND : 0);
+        const zone = (d: number) => (d >= MINB ? 60 + Math.min(d, 14) : d >= 3.5 ? 12 : 0);
+        const waste = (d: number) => (d > 0.5 && d < MINB ? d : 0);
+        return zone(top) + zone(bot) - 1.5 * (waste(top) + waste(bot)) - 0.25 * w * h;
+      };
+      let bestU: { pick: Pick; u: number; tierIdx: number; label: string } | null = null;
+      const considerUsable = (pick: Pick, rot: boolean, tierIdx: number, label: string) => {
+        const u = stairUtil(pick.placement, pick.sW, pick.sH, rot);
+        if (!bestU || u > bestU.u + 1e-6) bestU = { pick, u, tierIdx, label };
+      };
+
       // ✅ NARROW PLOT FALLBACK (10 ft ya kam): portrait stair, ek side par >= 3 ft walkway (passage tak),
       // neeche >= 3.5 ft entry. Cross-width pehle (lw - 3), phir (lw - 2.5), (lw - 2). Sirf USABLE placement return hota hai.
       const narrowPlotFallback = (): Pick | null => {
@@ -1640,6 +1659,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
       const fwCaps = Array.from(new Set([FLIGHT_WIDTH_MAX_FT, 3.1, FLIGHT_WIDTH_MIN_FT].map(v => Number(v.toFixed(2)))));
       outer: for (const tier of passageTiers) {
         if (STAIR_OVERRIDE?.rotated === true) break;   // forced rotated: portrait try hi nahi
+        if (bestU) break outer;                         // pichhle (stricter) tier me usable mil gaya
         for (const zl of zoneLens) {
           for (const fwCap of fwCaps) {
             const base = fitStaircaseToZone(floorH, {
@@ -1659,13 +1679,11 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
               if (sW < 3 || sH < 6) continue;
               const placement = chooseStaircaseCorner(living, sW, sH, rooms, [], t, { upperRange, relocateDoors: true });
               if (!placement) continue;
+              const pick: Pick = { fit, placement, sW, sH, zoneCross: lw, zoneRun: zl, minPassage: tier.minPassage };
+              if (placement.usable) { considerUsable(pick, false, passageTiers.indexOf(tier), tier.label); continue; }
               const vNew = placement.weight ?? 9999;
               const vOld = best?.placement.weight ?? 9999;
-              const better = !best
-                || (placement.usable && !best.placement.usable)
-                || (!placement.usable && !best.placement.usable && vNew < vOld - 0.01);
-              if (better) { best = { fit, placement, sW, sH, zoneCross: lw, zoneRun: zl, minPassage: tier.minPassage }; usedTier = tier.label; }
-              if (placement.usable) break outer;
+              if (!best || (!best.placement.usable && vNew < vOld - 0.01)) { best = pick; usedTier = tier.label; }
             }
           }
         }
@@ -1673,11 +1691,13 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
 
       // ✅ FALLBACK: seedhi (portrait) stair kisi corner me clean fit nahi hui (samne wali wall se chipak jaati / 3 ft entry nahi) ->
       // stair ko ROTATE karke (run X direction me, entry LEFT/RIGHT) har corner me try karo. Types: U / winder / C / L sab.
-      if (STAIR_OVERRIDE?.rotated === true || ((!best || !best.placement.usable) && STAIR_OVERRIDE?.rotated !== false)) {
+      if (STAIR_OVERRIDE?.rotated === true || STAIR_OVERRIDE?.rotated !== false) {
         const rotLens = Array.from(new Set([
           Math.max(6, lw - 4), Math.max(6, lw - STAIR_ENTRY_MIN_FT), Math.max(6, lw - STAIR_CLEAR_DEPTH_FT), Math.max(6, lw - 0.5), Math.max(6, lw),
         ].map(v => Number(v.toFixed(2)))));
         outerRot: for (const tier of passageTiers) {
+          const tIdx = passageTiers.indexOf(tier);
+          if (bestU && tIdx > bestU.tierIdx && !bestU.label.startsWith('ROTATED_')) break outerRot;   // portrait ke tier se zyada relaxed nahi
           for (const zl of rotLens) {
             for (const fwCap of fwCaps) {
               for (const t of typeOrder) {
@@ -1694,19 +1714,25 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
                 if (rW > lw - STAIR_ENTRY_MIN_FT + 0.01) continue;   // rotated stair ke ek taraf 3.5 ft entry zaroori
                 const placement = chooseStaircaseCorner(living, rW, rH, rooms, [], t, { rotated: true, upperRange, relocateDoors: true });
                 if (!placement) continue;
+                const pickR: Pick = { fit, placement, sW: rW, sH: rH, rotated: true, zoneCross: lh, zoneRun: zl, minPassage: tier.minPassage };
+                if (placement.usable) { considerUsable(pickR, true, tIdx, `ROTATED_${tier.label}`); continue; }
                 const vNew = placement.weight ?? 9999;
                 const vOld = best?.placement.weight ?? 9999;
-                const better = !best
-                  || (placement.usable && !best.placement.usable)
-                  || (!placement.usable && !best.placement.usable && vNew < vOld - 0.01);
-                if (better) { best = { fit, placement, sW: rW, sH: rH, rotated: true, zoneCross: lh, zoneRun: zl, minPassage: tier.minPassage }; usedTier = `ROTATED_${tier.label}`; }
-                if (placement.usable) break outerRot;
+                if (!best || (!best.placement.usable && vNew < vOld - 0.01)) { best = pickR; usedTier = `ROTATED_${tier.label}`; }
               }
             }
           }
         }
       }
 
+      if (bestU) {
+        best = (bestU as any).pick as Pick; usedTier = (bestU as any).label;
+        console.log('[STAIR ARCHITECT] chosen', {
+          shape: best.rotated ? 'C (run along width, entry LEFT/RIGHT)' : 'U (entry TOP/BOTTOM)',
+          type: best.fit?.staircaseType, rect: `${best.sW.toFixed(1)}x${best.sH.toFixed(1)}`, corner: best.placement.corner,
+          entry: best.placement.entryFace, utility: Number((bestU as any).u.toFixed(1)), tier: usedTier,
+        });
+      }
       if (best) {
         // ✅ EXACT-FIT: spec ke treads vs rect ka mismatch ("SHORT n TREAD") yahin khatam.
         //   Riser count fixed; start/end patti (Landing-1 / Landing-2) me jagah kam ho to extra treads MIDDLE me shift,

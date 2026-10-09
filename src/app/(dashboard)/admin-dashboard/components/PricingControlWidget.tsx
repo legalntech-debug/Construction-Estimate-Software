@@ -55,6 +55,23 @@ function canApprovePricing(profile: any): boolean {
   return getUserRoles(profile).some((r) => APPROVER_ROLES.includes(r));
 }
 
+// ═══════════════════════════════════════════════════════════
+// AUTO-SYNC HELPERS
+// ═══════════════════════════════════════════════════════════
+const roundTwo = (n: number) => Math.round(n * 100) / 100;
+
+/** MRP + Price se auto % nikalna */
+const syncPercentFromPrice = (mrp: number, price: number): number | null => {
+  if (!mrp || mrp <= 0 || price >= mrp) return null;
+  return roundTwo(((mrp - price) / mrp) * 100);
+};
+
+/** MRP + % se auto price nikalna */
+const syncPriceFromPercent = (mrp: number, pct: number | null): number => {
+  if (pct === null || pct <= 0 || !mrp || mrp <= 0) return mrp;
+  return Math.round(mrp - (mrp * pct) / 100);
+};
+
 export default function PricingControlWidget() {
   const { currentUser } = useAuth();
 
@@ -146,6 +163,11 @@ export default function PricingControlWidget() {
     setSaving(true);
 
     try {
+      // ═══ AUTO-SYNC: price और % dono consistent karo ═══
+      const finalMrp = Number(editForm.mrp);
+      const finalPrice = Number(editForm.price);
+      const autoPercent = syncPercentFromPrice(finalMrp, finalPrice);
+
       const oldValues = {
         mrp: editingRow.mrp,
         price: editingRow.price,
@@ -154,10 +176,11 @@ export default function PricingControlWidget() {
       };
 
       const newValues = {
-        mrp: Number(editForm.mrp),
-        price: Number(editForm.price),
+        mrp: finalMrp,
+        price: finalPrice,
         discount_enabled: editForm.discount_enabled,
-        discount_percent: editForm.discount_percent,
+        discount_percent:
+          editForm.discount_percent !== null ? editForm.discount_percent : autoPercent,
       };
 
       const parts: string[] = [];
@@ -165,6 +188,8 @@ export default function PricingControlWidget() {
       if (oldValues.price !== newValues.price) parts.push(`Price ₹${oldValues.price} → ₹${newValues.price}`);
       if (oldValues.discount_enabled !== newValues.discount_enabled)
         parts.push(`Discount ${oldValues.discount_enabled ? 'OFF' : 'ON'}`);
+      if (oldValues.discount_percent !== newValues.discount_percent)
+        parts.push(`Discount % ${oldValues.discount_percent ?? '—'} → ${newValues.discount_percent ?? '—'}`);
       const summary = parts.join(' | ') || 'No changes';
 
       if (canApprove) {
@@ -228,13 +253,20 @@ export default function PricingControlWidget() {
   const handleApprove = async () => {
     if (!approvingReq || !currentUser) return;
 
+    // ═══ AUTO-SYNC: agar admin ne % nahi diya to price se auto nikaalo ═══
+    const finalMrp = Number(adminEditedValues.mrp ?? approvingReq.new_values.mrp);
+    const finalPrice = Number(adminEditedValues.price ?? approvingReq.new_values.price);
+    const finalDiscountPercent =
+      adminEditedValues.discount_percent ??
+      approvingReq.new_values.discount_percent ??
+      syncPercentFromPrice(finalMrp, finalPrice);
+
     const finalValues = {
-      mrp: Number(adminEditedValues.mrp ?? approvingReq.new_values.mrp),
-      price: Number(adminEditedValues.price ?? approvingReq.new_values.price),
+      mrp: finalMrp,
+      price: finalPrice,
       discount_enabled:
         adminEditedValues.discount_enabled ?? approvingReq.new_values.discount_enabled,
-      discount_percent:
-        adminEditedValues.discount_percent ?? approvingReq.new_values.discount_percent,
+      discount_percent: finalDiscountPercent,
     };
 
     const wasOverridden =
@@ -577,7 +609,7 @@ export default function PricingControlWidget() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* 2. MOBILE CARD VIEW (NEW) */}
+      {/* 2. MOBILE CARD VIEW */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <div className="block md:hidden space-y-3">
         {filteredRows.length === 0 ? (
@@ -596,7 +628,6 @@ export default function PricingControlWidget() {
                 key={row.id}
                 className="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-2"
               >
-                {/* Header: Case Type + State + Status */}
                 <div className="flex justify-between items-start gap-2 border-b border-slate-200 pb-2">
                   <div className="min-w-0 flex-1">
                     <div className="font-bold text-slate-900 text-xs truncate">{row.case_type}</div>
@@ -615,7 +646,6 @@ export default function PricingControlWidget() {
                   </span>
                 </div>
 
-                {/* Grid: MRP, Price, Discount, % */}
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-white p-2 rounded-xl border border-slate-200">
                     <span className="block text-[9px] text-slate-400 font-bold uppercase">MRP</span>
@@ -650,7 +680,6 @@ export default function PricingControlWidget() {
                   </div>
                 </div>
 
-                {/* Edit Button */}
                 <button
                   onClick={() => {
                     setEditingRow(row);
@@ -671,7 +700,9 @@ export default function PricingControlWidget() {
         )}
       </div>
 
-      {/* EDIT MODAL */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* EDIT MODAL — AUTO-SYNC ENABLED */}
+      {/* ═══════════════════════════════════════════════════════════ */}
       {editingRow && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md p-5 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -694,31 +725,96 @@ export default function PricingControlWidget() {
               </p>
             </div>
 
+            {/* Quick % Buttons */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase">
+                Quick Discount
+              </label>
+              <div className="flex gap-1 flex-wrap mt-1">
+                {[5, 10, 15, 20, 25, 30, 50].map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() =>
+                      setEditForm({
+                        ...editForm,
+                        discount_percent: p,
+                        price: syncPriceFromPercent(editForm.mrp, p),
+                      })
+                    }
+                    className={`px-2 py-1 rounded text-[10px] font-bold transition ${
+                      editForm.discount_percent === p
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {p}% OFF
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditForm({
+                      ...editForm,
+                      discount_percent: null,
+                      price: editForm.mrp,
+                    })
+                  }
+                  className="px-2 py-1 rounded text-[10px] font-bold bg-rose-100 text-rose-700 hover:bg-rose-200"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-3">
+              {/* MRP Input */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">MRP (₹)</label>
                 <input
                   type="number"
                   value={editForm.mrp}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, mrp: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const newMrp = Number(e.target.value);
+                    // Agar % diya hua hai → price recalculate
+                    const newPrice =
+                      editForm.discount_percent !== null
+                        ? syncPriceFromPercent(newMrp, editForm.discount_percent)
+                        : editForm.price;
+                    setEditForm({
+                      ...editForm,
+                      mrp: newMrp,
+                      price: newPrice,
+                    });
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
+              {/* Price Input → % auto */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">Price (₹)</label>
                 <input
                   type="number"
                   value={editForm.price}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, price: Number(e.target.value) })
-                  }
+                  onChange={(e) => {
+                    const newPrice = Number(e.target.value);
+                    setEditForm({
+                      ...editForm,
+                      price: newPrice,
+                      discount_percent: syncPercentFromPrice(editForm.mrp, newPrice),
+                    });
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {editForm.mrp > 0 && editForm.price < editForm.mrp && (
+                  <p className="text-[10px] text-emerald-600 font-bold mt-1">
+                    ✓ {syncPercentFromPrice(editForm.mrp, editForm.price)}% off auto-calculated
+                  </p>
+                )}
               </div>
 
+              {/* Discount Toggle */}
               <div className="flex items-center gap-2 bg-emerald-50 p-3 rounded-xl border border-emerald-200">
                 <input
                   type="checkbox"
@@ -734,23 +830,51 @@ export default function PricingControlWidget() {
                 </label>
               </div>
 
+              {/* Discount % Input → Price auto */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">
-                  Manual Discount % (blank = auto)
+                  Discount % (blank = auto)
                 </label>
                 <input
                   type="number"
                   value={editForm.discount_percent ?? ''}
                   placeholder="auto"
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const pct = e.target.value === '' ? null : Number(e.target.value);
                     setEditForm({
                       ...editForm,
-                      discount_percent:
-                        e.target.value === '' ? null : Number(e.target.value),
-                    })
-                  }
+                      discount_percent: pct,
+                      price: syncPriceFromPercent(editForm.mrp, pct),
+                    });
+                  }}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                <p className="text-[10px] text-blue-600 mt-1">
+                  💡 % badlenge to price auto-update hoga
+                </p>
+              </div>
+
+              {/* Live Preview */}
+              <div className="bg-slate-900 text-white p-3 rounded-xl">
+                <p className="text-[10px] font-bold uppercase text-slate-400">Live Preview</p>
+                <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+                  {editForm.mrp > editForm.price && editForm.discount_enabled && (
+                    <span className="line-through text-slate-500 text-xs">
+                      ₹{editForm.mrp}
+                    </span>
+                  )}
+                  <span className="text-lg font-black text-emerald-400">
+                    ₹{editForm.price}
+                  </span>
+                  {editForm.discount_percent !== null && editForm.discount_percent > 0 && (
+                    <span className="text-xs bg-emerald-500 text-white px-2 py-0.5 rounded font-bold">
+                      {editForm.discount_percent}% OFF
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Savings: ₹{editForm.mrp - editForm.price}
+                </p>
               </div>
 
               {!canApprove && (
@@ -780,7 +904,9 @@ export default function PricingControlWidget() {
         </div>
       )}
 
-      {/* APPROVE MODAL */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* APPROVE MODAL — AUTO-SYNC ENABLED */}
+      {/* ═══════════════════════════════════════════════════════════ */}
       {approvingReq && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -835,12 +961,25 @@ export default function PricingControlWidget() {
                         <input
                           type="number"
                           value={adminEditedValues[f] ?? ''}
-                          onChange={(e) =>
-                            setAdminEditedValues({
-                              ...adminEditedValues,
-                              [f]: Number(e.target.value),
-                            })
-                          }
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            const updated = { ...adminEditedValues, [f]: val };
+                            // Agar price badla → % auto-sync
+                            if (f === 'price') {
+                              const mrp = Number(
+                                updated.mrp ?? approvingReq.new_values.mrp
+                              );
+                              updated.discount_percent = syncPercentFromPrice(mrp, val);
+                            }
+                            // Agar mrp badla → price auto (agar % tha)
+                            if (f === 'mrp' && updated.discount_percent !== null && updated.discount_percent !== undefined) {
+                              updated.price = syncPriceFromPercent(
+                                val,
+                                updated.discount_percent
+                              );
+                            }
+                            setAdminEditedValues(updated);
+                          }}
                           className="w-24 px-2 py-1 border border-emerald-300 rounded text-right font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                       </td>
@@ -865,6 +1004,34 @@ export default function PricingControlWidget() {
                           })
                         }
                         className="w-4 h-4"
+                      />
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-bold uppercase text-slate-700">% Off</td>
+                    <td className="p-2 text-right text-slate-500">
+                      {approvingReq.old_values?.discount_percent ?? '—'}%
+                    </td>
+                    <td className="p-2 text-right text-blue-600 font-bold">
+                      {approvingReq.new_values?.discount_percent ?? '—'}%
+                    </td>
+                    <td className="p-2 text-right bg-emerald-50">
+                      <input
+                        type="number"
+                        value={adminEditedValues.discount_percent ?? ''}
+                        placeholder="auto"
+                        onChange={(e) => {
+                          const pct = e.target.value === '' ? null : Number(e.target.value);
+                          const mrp = Number(
+                            adminEditedValues.mrp ?? approvingReq.new_values.mrp
+                          );
+                          setAdminEditedValues({
+                            ...adminEditedValues,
+                            discount_percent: pct,
+                            price: syncPriceFromPercent(mrp, pct),
+                          });
+                        }}
+                        className="w-24 px-2 py-1 border border-emerald-300 rounded text-right font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
                     </td>
                   </tr>

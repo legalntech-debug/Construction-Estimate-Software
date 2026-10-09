@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
-import { UserPlus, X, Mail, Lock, Eye, EyeOff, Building, ShieldCheck, MessageSquareShare, MapPin, CreditCard } from 'lucide-react';
+import { UserPlus, X, Mail, Lock, Eye, EyeOff, Building, ShieldCheck, MessageSquareShare, MapPin, CreditCard, AlertTriangle } from 'lucide-react';
 
 const INDIAN_STATES_AND_DISTRICTS: Record<string, string[]> = {
   "ANDHRA PRADESH": ["Anantapur", "Chittoor", "East Godavari", "Guntur", "Krishna", "Kurnool", "Prakasam", "Srikakulam", "Visakhapatnam", "Vizianagaram", "West Godavari", "YSR Kadapa"],
@@ -34,6 +34,8 @@ const INDIAN_STATES_AND_DISTRICTS: Record<string, string[]> = {
   "WEST BENGAL": ["Alipurduar", "Bankura", "Birbhum", "Cooch Behar", "Dakshin Dinajpur", "Darjeeling", "Hooghly", "Howrah", "Jalpaiguri", "Jhargram", "Kalimpong", "Kolkata", "Malda", "Murshidabad", "Nadia", "North 24 Parganas", "Paschim Bardhaman", "Paschim Medinipur", "Purba Bardhaman", "Purba Medinipur", "Purulia", "South 24 Parganas", "Uttar Dinajpur"]
 };
 
+// ... (INDIAN_STATES_AND_DISTRICTS — same rakho, koi change nahi)
+
 interface AddUserModalProps {
   partnerProfile: any;
   onClose: () => void;
@@ -56,6 +58,12 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
   const [formError, setFormError] = useState('');
   const [createdUserPayload, setCreatedUserPayload] = useState<any>(null);
 
+  // ✅ NEW: Duplicate error state
+  const [duplicateError, setDuplicateError] = useState<{
+    message: string;
+    field: string;
+  } | null>(null);
+
   const availableCities = useMemo(() => {
     if (!newUserState) return [];
     return INDIAN_STATES_AND_DISTRICTS[newUserState.toUpperCase()] || [];
@@ -65,6 +73,7 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
     e.preventDefault();
     setSubmittingUser(true);
     setFormError('');
+    setDuplicateError(null);
 
     if (!partnerProfile) {
       setFormError('PARTNER SESSION INVALID.');
@@ -76,40 +85,47 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
       const generatedUserCode = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
       const partnerUserCode = partnerProfile?.profiles?.user_code || partnerProfile.partner_id;
 
-      // API Route endpoint call
       const res = await fetch('/api/admin/create-user', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: newUserEmail.toLowerCase(),
           password: newUserPassword,
           profileData: {
-  full_name: newUserName.toUpperCase(),
-  mobile: newUserMobile,
-  email: newUserEmail.toLowerCase(),
-  address: newUserAddress.toUpperCase(),
-  aadhaar_no: newUserAadhaar,
-  user_type: newUserType,
-  plan_type: 'BASIC PLAN',
-  firm_name: newUserType !== 'INDIVIDUAL' ? newUserFirmName.toUpperCase() : null,
-  city: newUserCity.toUpperCase(),
-  state: newUserState.toUpperCase(),
-  user_code: generatedUserCode,
-  referred_by: partnerUserCode,
-  partner_id: partnerProfile.partner_id,
-  status: 'inactive',                                  // ✅ CHANGED
-  approval_status: 'PENDING',                          // ✅ NEW LINE
-  role: 'user',
-  terms_accepted: false,
-  terms_accepted_at: null,
-  created_at: new Date().toISOString(),
-},
+            full_name: newUserName.toUpperCase(),
+            mobile: newUserMobile,
+            email: newUserEmail.toLowerCase(),
+            address: newUserAddress.toUpperCase(),
+            aadhaar_no: newUserAadhaar.replace(/\s/g, ''),
+            user_type: newUserType,
+            plan_type: 'BASIC PLAN',
+            firm_name: newUserType !== 'INDIVIDUAL' ? newUserFirmName.toUpperCase() : null,
+            city: newUserCity.toUpperCase(),
+            state: newUserState.toUpperCase(),
+            user_code: generatedUserCode,
+            referred_by: partnerUserCode,
+            partner_id: partnerProfile.partner_id,
+            status: 'active',
+            approval_status: 'APPROVED',
+            role: 'user',
+            terms_accepted: false,
+            terms_accepted_at: null,
+            created_at: new Date().toISOString(),
+          },
         }),
       });
 
       const result = await res.json();
+
+      // ✅ HANDLE DUPLICATE ERROR
+      if (res.status === 409 || result.duplicate) {
+        setDuplicateError({
+          message: result.error || 'Duplicate account detected.',
+          field: result.field || 'unknown',
+        });
+        setSubmittingUser(false);
+        return;
+      }
 
       if (!res.ok || result.error) {
         throw new Error(result.error || 'FAILED TO CREATE USER ACCOUNT.');
@@ -155,7 +171,38 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
 
         {!createdUserPayload ? (
           <form onSubmit={handleAddUserSubmit} className="space-y-3">
-            {formError && (
+            
+            {/* ✅ DUPLICATE ERROR BANNER — Highlighted */}
+            {duplicateError && (
+              <div className="bg-red-950/90 border-2 border-red-700 text-red-200 text-xs p-3.5 rounded-xl space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-black text-red-300 uppercase text-[11px] tracking-wide">
+                      ⚠️ Duplicate Account Detected
+                    </p>
+                    <p className="text-[11px] text-red-200 leading-relaxed mt-1">
+                      {duplicateError.message}
+                    </p>
+                    {duplicateError.field && (
+                      <p className="text-[10px] text-red-400 mt-2 font-mono">
+                        Duplicate field: <span className="font-black uppercase">{duplicateError.field}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateError(null)}
+                  className="w-full mt-1 text-[10px] font-black text-red-200 bg-red-900/50 hover:bg-red-900/70 border border-red-700 py-1.5 rounded-lg transition"
+                >
+                  DISMISS & TRY AGAIN
+                </button>
+              </div>
+            )}
+
+            {/* Regular error banner */}
+            {formError && !duplicateError && (
               <div className="bg-red-950/80 border border-red-800 text-red-300 text-xs p-2.5 rounded-xl font-bold">
                 {formError}
               </div>
@@ -350,7 +397,7 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
               <button
                 type="submit"
                 disabled={submittingUser}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg flex items-center gap-1.5"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {submittingUser ? 'CREATING...' : 'CREATE ACCOUNT NOW →'}
               </button>
@@ -363,7 +410,7 @@ export default function AddUserModal({ partnerProfile, onClose, onSuccess }: Add
             </div>
             <div>
               <h4 className="text-base font-black text-white">USER ACCOUNT CREATED SUCCESSFULLY!</h4>
-              <p className="text-xs text-slate-400 mt-1">Direct Auth & Profile created. Terms approval pending for first login.</p>
+              <p className="text-xs text-slate-400 mt-1">✅ Auto-approved — no further verification needed.</p>
             </div>
 
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-left space-y-2 font-mono text-xs">

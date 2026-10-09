@@ -5,12 +5,14 @@ import { createBrowserClient } from '@supabase/ssr';
 import { 
   Wallet, Users, UserPlus, Lock, Search, CreditCard, ArrowUpRight, 
   Landmark, X, PlusCircle, Filter, Eye, EyeOff, LogOut, 
-  AlertTriangle, PhoneCall, UserX, ExternalLink, Calculator, CheckCircle
+  AlertTriangle, PhoneCall, UserX, ExternalLink, Calculator, CheckCircle,
+  RotateCcw, XCircle, Bell
 } from 'lucide-react';
 import AddUserModal from './components/AddUserModal';
 import PartnerProfileCard from './components/PartnerProfileCard';
 import PayoutBreakdownModal from './components/PayoutBreakdownModal';
 import PartnerApprovalLockModal from './components/PartnerApprovalLockModal';
+import RejectSendBackModal from './components/RejectSendBackModal';
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,11 +23,10 @@ export default function PartnerDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [isAdmin, setIsAdmin] = useState(false); // Strictly for Admin only (Settlement entry)
+  const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminOrCEO, setIsAdminOrCEO] = useState(false);
   const [isLevel1Approver, setIsLevel1Approver] = useState(false);
 
-  // Approval Verification State
   const [hasPartnerAccount, setHasPartnerAccount] = useState<boolean>(true);
   const [approvalStatus, setApprovalStatus] = useState<string>('PENDING');
   const [approvedByLevel1, setApprovedByLevel1] = useState<string | null>(null);
@@ -60,11 +61,17 @@ export default function PartnerDashboardPage() {
   const [payoutRef, setPayoutRef] = useState('');
   const [payoutNotes, setPayoutNotes] = useState('');
 
-  // Official Management Contacts for WhatsApp Notifications
+  // ✅ Reject/Send-Back/Notification State
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showSendBackModal, setShowSendBackModal] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+
   const MANAGEMENT_CONTACTS = {
-    admin: "917987561396",      // Admin
-    coPartner: "918249169703",  // Madhusmita Co-Partner
-    ceo: "918103804355"         // Jayant Tomar CEO
+    admin: "917987561396",
+    coPartner: "918249169703",
+    ceo: "918103804355"
   };
 
   useEffect(() => {
@@ -74,6 +81,13 @@ export default function PartnerDashboardPage() {
     fetchInitialData();
     return () => sessionStorage.removeItem('partner_ledger_unlocked');
   }, []);
+
+  // ✅ Fetch notifications when session ready
+  useEffect(() => {
+    if (session?.user?.id) {
+      fetchNotifications();
+    }
+  }, [session]);
 
   useEffect(() => {
     if (!isUnlocked || !session) return;
@@ -101,24 +115,62 @@ export default function PartnerDashboardPage() {
       .single();
 
     setProfile(userProfile);
-    
-    const userRole = (userProfile?.role || '').toLowerCase();
-    const userType = (userProfile?.user_type || '').toLowerCase();
-    const userCode = (userProfile?.user_code || '').toLowerCase();
 
-    const strictlyAdmin = userRole === 'admin' || userType === 'admin' || userCode === 'admin001';
+    const userRole = (userProfile?.role || '');
+    const userType = (userProfile?.user_type || '');
+    const userCode = (userProfile?.user_code || '');
+
+    const normalize = (s: string) => (s || '').toLowerCase().replace(/[\s\-_]/g, '');
+
+    const normRole = normalize(userRole);
+    const normType = normalize(userType);
+    const normCode = normalize(userCode);
+
+    const strictlyAdmin = 
+      normRole === 'admin' || 
+      normType === 'admin' || 
+      normCode === 'admin001';
+
+    const isCEO = 
+      normRole === 'ceo' || 
+      normType === 'ceo' || 
+      normRole.includes('ceo') ||
+      normType.includes('ceo');
+
+    const isCoPartner = 
+      normRole === 'copartner' || 
+      normType === 'copartner' || 
+      normRole.includes('copartner') ||
+      normType.includes('copartner');
+
+    const isLevel1 = isCEO || isCoPartner || strictlyAdmin;
+
     setIsAdmin(strictlyAdmin);
+    setIsAdminOrCEO(strictlyAdmin || isCEO || isCoPartner);
+    setIsLevel1Approver(isLevel1);
 
-    const hasAdminAccess = strictlyAdmin || ['ceo', 'ceo - co-partner', 'co-partner'].includes(userType) || 
-                           ['ceo', 'ceo - co-partner', 'co-partner'].includes(userRole) ||
-                           userRole.includes('ceo') || userRole.includes('co-partner');
-                           
-    const isL1 = hasAdminAccess || ['engineer', 'co-partner', 'ceo'].includes(userRole) || ['engineer', 'co-partner', 'ceo'].includes(userType);
-    
-    setIsAdminOrCEO(hasAdminAccess);
-    setIsLevel1Approver(isL1);
+    const { data: ownPartnerData } = await supabase
+      .from('partner_profiles')
+      .select(`*, profiles:user_id (*)`)
+      .eq('user_id', session.user.id)
+      .maybeSingle();
 
-    if (hasAdminAccess || isL1) {
+    if (ownPartnerData) {
+      setHasPartnerAccount(true);
+      setPartnerProfile(ownPartnerData);
+      setApprovalStatus(ownPartnerData.approval_status || 'PENDING');
+      setApprovedByLevel1(ownPartnerData.approved_by_level1);
+      setApprovedByAdmin(ownPartnerData.approved_by_admin);
+      
+      if (ownPartnerData.approval_status === 'APPROVED') {
+        await loadPartnerDetails(ownPartnerData.partner_id, session.user.id);
+      }
+    } else {
+      setHasPartnerAccount(false);
+      setApprovalStatus('PENDING');
+    }
+
+    if (strictlyAdmin || isLevel1 || isCEO || isCoPartner) {
       const { data: partners } = await supabase
         .from('partner_profiles')
         .select(`*, profiles:user_id (*)`);
@@ -131,35 +183,24 @@ export default function PartnerDashboardPage() {
       });
 
       setAllPartners(partnerList);
-      if (partnerList.length > 0) {
-        const target = partnerList.find(p => p.partner_id === selectedPartnerId) || partnerList[0];
+      
+      if (!ownPartnerData && partnerList.length > 0) {
+        const target = partnerList[0];
         setSelectedPartnerId(target.partner_id);
         setPartnerProfile(target);
         setApprovalStatus(target.approval_status || 'PENDING');
         setApprovedByLevel1(target.approved_by_level1);
         setApprovedByAdmin(target.approved_by_admin);
         await loadPartnerDetails(target.partner_id, target.user_id);
-      }
-    } else {
-      const { data: partnerData } = await supabase
-        .from('partner_profiles')
-        .select(`*, profiles:user_id (*)`)
-        .eq('user_id', session.user.id)
-        .maybeSingle();
-
-      if (!partnerData) {
-        setHasPartnerAccount(false);
-      } else {
-        setHasPartnerAccount(true);
-        setPartnerProfile(partnerData);
-        setApprovalStatus(partnerData.approval_status || 'PENDING');
-        setApprovedByLevel1(partnerData.approved_by_level1);
-        setApprovedByAdmin(partnerData.approved_by_admin);
-        if (partnerData.approval_status === 'APPROVED') {
-          await loadPartnerDetails(partnerData.partner_id, session.user.id);
-        }
+      } else if (ownPartnerData) {
+        setSelectedPartnerId(ownPartnerData.partner_id);
       }
     }
+
+    console.log('🔍 User:', session.user.email);
+    console.log('🔍 isCEO:', isCEO, '| isCoPartner:', isCoPartner);
+    console.log('🔍 isLevel1:', isLevel1);
+
     setLoading(false);
   };
 
@@ -312,30 +353,25 @@ export default function PartnerDashboardPage() {
       const partnerName = targetPartnerObj?.profiles?.full_name || "Valued Partner";
       const partnerMobile = targetPartnerObj?.profiles?.mobile;
 
-      // Professional WhatsApp notification routing
       if (level === 'LEVEL1') {
-        const msgForAdminAndCoPartner = encodeURIComponent(
-          `Dear Management,\n\nLevel 1 approval has been completed successfully for partner account: *${partnerName}* by *${approverName}*.\n\nKindly proceed with the final administrative verification and approval.\n\nRegards,\nManagement System`
+        const msg = encodeURIComponent(
+          `Dear Management,\n\nLevel 1 approval completed for partner: *${partnerName}*\nApproved by: *${approverName}*\n\nKindly proceed with the final administrative approval.\n\nRegards,\nManagement System`
         );
-
-        // Open WhatsApp for Admin and Co-Partner
-        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.admin}?text=${msgForAdminAndCoPartner}`, '_blank');
-        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.coPartner}?text=${msgForAdminAndCoPartner}`, '_blank');
-
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.admin}?text=${msg}`, '_blank');
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.coPartner}?text=${msg}`, '_blank');
       } else if (level === 'ADMIN') {
-        const msgForCEO = encodeURIComponent(
-          `Dear CEO,\n\nFinal Admin Approval has been granted for partner account: *${partnerName}*.\n\nAll onboarding procedures are now successfully completed.\n\nRegards,\nManagement System`
+        const msg = encodeURIComponent(
+          `Dear CEO,\n\nFinal Admin Approval granted for partner: *${partnerName}*\nApproved by: *${approverName}*\n\nAll onboarding procedures are now complete.\n\nRegards,\nManagement System`
         );
-        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.ceo}?text=${msgForCEO}`, '_blank');
+        window.open(`https://wa.me/${MANAGEMENT_CONTACTS.ceo}?text=${msg}`, '_blank');
 
-        // Notify Partner via WhatsApp that account is approved
         if (partnerMobile) {
-          const formattedMobile = partnerMobile.replace(/\D/g, '');
-          const partnerRecipientNo = formattedMobile.startsWith('91') ? formattedMobile : `91${formattedMobile}`;
-          const msgForPartner = encodeURIComponent(
-            `Dear ${partnerName},\n\nWe are pleased to inform you that your Partner Account has been successfully *APPROVED*!\n\nYou can now access your full partner dashboard, track network revenue, and view commission earnings.\n\nWelcome aboard!\n\nBest Regards,\nExecutive Management Team`
+          const formatted = partnerMobile.replace(/\D/g, '');
+          const recipient = formatted.startsWith('91') ? formatted : `91${formatted}`;
+          const partnerMsg = encodeURIComponent(
+            `Dear ${partnerName},\n\n🎉 *Congratulations!* 🎉\n\nYour Partner Account has been *APPROVED*!\n\n✅ Access your full Partner Dashboard\n✅ Track network revenue\n✅ View commission earnings\n\nWelcome aboard!\n\nBest Regards,\nExecutive Management Team`
           );
-          window.open(`https://wa.me/${partnerRecipientNo}?text=${msgForPartner}`, '_blank');
+          window.open(`https://wa.me/${recipient}?text=${partnerMsg}`, '_blank');
         }
       }
 
@@ -343,6 +379,129 @@ export default function PartnerDashboardPage() {
     } else {
       alert('Approval Error: ' + error.message);
     }
+  };
+
+    // ✅ Handle Reject
+  const handleRejectPartner = async (
+    reasonCode: string,
+    reasonText: string,
+    customText: string
+  ) => {
+    if (!partnerProfile) throw new Error('No partner selected');
+
+    // ✅ Capture current partner at time of action (avoid stale state)
+    const currentPartner = partnerProfile;
+    const rejectorName = profile?.full_name || 'Admin';
+    const partnerName = currentPartner?.profiles?.full_name || 'Partner';
+    const partnerUserId = currentPartner?.user_id;
+
+    const { error } = await supabase
+      .from('partner_profiles')
+      .update({
+        approval_status: 'REJECTED',
+        rejection_reason: reasonText,
+        rejection_reason_code: reasonCode,
+        rejected_by: rejectorName,
+        rejected_at: new Date().toISOString(),
+      })
+      .eq('partner_id', currentPartner.partner_id);
+
+    if (error) throw new Error(error.message);
+
+    // ✅ Create notification
+    await supabase.from('notifications').insert({
+      user_id: partnerUserId,
+      title: '❌ Partner Profile REJECTED',
+      message: `Your partner profile has been rejected by ${rejectorName}.\n\nReason: ${reasonText}`,
+      type: 'ERROR',
+      category: 'REJECTION',
+      related_id: currentPartner.partner_id,
+    });
+
+    // ✅ WhatsApp notification
+    const partnerMobile = currentPartner?.profiles?.mobile;
+    if (partnerMobile) {
+      const formatted = partnerMobile.replace(/\D/g, '');
+      const recipient = formatted.startsWith('91') ? formatted : `91${formatted}`;
+      const msg = encodeURIComponent(
+        `Dear ${partnerName},\n\n❌ *Partner Profile REJECTED*\n\nYour partner profile has been rejected.\n\nReason: *${reasonText}*\n\nRejected by: ${rejectorName}\n\nFor more details, please login to your account.\n\nRegards,\nL&T Management Team`
+      );
+      window.open(`https://wa.me/${recipient}?text=${msg}`, '_blank');
+    }
+
+    setShowRejectModal(false);
+    await fetchInitialData();
+  };
+
+    // ✅ Handle Send Back
+  const handleSendBackPartner = async (
+    reasonCode: string,
+    reasonText: string,
+    customText: string
+  ) => {
+    if (!partnerProfile) throw new Error('No partner selected');
+
+    // ✅ Capture current partner at time of action
+    const currentPartner = partnerProfile;
+    const senderName = profile?.full_name || 'Admin';
+    const partnerName = currentPartner?.profiles?.full_name || 'Partner';
+    const partnerUserId = currentPartner?.user_id;
+
+    const { error } = await supabase
+      .from('partner_profiles')
+      .update({
+        approval_status: 'SEND_BACK',
+        send_back_reason: reasonText,
+        send_back_reason_code: reasonCode,
+        send_back_by: senderName,
+        send_back_at: new Date().toISOString(),
+        approved_by_level1: null,
+        approved_by_admin: null,
+      })
+      .eq('partner_id', currentPartner.partner_id);
+
+    if (error) throw new Error(error.message);
+
+    await supabase.from('notifications').insert({
+      user_id: partnerUserId,
+      title: '⚠️ Profile Needs Correction',
+      message: `Your partner profile has been sent back for correction by ${senderName}.\n\nReason: ${reasonText}\n\nPlease update the details and resubmit.`,
+      type: 'WARNING',
+      category: 'SEND_BACK',
+      related_id: currentPartner.partner_id,
+    });
+
+    const partnerMobile = currentPartner?.profiles?.mobile;
+    if (partnerMobile) {
+      const formatted = partnerMobile.replace(/\D/g, '');
+      const recipient = formatted.startsWith('91') ? formatted : `91${formatted}`;
+      const msg = encodeURIComponent(
+        `Dear ${partnerName},\n\n⚠️ *Profile Needs Correction*\n\nYour partner profile has been sent back for correction.\n\nReason: *${reasonText}*\n\nSent back by: ${senderName}\n\nPlease login to your account, update the details, and resubmit.\n\nRegards,\nL&T Management Team`
+      );
+      window.open(`https://wa.me/${recipient}?text=${msg}`, '_blank');
+    }
+
+    setShowSendBackModal(false);
+    await fetchInitialData();
+  };
+
+  const fetchNotifications = async () => {
+    if (!session?.user?.id) return;
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setNotifications(data || []);
+  };
+
+  const markNotificationRead = async (notifId: string) => {
+    await supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notifId);
+    fetchNotifications();
   };
 
   const filteredReferredUsers = useMemo(() => {
@@ -416,21 +575,65 @@ export default function PartnerDashboardPage() {
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-300 bg-slate-950 min-h-screen font-mono">LOADING LEDGER...</div>;
+  // ═══════════════════════════════════════════════════════════════
+  // RENDER BLOCKS
+  // ═══════════════════════════════════════════════════════════════
 
-  if ((!hasPartnerAccount || approvalStatus !== 'APPROVED') && !isAdminOrCEO && !isLevel1Approver) {
+  if (loading) {
+    return (
+      <div className="p-8 text-center text-slate-300 bg-slate-950 min-h-screen font-mono">
+        LOADING LEDGER...
+      </div>
+    );
+  }
+
+  if (!session || !session.user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl w-full max-w-md text-center space-y-4 shadow-2xl">
+          <div className="p-3 bg-red-950/60 border border-red-800/50 rounded-2xl w-fit mx-auto">
+            <Lock className="text-red-400 w-8 h-8" />
+          </div>
+          <h2 className="text-xl font-black text-white uppercase tracking-wider">SESSION EXPIRED</h2>
+          <p className="text-xs text-slate-400">Please login again to access the partner dashboard.</p>
+          <button
+            onClick={() => (window.location.href = '/login')}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl text-xs uppercase shadow-lg"
+          >
+            GO TO LOGIN →
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasPartnerAccount && !isAdminOrCEO && !isLevel1Approver) {
     return (
       <PartnerApprovalLockModal
         userId={session.user.id}
-        hasAccount={hasPartnerAccount}
-        approvalStatus={approvalStatus}
-        approvedByLevel1={approvedByLevel1}
-        approvedByAdmin={approvedByAdmin}
+        hasAccount={false}
+        approvalStatus="PENDING"
+        approvedByLevel1={null}
+        approvedByAdmin={null}
         onRefresh={fetchInitialData}
       />
     );
   }
 
+  if (approvalStatus !== 'APPROVED' && !isAdminOrCEO && !isLevel1Approver) {
+    return (
+      <PartnerApprovalLockModal
+        userId={session.user.id}
+        hasAccount={true}
+        approvalStatus={approvalStatus}
+        approvedByLevel1={approvedByLevel1}
+        approvedByAdmin={approvedByAdmin}
+        rejectionReason={partnerProfile?.rejection_reason || null}
+        sendBackReason={partnerProfile?.send_back_reason || null}
+        onRefresh={fetchInitialData}
+      />
+    );
+  }
   if (!isUnlocked) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -453,7 +656,9 @@ export default function PartnerDashboardPage() {
               </button>
             </div>
             {authError && <p className="text-red-400 text-xs font-semibold uppercase">{authError}</p>}
-            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl text-xs uppercase shadow-lg">ACCESS LEDGER →</button>
+            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3.5 rounded-xl text-xs uppercase shadow-lg">
+              ACCESS LEDGER →
+            </button>
           </form>
         </div>
       </div>
@@ -473,7 +678,7 @@ export default function PartnerDashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-          {(isAdminOrCEO || isLevel1Approver) && (
+          {(isAdminOrCEO || isLevel1Approver || isAdmin) && allPartners.length > 0 && (
             <>
               <div className="flex items-center gap-2 bg-slate-900 border border-indigo-900/50 p-2 rounded-xl">
                 <Search size={14} className="text-indigo-400 shrink-0" />
@@ -502,13 +707,13 @@ export default function PartnerDashboardPage() {
               </div>
 
               {partnerProfile && partnerProfile.approval_status !== 'APPROVED' && (
-                <div className="flex items-center gap-1.5">
-                  {!partnerProfile.approved_by_level1 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {!partnerProfile.approved_by_level1 && (isAdminOrCEO || isLevel1Approver) && (
                     <button 
                       onClick={() => handleApprovePartner(partnerProfile.partner_id, 'LEVEL1')}
                       className="bg-indigo-700 hover:bg-indigo-600 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1"
                     >
-                      <CheckCircle size={12} /> APPROVE (LEVEL 1: CEO/CO-PARTNER)
+                      <CheckCircle size={12} /> APPROVE (LEVEL 1)
                     </button>
                   )}
                   {isAdmin && (
@@ -516,7 +721,27 @@ export default function PartnerDashboardPage() {
                       onClick={() => handleApprovePartner(partnerProfile.partner_id, 'ADMIN')}
                       className="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
                     >
-                      <CheckCircle size={12} /> FINAL ADMIN APPROVAL
+                      <CheckCircle size={12} /> FINAL APPROVE
+                    </button>
+                  )}
+
+                  {(isAdminOrCEO || isLevel1Approver || isAdmin) && (
+                    <button 
+                      onClick={() => setShowSendBackModal(true)}
+                      className="bg-amber-600 hover:bg-amber-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
+                      title="Send back for correction"
+                    >
+                      <RotateCcw size={12} /> SEND BACK
+                    </button>
+                  )}
+
+                  {isAdmin && (
+                    <button 
+                      onClick={() => setShowRejectModal(true)}
+                      className="bg-red-600 hover:bg-red-500 text-white px-2.5 py-2 rounded-xl text-[10px] font-black flex items-center gap-1 shadow-md"
+                      title="Reject partner profile"
+                    >
+                      <XCircle size={12} /> REJECT
                     </button>
                   )}
                 </div>
@@ -533,13 +758,68 @@ export default function PartnerDashboardPage() {
             </>
           )}
 
+          {/* NOTIFICATION BELL */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="bg-slate-900 border border-slate-800 text-slate-300 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 hover:bg-slate-800 relative"
+            >
+              <Bell size={14} />
+              {notifications.filter(n => !n.is_read).length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                  {notifications.filter(n => !n.is_read).length}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div className="absolute right-0 top-full mt-2 w-80 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-96 overflow-y-auto">
+                <div className="p-3 border-b border-slate-800">
+                  <h4 className="text-xs font-bold text-white">NOTIFICATIONS</h4>
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-slate-500 text-xs">No notifications</div>
+                ) : (
+                  notifications.map((notif) => (
+                    <div
+                      key={notif.id}
+                      onClick={() => markNotificationRead(notif.id)}
+                      className={`p-3 border-b border-slate-800/60 cursor-pointer hover:bg-slate-800/40 ${
+                        !notif.is_read ? 'bg-indigo-950/30' : ''
+                      }`}
+                    >
+                      <p className={`text-xs font-bold ${
+                        notif.type === 'ERROR' ? 'text-red-400' :
+                        notif.type === 'WARNING' ? 'text-amber-400' :
+                        notif.type === 'SUCCESS' ? 'text-emerald-400' :
+                        'text-white'
+                      }`}>
+                        {notif.title}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-1 whitespace-pre-line">
+                        {notif.message}
+                      </p>
+                      <p className="text-[9px] text-slate-600 mt-1">
+                        {new Date(notif.created_at).toLocaleString('en-IN')}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
           <button onClick={() => { sessionStorage.removeItem('partner_ledger_unlocked'); setIsUnlocked(false); }} className="bg-red-950/80 hover:bg-red-900 border border-red-800 text-red-300 px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 ml-auto">
             <LogOut size={14} /> LOCK
           </button>
         </div>
       </div>
 
-      <PartnerProfileCard partnerProfile={partnerProfile} />
+            <PartnerProfileCard
+        partnerProfile={partnerProfile}
+        canEdit={!!partnerProfile && approvalStatus === 'APPROVED'}
+        onEdit={() => setShowEditProfileModal(true)}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-md">
@@ -908,6 +1188,43 @@ export default function PartnerDashboardPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* ✅ REJECT MODAL */}
+      {showRejectModal && partnerProfile && (
+        <RejectSendBackModal
+          partnerName={partnerProfile?.profiles?.full_name || 'Partner'}
+          action="REJECT"
+          onClose={() => setShowRejectModal(false)}
+          onConfirm={handleRejectPartner}
+        />
+      )}
+
+            {/* ✅ SEND BACK MODAL */}
+      {showSendBackModal && partnerProfile && (
+        <RejectSendBackModal
+          partnerName={partnerProfile?.profiles?.full_name || 'Partner'}
+          action="SEND_BACK"
+          onClose={() => setShowSendBackModal(false)}
+          onConfirm={handleSendBackPartner}
+        />
+      )}
+
+      {/* ✅ EDIT PROFILE MODAL — For approved partner */}
+      {showEditProfileModal && (
+        <PartnerApprovalLockModal
+          userId={session.user.id}
+          hasAccount={true}
+          approvalStatus={approvalStatus}
+          approvedByLevel1={approvedByLevel1}
+          approvedByAdmin={approvedByAdmin}
+          startInEditMode={true}
+          onRefresh={() => {
+            fetchInitialData();
+            setShowEditProfileModal(false);
+          }}
+          onClose={() => setShowEditProfileModal(false)}
+        />
       )}
 
     </div>

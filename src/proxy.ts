@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   // 1. Root URL (/) को सीधे /verify-estimate पर भेजें
@@ -68,7 +68,7 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/login', request.url));
     }
   } catch (error) {
-    console.error('Middleware Auth Check Error:', error);
+    console.error('Proxy Auth Check Error:', error);
     // नेटवर्क एरर आने पर अनपेक्षित अटकाव रोकने के लिए रिस्पॉन्स पास करें
     return supabaseResponse;
   }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Suspense } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Wallet, ArrowDownCircle, ArrowUpCircle, Calendar, X, Search, Printer, ChevronDown, Lock, ArrowRight, AlertTriangle } from 'lucide-react';
 import emailjs from '@emailjs/browser';
@@ -59,7 +59,10 @@ const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
   "UTTAR PRADESH": ["Agra", "Aligarh", "Ambedkar Nagar", "Amethi", "Amroha", "Auraiya", "Ayodhya", "Azamgarh", "Badaun", "Baghpat", "Bahraich", "Ballia", "Balrampur", "Banda", "Barabanki", "Bareilly", "Basti", "Bhadohi", "Bijnor", "Budaun", "Bulandshahr", "Chandauli", "Chitrakoot", "Deoria", "Etah", "Etawah", "Farrukhabad", "Fatehpur", "Firozabad", "Gautam Buddha Nagar", "Ghaziabad", "Ghazipur", "Gonda", "Gorakhpur", "Hamirpur", "Hapur", "Hardoi", "Hathras", "Jalaun", "Jaunpur", "Jhansi", "Kannauj", "Kanpur Dehat", "Kanpur Nagar", "Kasganj", "Kaushambi", "Kheri", "Kushinagar", "Lalitpur", "Lucknow", "Maharajganj", "Mahoba", "Mainpuri", "Mathura", "Mau", "Meerut", "Mirzapur", "Moradabad", "Muzaffarnagar", "Pilibhit", "Pratapgarh", "Prayagraj", "Raebareli", "Rampur", "Saharanpur", "Sambhal", "Sant Kabir Nagar", "Shahjahanpur", "Shamli", "Shravasti", "Siddharthnagar", "Sitapur", "Sonbhadra", "Sultanpur", "Unnao", "Varanasi"]
 };
 
-export default function WalletLedgerPage() {
+// ═══════════════════════════════════════════════════════════════════
+// MAIN CONTENT — uses useSearchParams (must be inside Suspense)
+// ═══════════════════════════════════════════════════════════════════
+function WalletLedgerContent() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [authLoading, setAuthLoading] = useState<boolean>(false);
@@ -103,7 +106,7 @@ export default function WalletLedgerPage() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
 
-  // ✅ NEW: Recharge-related state
+  // ✅ Now inside Suspense — safe
   const searchParams = useSearchParams();
   const [isRechargeOpen, setIsRechargeOpen] = useState<boolean>(false);
 
@@ -116,14 +119,14 @@ export default function WalletLedgerPage() {
     fetchInitialData();
   }, []);
 
-  // ══════════════════════════════════════════════════════════════════
-  // ✅ NEW: URL में ?recharge=1 हो तो password gate skip + modal auto-open
-  // ══════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════
+  // Recharge param handler
+  // ═══════════════════════════════════════════════════════════
   useEffect(() => {
     if (searchParams.get('recharge') === '1') {
-      setIsAuthenticated(true);                       // 🔓 Password gate bypass
+      setIsAuthenticated(true);
       sessionStorage.setItem('ledger_authenticated', 'true');
-      setIsRechargeOpen(true);                        // 💳 RechargeModal auto-open
+      setIsRechargeOpen(true);
     }
   }, [searchParams]);
 
@@ -1309,13 +1312,12 @@ export default function WalletLedgerPage() {
       />
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* ✅ NEW: RechargeModal — URL ?recharge=1 par auto-open         */}
+      {/* RechargeModal — URL ?recharge=1 par auto-open                */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <RechargeModal
         isOpen={isRechargeOpen}
         onClose={() => {
           setIsRechargeOpen(false);
-          // URL se ?recharge=1 param hatao (clean URL)
           if (typeof window !== 'undefined') {
             const url = new URL(window.location.href);
             url.searchParams.delete('recharge');
@@ -1333,5 +1335,27 @@ export default function WalletLedgerPage() {
       />
 
     </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ✅ DEFAULT EXPORT — Wraps content in Suspense (required by Next.js 15)
+// ═══════════════════════════════════════════════════════════════════
+export default function WalletLedgerPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-50">
+          <div className="text-center space-y-3">
+            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+              Loading Ledger…
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <WalletLedgerContent />
+    </Suspense>
   );
 }

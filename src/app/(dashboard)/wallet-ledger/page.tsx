@@ -4,9 +4,12 @@ import { useState, useEffect, useRef } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { Wallet, ArrowDownCircle, ArrowUpCircle, Calendar, X, Search, Printer, ChevronDown, Lock, ArrowRight, AlertTriangle } from 'lucide-react';
 import emailjs from '@emailjs/browser';
+import { useSearchParams } from 'next/navigation';
+
 import WithdrawalModal from './components/WithdrawalModal';
 import AdminApprovalModal from './components/AdminApprovalModal';
 import CustomerProfileCard from './components/CustomerProfileCard';
+import RechargeModal from '../dashboard/components/RechargeModal';
 
 interface UserProfile {
   id: string;
@@ -100,6 +103,10 @@ export default function WalletLedgerPage() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
 
+  // ✅ NEW: Recharge-related state
+  const searchParams = useSearchParams();
+  const [isRechargeOpen, setIsRechargeOpen] = useState<boolean>(false);
+
   const supabaseClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -108,6 +115,17 @@ export default function WalletLedgerPage() {
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  // ══════════════════════════════════════════════════════════════════
+  // ✅ NEW: URL में ?recharge=1 हो तो password gate skip + modal auto-open
+  // ══════════════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (searchParams.get('recharge') === '1') {
+      setIsAuthenticated(true);                       // 🔓 Password gate bypass
+      sessionStorage.setItem('ledger_authenticated', 'true');
+      setIsRechargeOpen(true);                        // 💳 RechargeModal auto-open
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -860,7 +878,7 @@ export default function WalletLedgerPage() {
         }
       `}</style>
 
-      {/* Header & Controls — 🔥 MOBILE FIXED */}
+      {/* Header & Controls */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-4 sm:mb-6 gap-3 sm:gap-4 bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 print:hidden">
         <div>
           <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-wide uppercase">Wallet & Account Ledger</h1>
@@ -977,7 +995,7 @@ export default function WalletLedgerPage() {
         </div>
       </div>
 
-      {/* ADMIN PANEL — 🔥 MOBILE FIXED */}
+      {/* ADMIN PANEL */}
       {isAdmin && (
         <div className="bg-gradient-to-r from-blue-900 to-slate-900 p-4 sm:p-6 rounded-xl shadow-md text-white mb-4 sm:mb-6 print:hidden">
           <div className="flex items-center gap-2 mb-3">
@@ -1082,7 +1100,7 @@ export default function WalletLedgerPage() {
           />
         </div>
 
-        {/* Summary Cards — 🔥 MOBILE FIXED: grid-cols-1 on mobile */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 sm:gap-6 mb-4 sm:mb-6 print:grid-cols-3">
           <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 flex items-center justify-between">
             <div className="min-w-0">
@@ -1113,7 +1131,7 @@ export default function WalletLedgerPage() {
           </div>
         </div>
 
-        {/* Ledger Table — 🔥 MOBILE FIXED: horizontal scroll */}
+        {/* Ledger Table */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 font-bold text-xs sm:text-sm uppercase tracking-wide text-slate-700 flex flex-col sm:flex-row justify-between sm:items-center gap-1 sm:gap-2">
             <span className="truncate">Ledger Statement ({fromDate && toDate ? `${fromDate} to ${toDate}` : (selectedMonth === 'ALL' ? 'All-Time' : selectedMonth)})</span>
@@ -1233,7 +1251,7 @@ export default function WalletLedgerPage() {
 
       </div>
 
-      {/* OTP Verification Modal — 🔥 MOBILE FIXED */}
+      {/* OTP Verification Modal */}
       {showOtpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-3 sm:p-4 print:hidden">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl relative">
@@ -1273,8 +1291,46 @@ export default function WalletLedgerPage() {
         </div>
       )}
 
-      <WithdrawalModal isOpen={showRefundModal} onClose={() => setShowRefundModal(false)} profile={targetProfile || profile} onSuccess={fetchLedgerData} supabaseClient={supabaseClient} />
-      <AdminApprovalModal selectedRequest={selectedRequest} onClose={() => setSelectedRequest(null)} onSuccess={fetchLedgerData} supabaseClient={supabaseClient} profile={profile} />
+      {/* ✅ Existing Modals */}
+      <WithdrawalModal 
+        isOpen={showRefundModal} 
+        onClose={() => setShowRefundModal(false)} 
+        profile={targetProfile || profile} 
+        onSuccess={fetchLedgerData} 
+        supabaseClient={supabaseClient} 
+      />
+      
+      <AdminApprovalModal 
+        selectedRequest={selectedRequest} 
+        onClose={() => setSelectedRequest(null)} 
+        onSuccess={fetchLedgerData} 
+        supabaseClient={supabaseClient} 
+        profile={profile} 
+      />
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* ✅ NEW: RechargeModal — URL ?recharge=1 par auto-open         */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <RechargeModal
+        isOpen={isRechargeOpen}
+        onClose={() => {
+          setIsRechargeOpen(false);
+          // URL se ?recharge=1 param hatao (clean URL)
+          if (typeof window !== 'undefined') {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('recharge');
+            window.history.replaceState({}, '', url.toString());
+          }
+        }}
+        userData={{
+          uuid: profile?.id,
+          id: profile?.user_code,
+          email: profile?.email,
+          name: profile?.full_name,
+          wallet: profile?.wallet_balance,
+        }}
+        onRechargeSubmitted={fetchLedgerData}
+      />
 
     </div>
   );

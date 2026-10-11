@@ -92,7 +92,8 @@ function doorRect(room: Rect, d: any): Rect | null {
   const wd = Number(d.widthFeet || 0);
   if (!wd || !wall) return null;
   const opening = String(d.doorType || "").toUpperCase() === "OPENING" || d.renderSymbol === false;
-  const depth = opening ? 0.4 : wd;
+  const dbl = Boolean(d.isDoubleLeaf || d.doubleLeaf || (d.leafCount && d.leafCount > 1) || String(d.doorType || '').toUpperCase() === 'MAIN');
+  const depth = opening ? 0.4 : dbl ? wd / 2 : wd;
   switch (wall) {
     case "TOP": return { x: room.x + off, y: room.y, w: wd, h: depth };
     case "BOTTOM": return { x: room.x + off, y: room.y + room.h - depth, w: wd, h: depth };
@@ -447,8 +448,11 @@ export function doorSwingBox(
 ): Box {
   const off = (door.offsetFeet || 0) * scale;
   const span = (door.widthFeet || 3) * scale;
-  const depth = span * (1 + margin);          // pura leaf radius + margin
-  const inside = Boolean(door.swingInside);
+  // v8: double-leaf (parking gate / MAIN) ke leaf ka radius = width/2 aur wo hamesha andar swing draw hota hai
+  const dd: any = door;
+  const dbl = Boolean(dd.isDoubleLeaf || dd.doubleLeaf || (dd.leafCount && dd.leafCount > 1) || String(dd.doorType || '').toUpperCase() === 'MAIN');
+  const depth = (dbl ? span / 2 : span) * (1 + margin);          // pura leaf radius + margin
+  const inside = dbl ? true : Boolean(door.swingInside);
   const m = span * margin / 2;
   switch (door.wall) {
     case "TOP":    return { x: room.x + off - m, y: inside ? room.y : room.y - depth, w: span + 2 * m, h: depth };

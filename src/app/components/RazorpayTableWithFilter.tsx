@@ -1,28 +1,51 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 
-export default function RazorpayTableWithFilter({ transactions }: { transactions: any[] }) {
-  const [searchTerm, setSearchTerm] = useState('');
+interface RazorpayTableWithFilterProps {
+  transactions: any[];
+}
 
-  /* ============================================================
-     ✅ Centralized amount resolver — bulletproof
-     Priority: resolved_amount → amount → service/estimate detection
-     ============================================================ */
+type DatePreset = '' | 'today' | '7d' | '30d' | '90d' | 'month' | 'custom';
+
+export default function RazorpayTableWithFilter({ transactions }: RazorpayTableWithFilterProps) {
+  const [colFilters, setColFilters] = useState({
+    paymentId: '',
+    reference: '',
+    customer: '',
+    caseType: '',
+    amount: '',
+    paymentStatus: '',
+    datePreset: '' as DatePreset,
+    fromDate: '',
+    toDate: '',
+  });
+
+  const [showCustomDatePopover, setShowCustomDatePopover] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setShowCustomDatePopover(false);
+      }
+    };
+    if (showCustomDatePopover) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showCustomDatePopover]);
+
+  /* Amount resolver */
   const getAmount = (txn: any): number => {
-    // 1. resolved_amount (widget ne set kiya) — highest priority
     if (txn?.resolved_amount != null) {
       const n = Number(txn.resolved_amount);
       if (!isNaN(n) && n > 0) return n;
     }
-
-    // 2. amount (RPC se aaya hua already-resolved)
     if (txn?.amount != null) {
       const n = Number(txn.amount);
       if (!isNaN(n) && n > 0) return n;
     }
-
-    // 3. Service vs Estimate detection
     const isService =
       txn?.source_table === 'service_records' ||
       txn?.record_category === 'SERVICE' ||
@@ -30,117 +53,526 @@ export default function RazorpayTableWithFilter({ transactions }: { transactions
       (Number(txn?.gateway_fee || 0) > 0 && Number(txn?.user_payment || 0) === 0);
 
     const raw = isService
-      ? (txn?.gateway_fee ??
-         txn?.user_service_fee ??
-         txn?.user_payment ??
-         txn?.fee_standard ??
-         0)
-      : (txn?.user_payment ??
-         txn?.amount ??
-         txn?.total_amount ??
-         0);
+      ? txn?.gateway_fee ?? txn?.user_service_fee ?? txn?.user_payment ?? txn?.fee_standard ?? 0
+      : txn?.user_payment ?? txn?.amount ?? txn?.total_amount ?? 0;
 
     const n = Number(raw);
     return isNaN(n) ? 0 : n;
   };
 
-  // Filter transactions based on Payment ID or Reference No.
-  const filteredTransactions = transactions.filter((txn) => {
-    const paymentId = (txn.razorpay_payment_id || '').toLowerCase();
-    const refNo = (txn.ref_no || txn.reference_no || '').toLowerCase();
-    const query = searchTerm.toLowerCase();
+  const getDateRange = (): { from: Date | null; to: Date | null } => {
+    const preset = colFilters.datePreset;
 
-    return paymentId.includes(query) || refNo.includes(query);
-  });
+    if (preset === 'custom' && (colFilters.fromDate || colFilters.toDate)) {
+      return {
+        from: colFilters.fromDate ? new Date(colFilters.fromDate + 'T00:00:00') : null,
+        to: colFilters.toDate ? new Date(colFilters.toDate + 'T23:59:59') : null,
+      };
+    }
 
-  // ✅ Total revenue — service-aware
-  const totalGatewayRevenue = transactions.reduce(
-    (acc: number, curr: any) => acc + getAmount(curr),
-    0
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    switch (preset) {
+      case 'today':
+        return { from: today, to: new Date(today.getTime() + 86400000 - 1) };
+      case '7d':
+        return { from: new Date(today.getTime() - 7 * 86400000), to: new Date(today.getTime() + 86400000 - 1) };
+      case '30d':
+        return { from: new Date(today.getTime() - 30 * 86400000), to: new Date(today.getTime() + 86400000 - 1) };
+      case '90d':
+        return { from: new Date(today.getTime() - 90 * 86400000), to: new Date(today.getTime() + 86400000 - 1) };
+      case 'month':
+        return {
+          from: new Date(now.getFullYear(), now.getMonth(), 1),
+          to: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
+        };
+      default:
+        return { from: null, to: null };
+    }
+  };
+
+  const filteredTransactions = useMemo(() => {
+    const dateRange = getDateRange();
+
+    return transactions.filter((txn) => {
+      if (dateRange.from || dateRange.to) {
+        const txDate = new Date(txn.created_at || txn.date || Date.now());
+        if (isNaN(txDate.getTime())) return false;
+        if (dateRange.from && txDate < dateRange.from) return false;
+        if (dateRange.to && txDate > dateRange.to) return false;
+      }
+      if (colFilters.paymentId) {
+        const q = colFilters.paymentId.toLowerCase();
+        if (!String(txn.razorpay_payment_id || '').toLowerCase().includes(q)) return false;
+      }
+      if (colFilters.reference) {
+        const q = colFilters.reference.toLowerCase();
+        const ref = String(txn.reference_no || txn.ref_no || '').toLowerCase();
+        if (!ref.includes(q)) return false;
+      }
+      if (colFilters.customer) {
+        const q = colFilters.customer.toLowerCase();
+        const name = String(txn.customer_name || txn.client_name || '').toLowerCase();
+        if (!name.includes(q)) return false;
+      }
+      if (colFilters.caseType) {
+        const q = colFilters.caseType.toLowerCase();
+        const ct = String(txn.case_type || txn.caseType || txn.estimate_type || '').toLowerCase();
+        if (!ct.includes(q)) return false;
+      }
+      if (colFilters.amount) {
+        const q = colFilters.amount.replace(/[^0-9.-]/g, '');
+        if (!String(getAmount(txn)).includes(q)) return false;
+      }
+      if (colFilters.paymentStatus) {
+        const q = colFilters.paymentStatus.toLowerCase();
+        const status = String(
+          txn.platform_payment_status || txn.payment_status || 'paid'
+        ).toLowerCase();
+        if (status !== q) return false;
+      }
+      return true;
+    });
+  }, [transactions, colFilters]);
+
+  const filteredTotal = useMemo(
+    () => filteredTransactions.reduce((s, t) => s + getAmount(t), 0),
+    [filteredTransactions]
   );
 
+  const filteredPaidCount = useMemo(
+    () =>
+      filteredTransactions.filter(
+        (t) =>
+          String(t.platform_payment_status || t.payment_status || 'paid').toLowerCase() ===
+          'paid'
+      ).length,
+    [filteredTransactions]
+  );
+
+  const caseTypeOptions = useMemo(() => {
+    const set = new Set<string>();
+    transactions.forEach((t) => {
+      const ct = t.case_type || t.caseType || t.estimate_type;
+      if (ct) set.add(String(ct));
+    });
+    return Array.from(set).sort();
+  }, [transactions]);
+
+  const activeDateLabel = useMemo(() => {
+    if (colFilters.datePreset === 'custom') {
+      if (colFilters.fromDate && colFilters.toDate) return `${colFilters.fromDate} → ${colFilters.toDate}`;
+      if (colFilters.fromDate) return `From ${colFilters.fromDate}`;
+      if (colFilters.toDate) return `Upto ${colFilters.toDate}`;
+    }
+    if (colFilters.datePreset === 'today') return 'Today';
+    if (colFilters.datePreset === '7d') return 'Last 7 days';
+    if (colFilters.datePreset === '30d') return 'Last 30 days';
+    if (colFilters.datePreset === '90d') return 'Last 90 days';
+    if (colFilters.datePreset === 'month') return 'This month';
+    return '';
+  }, [colFilters]);
+
+  const hasAnyFilter = Object.values(colFilters).some((v) => v !== '');
+
   return (
-    <div className="bg-white p-6 rounded-2xl border shadow-sm mt-8">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div>
-          <h3 className="text-lg font-bold text-gray-800">Razorpay Live Revenue & Transactions</h3>
-          <p className="text-xs text-gray-500">Real-time gateway collections fetched directly from estimates & service records.</p>
-        </div>
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full">
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-left text-xs table-fixed">
+          {/* ══════ HEADER ══════ */}
+          <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-20 shadow-sm">
+            <tr>
+              {/* Payment ID */}
+              <th className="py-1.5 px-2 w-[15%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Payment ID</span>
+                  <input
+                    type="text"
+                    placeholder="Filter…"
+                    value={colFilters.paymentId}
+                    onChange={(e) => setColFilters({ ...colFilters, paymentId: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] normal-case"
+                  />
+                </div>
+              </th>
 
-        <div className="flex items-center gap-4 w-full md:w-auto">
-          {/* Search Input for Filters */}
-          <div className="relative w-full md:w-72">
-            <input
-              type="text"
-              placeholder="Search Payment ID or Ref No..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-4 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-            />
-          </div>
+              {/* Reference No */}
+              <th className="py-1.5 px-2 w-[13%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Reference No</span>
+                  <input
+                    type="text"
+                    placeholder="Filter…"
+                    value={colFilters.reference}
+                    onChange={(e) => setColFilters({ ...colFilters, reference: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] normal-case"
+                  />
+                </div>
+              </th>
 
-          <div className="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl text-right whitespace-nowrap">
-            <span className="text-[10px] font-semibold text-emerald-600 block">Total Gateway Revenue</span>
-            <span className="text-lg font-extrabold text-emerald-700">
-              ₹ {totalGatewayRevenue.toLocaleString('en-IN')}
-            </span>
-          </div>
-        </div>
-      </div>
+              {/* Customer */}
+              <th className="py-1.5 px-2 w-[16%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Customer</span>
+                  <input
+                    type="text"
+                    placeholder="Filter…"
+                    value={colFilters.customer}
+                    onChange={(e) => setColFilters({ ...colFilters, customer: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] normal-case"
+                  />
+                </div>
+              </th>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-gray-100 text-gray-700 uppercase tracking-wider font-semibold border-b border-gray-200">
-              <th className="py-3 px-4">Razorpay Payment ID</th>
-              <th className="py-3 px-4">Reference No</th>
-              <th className="py-3 px-4">Customer Name</th>
-              <th className="py-3 px-4">Case Type</th>
-              <th className="py-3 px-4">Date & Time</th>
-              <th className="py-3 px-4 text-right">Amount Paid</th>
-              <th className="py-3 px-4 text-center">Payment Status</th>
+              {/* Case Type */}
+              <th className="py-1.5 px-2 w-[13%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Case Type</span>
+                  <select
+                    value={colFilters.caseType}
+                    onChange={(e) => setColFilters({ ...colFilters, caseType: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case"
+                  >
+                    <option value="">All</option>
+                    {caseTypeOptions.map((ct) => (
+                      <option key={ct} value={ct}>
+                        {ct}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </th>
+
+              {/* ✅ DATE — Center aligned + Compact */}
+              <th className="py-1.5 px-2 w-[13%] bg-slate-50">
+                <div className="flex flex-col gap-1" ref={popoverRef}>
+                  <span className="text-[9px] text-slate-500 text-center block">Date</span>
+
+                  <select
+                    value={colFilters.datePreset}
+                    onChange={(e) => {
+                      const v = e.target.value as DatePreset;
+                      if (v === 'custom') {
+                        setColFilters({
+                          ...colFilters,
+                          datePreset: 'custom',
+                          fromDate: colFilters.fromDate || '',
+                          toDate: colFilters.toDate || '',
+                        });
+                        setShowCustomDatePopover(true);
+                      } else {
+                        setColFilters({
+                          ...colFilters,
+                          datePreset: v,
+                          fromDate: '',
+                          toDate: '',
+                        });
+                        setShowCustomDatePopover(false);
+                      }
+                    }}
+                    className={`w-full px-1.5 py-0.5 text-[10px] bg-white border rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case truncate text-center ${
+                      colFilters.datePreset ? 'border-blue-300 text-blue-700 font-semibold' : 'border-slate-200'
+                    }`}
+                  >
+                    <option value="">All Dates</option>
+                    <option value="today">Today</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                    <option value="90d">Last 90 days</option>
+                    <option value="month">This Month</option>
+                    <option value="custom">Custom Range…</option>
+                  </select>
+
+                  {colFilters.datePreset === 'custom' &&
+                    (colFilters.fromDate || colFilters.toDate) && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomDatePopover(!showCustomDatePopover)}
+                        className="w-full px-1.5 py-0.5 text-[9px] bg-blue-50 border border-blue-200 rounded text-blue-700 font-semibold truncate text-center hover:bg-blue-100 transition"
+                        title={activeDateLabel}
+                      >
+                        📅 {activeDateLabel}
+                      </button>
+                    )}
+
+                  {/* Popover */}
+                  {showCustomDatePopover && (
+                    <div className="absolute top-full mt-1 left-0 z-50 bg-white border border-slate-300 rounded-lg shadow-xl p-2.5 w-[220px]">
+                      <div className="flex items-center justify-between mb-2 pb-1.5 border-b border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-700 uppercase">
+                          Custom Date Range
+                        </span>
+                        <button
+                          onClick={() => setShowCustomDatePopover(false)}
+                          className="text-slate-400 hover:text-slate-700 font-bold text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">
+                            From
+                          </label>
+                          <input
+                            type="date"
+                            value={colFilters.fromDate}
+                            onChange={(e) =>
+                              setColFilters({ ...colFilters, fromDate: e.target.value })
+                            }
+                            className="w-full px-1.5 py-1 text-[10px] bg-white border border-slate-200 rounded text-slate-700 normal-case focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500 uppercase block mb-0.5">
+                            To
+                          </label>
+                          <input
+                            type="date"
+                            value={colFilters.toDate}
+                            onChange={(e) =>
+                              setColFilters({ ...colFilters, toDate: e.target.value })
+                            }
+                            className="w-full px-1.5 py-1 text-[10px] bg-white border border-slate-200 rounded text-slate-700 normal-case focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex gap-1 mt-2 pt-2 border-t border-slate-100">
+                        <button
+                          onClick={() =>
+                            setColFilters({
+                              ...colFilters,
+                              fromDate: '',
+                              toDate: '',
+                              datePreset: '',
+                            })
+                          }
+                          className="flex-1 px-1.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          onClick={() => setShowCustomDatePopover(false)}
+                          className="flex-1 px-1.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-[10px] font-bold"
+                        >
+                          Apply
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </th>
+
+              {/* ✅ AMOUNT — Center aligned */}
+              <th className="py-1.5 px-2 w-[10%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1 items-center">
+                  <span className="text-[9px] text-slate-500">Amount</span>
+                  <input
+                    type="text"
+                    placeholder="₹"
+                    value={colFilters.amount}
+                    onChange={(e) => setColFilters({ ...colFilters, amount: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center normal-case"
+                  />
+                </div>
+              </th>
+
+              {/* Status */}
+              <th className="py-1.5 px-2 w-[12%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Status</span>
+                  <select
+                    value={colFilters.paymentStatus}
+                    onChange={(e) =>
+                      setColFilters({ ...colFilters, paymentStatus: e.target.value })
+                    }
+                    className={`w-full px-1.5 py-0.5 text-[10px] bg-white border rounded font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case ${
+                      colFilters.paymentStatus === 'paid'
+                        ? 'border-emerald-300 text-emerald-700'
+                        : colFilters.paymentStatus === 'pending'
+                        ? 'border-amber-300 text-amber-700'
+                        : colFilters.paymentStatus === 'failed'
+                        ? 'border-rose-300 text-rose-700'
+                        : 'border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="">All</option>
+                    <option value="paid">Paid</option>
+                    <option value="pending">Pending</option>
+                    <option value="failed">Failed</option>
+                  </select>
+                </div>
+              </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 text-gray-600">
+
+          {/* ══════ BODY ══════ */}
+          <tbody className="divide-y divide-slate-100">
             {filteredTransactions && filteredTransactions.length > 0 ? (
-              filteredTransactions.map((txn: any, index: number) => (
-                <tr key={index} className="hover:bg-gray-50 transition-colors">
-                  <td className="py-3 px-4 font-mono font-medium text-gray-800">
-                    {txn.razorpay_payment_id || "N/A"}
-                  </td>
-                  <td className="py-3 px-4 font-semibold text-blue-600">
-                    {txn.reference_no || txn.ref_no || "N/A"}
-                  </td>
-                  <td className="py-3 px-4 font-medium text-gray-800">
-                    {txn.customer_name || txn.client_name || "Valued User"}
-                  </td>
-                  <td className="py-3 px-4 font-medium text-blue-600">
-                    {txn.case_type || txn.caseType || txn.estimate_type || "N/A"}
-                  </td>
-                  <td className="py-3 px-4">
-                    {new Date(txn.created_at || Date.now()).toLocaleString('en-IN')}
-                  </td>
+              filteredTransactions.map((txn: any, index: number) => {
+                const status = String(
+                  txn.platform_payment_status || txn.payment_status || 'paid'
+                ).toLowerCase();
 
-                  {/* ✅ Amount uses getAmount() — service-aware */}
-                  <td className="py-3 px-4 text-right font-bold text-gray-900">
-                    ₹ {getAmount(txn).toLocaleString('en-IN')}
-                  </td>
+                const statusStyles =
+                  status === 'paid'
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : status === 'pending'
+                    ? 'bg-amber-100 text-amber-700 border-amber-200'
+                    : status === 'failed'
+                    ? 'bg-rose-100 text-rose-700 border-rose-200'
+                    : 'bg-slate-100 text-slate-600 border-slate-200';
 
-                  <td className="py-3 px-4 text-center">
-                    <span className="bg-green-100 text-green-700 font-semibold px-2.5 py-1 rounded-full text-[10px]">
-                      {txn.platform_payment_status || txn.payment_status || 'PAID'}
-                    </span>
-                  </td>
-                </tr>
-              ))
+                const caseType = txn.case_type || txn.caseType || txn.estimate_type || 'N/A';
+
+                const caseTypeStyle =
+                  String(caseType).toUpperCase().includes('NEW')
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : String(caseType).toUpperCase().includes('PLAN')
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : String(caseType).toUpperCase().includes('RENOV')
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : String(caseType).toUpperCase().includes('VALUATION')
+                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                    : String(caseType).toUpperCase().includes('DEED')
+                    ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                    : 'bg-slate-50 text-slate-700 border-slate-200';
+
+                return (
+                  <tr key={index} className="hover:bg-blue-50/40 transition-colors">
+                    {/* Payment ID */}
+                    <td className="py-1 px-2 font-mono text-[10px] text-slate-700 truncate">
+                      <span title={txn.razorpay_payment_id || 'N/A'}>
+                        {txn.razorpay_payment_id || 'N/A'}
+                      </span>
+                    </td>
+
+                    {/* Reference No */}
+                    <td className="py-1 px-2 font-semibold text-blue-600 text-[10px] truncate">
+                      <span title={txn.reference_no || txn.ref_no || 'N/A'}>
+                        {txn.reference_no || txn.ref_no || 'N/A'}
+                      </span>
+                    </td>
+
+                    {/* Customer */}
+                    <td className="py-1 px-2 font-medium text-slate-800 text-[11px] truncate">
+                      <span title={txn.customer_name || txn.client_name || 'N/A'}>
+                        {txn.customer_name || txn.client_name || 'Valued User'}
+                      </span>
+                    </td>
+
+                    {/* Case Type */}
+                    <td className="py-1 px-2">
+                      <span
+                        className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase truncate inline-block max-w-full ${caseTypeStyle}`}
+                        title={caseType}
+                      >
+                        {caseType}
+                      </span>
+                    </td>
+
+                    {/* ✅ DATE — Center aligned */}
+                    <td className="py-1 px-2 whitespace-nowrap text-[10px] leading-tight text-center">
+                      <div className="text-slate-700 font-semibold">
+                        {new Date(txn.created_at || Date.now()).toLocaleDateString('en-IN', {
+                          day: '2-digit',
+                          month: 'short',
+                          year: '2-digit',
+                        })}
+                      </div>
+                      <div className="text-slate-400">
+                        {new Date(txn.created_at || Date.now()).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
+                    </td>
+
+                    {/* ✅ AMOUNT — Center aligned */}
+                    <td className="py-1 px-2 text-center font-bold text-emerald-600 text-[12px] whitespace-nowrap tabular-nums">
+                      ₹ {getAmount(txn).toLocaleString('en-IN')}
+                    </td>
+
+                    {/* Status */}
+                    <td className="py-1 px-2 text-center">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-bold uppercase ${statusStyles}`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             ) : (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-gray-400">
+                <td colSpan={7} className="py-8 text-center text-slate-400 text-xs font-medium">
                   No matching payment records found.
                 </td>
               </tr>
             )}
           </tbody>
+
+          {/* ══════ FOOTER ══════ */}
+          <tfoot className="sticky bottom-0 z-20">
+            <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-white font-bold">
+              <td colSpan={5} className="py-2 px-3 border-t-2 border-slate-700">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-300">
+                    TOTAL — Filtered
+                  </span>
+                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] font-bold tabular-nums">
+                    {filteredTransactions.length} txn
+                  </span>
+                  {activeDateLabel && (
+                    <span className="px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded text-[9px] font-bold normal-case">
+                      📅 {activeDateLabel}
+                    </span>
+                  )}
+                  {hasAnyFilter && (
+                    <button
+                      onClick={() =>
+                        setColFilters({
+                          paymentId: '',
+                          reference: '',
+                          customer: '',
+                          caseType: '',
+                          amount: '',
+                          paymentStatus: '',
+                          datePreset: '',
+                          fromDate: '',
+                          toDate: '',
+                        })
+                      }
+                      className="px-1.5 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded text-[9px] font-bold uppercase transition"
+                    >
+                      ✕ Clear Filters
+                    </button>
+                  )}
+                </div>
+              </td>
+              <td className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Total
+                </span>
+                <span className="text-emerald-400 text-[13px] font-black tabular-nums">
+                  ₹ {filteredTotal.toLocaleString('en-IN')}
+                </span>
+              </td>
+              <td className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Paid
+                </span>
+                <span className="text-emerald-400 text-[12px] font-black tabular-nums">
+                  ✓ {filteredPaidCount}
+                </span>
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
     </div>

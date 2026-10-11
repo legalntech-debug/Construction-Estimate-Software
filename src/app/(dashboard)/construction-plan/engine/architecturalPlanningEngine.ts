@@ -537,57 +537,16 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const settings = payload?.floorSettings || payload?.floor_settings || {};
   const orientation = getRoadOrientation(payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)');
 
-  let groundStairPos: { x: number; y: number; w?: number; h?: number } | null = payload?.groundStairPosition || null;
+  let groundStairPos: { x: number; y: number; w?: number; h?: number; spec?: any; corner?: string; entryFace?: string; exitFace?: string; flightDirection?: string; staircaseType?: string } | null = payload?.groundStairPosition || null;
   let groundStairOffset: { dx: number; dy: number } | null = payload?.groundStairRelativeOffset || null;
   let groundFloorProgram: string[] = payload?.groundFloorProgram || [];
 
   const groundKey = selectedFloors.find(f => f.includes('GROUND'));
 
-  if (groundKey && (!groundStairPos || !groundStairOffset || groundFloorProgram.length === 0)) {
-    const gInput = floorDataInput[groundKey] || floorDataInput[groundKey.toUpperCase()] || {};
-    const gW = Math.max(1, num(gInput.width, maxFootprint.width));
-    const gL = Math.max(1, num(gInput.length, maxFootprint.length));
-
-    const wall = getExternalWallThicknessFt();
-
-    const gClearW = Math.max(1, Math.min(gW, maxFootprint.width) - 2 * wall);
-    const gClearL = Math.max(1, Math.min(gL, maxFootprint.length) - 2 * wall);
-
-    try {
-      const gfResult = generateArchitecturalFloorPlan({
-        floorName: groundKey,
-        width: gClearW,
-        length: gClearL,
-        bhk: floorBhk[groundKey] || 'AUTO',
-        selectedRooms: normalizeSelectedRooms(
-          floorRoomsInput[groundKey] ?? floorRoomsInput[groundKey.toUpperCase()]
-        ),
-        planningMode: payload?.planningMode || 'AUTO',
-        roadSide: payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)',
-        hasParking: true,
-        planningArea: Math.max(1, num(gInput.area, gClearW * gClearL)),
-        parkingMode: String(settings[groundKey]?.parkingMode || 'CAR').toUpperCase() as ParkingMode,
-      });
-
-      const stairInfo = extractStairPositionFromResult(gfResult);
-
-      if (stairInfo) {
-        groundStairPos = { x: stairInfo.x, y: stairInfo.y, w: stairInfo.w, h: stairInfo.h };
-        groundStairOffset = stairInfo.relativeOffset;
-      }
-      groundFloorProgram = gfResult.rooms.map((r: any) =>
-        String(r.name || '').toLowerCase().replace(/\s+/g, '_')
-      );
-
-      if (typeof console !== 'undefined') {
-        console.log('[PLANNING ENGINE] Ground floor stair extracted:', {
-          stairInfo,
-          groundFloorProgram,
-        });
-      }
-    } catch (err) {
-      console.error('[PLANNING ENGINE] Ground floor stair extraction failed:', err);
-    }
+  // v6: ground floor isi call me REAL settings ke saath generate hota hai; stair uske
+  // asli result se nikalte hain (stale parent values ignore). Pre-pass sirf tab jab ground select nahi.
+  if (groundKey) {
+    groundStairPos = null; groundStairOffset = null; groundFloorProgram = [];
   } else if (typeof console !== 'undefined') {
     console.log('[PLANNING ENGINE] Using stair info from parent:', {
       groundStairPos,
@@ -600,7 +559,8 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const generatedFloorData: Record<string, any> = {};
   const generatedFloorRooms: Record<string, FloorRoom[]> = {};
 
-  for (const floorName of selectedFloors) {
+  const floorOrder = [...selectedFloors].sort((a, b) => (b.includes('GROUND') ? 1 : 0) - (a.includes('GROUND') ? 1 : 0));
+  for (const floorName of floorOrder) {
     const input = floorDataInput[floorName] || floorDataInput[floorName.toUpperCase()] || {};
     const width = Math.max(1, num(input.width, maxFootprint.width));
     const length = Math.max(1, num(input.length, maxFootprint.length));
@@ -616,11 +576,22 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       hasParking: isGround,
       planningArea: Math.max(1, num(input.area, width * length)),
       groundFloorProgram: isGround ? undefined : groundFloorProgram,
-      groundStairPosition: isGround ? undefined : (groundStairPos ? { x: groundStairPos.x, y: groundStairPos.y, w: groundStairPos.w, h: groundStairPos.h } : undefined),
+      groundStairPosition: isGround ? undefined : (groundStairPos ? { ...groundStairPos } : undefined),
       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
     }, maxFootprint);
 
     floors[floorName] = plan;
+
+    if (isGround) {
+      try {
+        const si: any = extractStairPositionFromResult(plan as any);
+        if (si) {
+          groundStairPos = { x: si.x, y: si.y, w: si.w, h: si.h, spec: si.spec, corner: si.corner, entryFace: si.entryFace, exitFace: si.exitFace, flightDirection: si.flightDirection, staircaseType: si.staircaseType };
+          groundStairOffset = si.relativeOffset;
+        }
+        groundFloorProgram = plan.rooms.map((r: any) => String(r.name || '').toLowerCase().replace(/\s+/g, '_'));
+      } catch (e) { console.error('[PLANNING ENGINE] ground stair extract failed', e); }
+    }
 
     if (typeof console !== 'undefined') {
       console.log('[PLANNING ENGINE] FLOOR FINAL', {

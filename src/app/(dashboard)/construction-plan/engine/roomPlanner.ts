@@ -619,7 +619,8 @@ function chooseStaircaseCorner(
     }
 
     const side = rotated ? L.h - sH : L.w - sW;
-    const sideMin = L.w < 9.5 ? 2.0 : MIN_SIDE_WALK_FT;   // narrow plot: 2 ft tak manzoor
+    // v8: C/hall-style (rotated) stair ki entry LEFT/RIGHT hoti hai -> upar/neeche ka side strip sirf 2 ft chahiye
+    const sideMin = (L.w < 9.5 || rotated) ? 2.0 : MIN_SIDE_WALK_FT;   // narrow plot: 2 ft tak manzoor
     if (side < sideMin - 0.01) {
       violations.push(`side walkway ${side.toFixed(2)} ft`);
       weight += 20 + (sideMin - side) * 30;
@@ -1837,17 +1838,58 @@ function splitOversizedBedrooms(roomsIn: FloorRoom[], W: number, H: number, isTo
 
   for (const R of rooms.filter(isBed) as any[]) {
     if (R.w <= MAX_BEDROOM_W_FT || R.h < 8) continue;
-    const n = Math.min(4, Math.ceil(R.w / MAX_BEDROOM_W_FT));
+    let n = Math.min(4, Math.ceil(R.w / MAX_BEDROOM_W_FT));
+    // v7: technically possible tabhi todo — har part >= 11 ft wide aur >= 9.5 ft deep (toilet ke saath).
+    // Depth kam ho (e.g. 30 wide x 15 long plot) to 2 bedroom ke liye bhi jagah nahi: ek hi bedroom rehne do.
+    const MIN_PART_W = 12.5, MIN_PART_H = 9.5;
+    if (R.h < MIN_PART_H) continue;
+    while (n > 1 && R.w / n < MIN_PART_W) n--;
+    if (n < 2) continue;
     const x0 = R.x, wTot = R.w;
-    const edges: number[] = [x0];
-    for (let k = 1; k < n; k++) edges.push(snap(x0 + (wTot * k) / n));
-    edges.push(x0 + wTot);
+    // v8: har part me stair se bachta hua 3 ft ka darwaza lag sake — warna kam parts me todo (ya mat todo)
+    const stairB: any = (rooms as any[]).find((r: any) => r.embeddedStair && !r.isSubRoom);
+    const circDoors0 = (R.doors || []).filter((d: any) => d.wall === 'BOTTOM' || d.wall === 'TOP');
+    const circWall0: 'BOTTOM' | 'TOP' = circDoors0.length ? circDoors0[0].wall : 'BOTTOM';
+    const edgesFor = (nn: number) => {
+      const ed: number[] = [x0];
+      for (let k = 1; k < nn; k++) ed.push(snap(x0 + (wTot * k) / nn));
+      ed.push(x0 + wTot);
+      return ed;
+    };
+    const doorFeasible = (ed: number[]): boolean => {
+      if (!stairB) return true;
+      const e = stairB.embeddedStair;
+      const sx = (stairB.x || 0) + (e.relX ?? 0), sy = (stairB.y || 0) + (e.relY ?? 0);
+      const wallYb = circWall0 === 'BOTTOM' ? R.y + R.h : R.y;
+      if (!(wallYb >= sy - 3.6 && wallYb <= sy + e.h + 3.6)) return true;
+      for (let k = 0; k + 1 < ed.length; k++) {
+        let ok = false;
+        for (let x = ed[k] + 0.4; x <= ed[k + 1] - 3.4 + 1e-6; x += 0.25) if (!(x < sx + e.w + 0.3 && x + 3 > sx - 0.3)) { ok = true; break; }
+        if (!ok) return false;
+      }
+      return true;
+    };
+    // v8: bedroom sizing rule — master pehle (net >= 10 ft chauda), phir bedroom (net >= 9 ft); toilet kam se kam 5 ft.
+    // 5-7% tak adjust (x0.93) manzoor; usse kam bache to todo mat (ek bada bedroom, sahi furniture ke saath).
+    const minNetFor = (k: number) => (k === 0 && /MASTER/.test(String(R.name))) ? 10 : 9;
+    const netFeasible = (ed: number[]): boolean => {
+      for (let k = 0; k + 1 < ed.length; k++) {
+        const pw = ed[k + 1] - ed[k];
+        if (pw - 5.0 < 0.93 * minNetFor(k) - 1e-6) return false;
+      }
+      return true;
+    };
+    while (n >= 2 && !(netFeasible(edgesFor(n)) && doorFeasible(edgesFor(n)))) n--;
+    if (n < 2) continue;
+    const edges: number[] = edgesFor(n);
 
     // circulation door of the original room (BOTTOM / TOP wall) -> uska wall + width
     const circDoors = (R.doors || []).filter((d: any) => d.wall === 'BOTTOM' || d.wall === 'TOP');
     const circWall: 'BOTTOM' | 'TOP' = circDoors.length ? circDoors[0].wall : 'BOTTOM';
     const origAttached = rooms.filter((t: any) => t.attachedTo === R.id || t.subZoneOf === R.id);
     const hadToilet = origAttached.some((t: any) => /TOILET/.test(String(t.name)));
+    const insideToilets = origAttached.filter((t: any) => /TOILET/.test(String(t.name)) &&
+      Math.min(R.x + R.w, t.x + t.w) - Math.max(R.x, t.x) > 0.05 && Math.min(R.y + R.h, t.y + t.h) - Math.max(R.y, t.y) > 0.05);
     const doorsAll: any[] = (R.doors || []).slice();
 
     const parts: any[] = [];
@@ -1885,10 +1927,26 @@ function splitOversizedBedrooms(roomsIn: FloorRoom[], W: number, H: number, isTo
       if (pt.doors.some((d: any) => d.wall === circWall)) continue;
       const dw = 3.0;
       let absX = pt.x + Math.max(0.6, Math.min(pt.w / 2 - dw / 2, pt.w - dw - 0.6));
+      let lo0 = pt.x + 0.4, hi0 = pt.x + pt.w - dw - 0.4;
       if (passage && pt.h) {
         const lo = passage.x + 0.3, hi = passage.x + passage.w - dw - 0.3;
         if (hi >= lo) absX = Math.max(lo, Math.min(absX, hi));
         absX = Math.max(pt.x + 0.4, Math.min(absX, pt.x + pt.w - dw - 0.4));
+        if (hi >= lo) { lo0 = Math.max(lo0, lo); hi0 = Math.min(hi0, hi); }
+      }
+      // v8: stair ke samne darwaza nahi — stair (aur uski 3 ft landing) ke x-span se bachkar sabse paas ki jagah
+      const stairBlock = (rooms as any[]).find((r: any) => r.embeddedStair && !r.isSubRoom);
+      if (stairBlock && hi0 >= lo0) {
+        const e = stairBlock.embeddedStair;
+        const sx = (stairBlock.x || 0) + (e.relX ?? 0), sy = (stairBlock.y || 0) + (e.relY ?? 0);
+        const wallYb = circWall === 'BOTTOM' ? pt.y + pt.h : pt.y;
+        const touches = wallYb >= sy - 3.6 && wallYb <= sy + e.h + 3.6;
+        const bad = (x: number) => touches && x < sx + e.w + 0.3 && x + dw > sx - 0.3;
+        if (touches && bad(absX)) {
+          let bestX = absX, bd = Infinity;
+          for (let x = lo0; x <= hi0 + 1e-6; x += 0.25) if (!bad(x) && Math.abs(x - absX) < bd) { bd = Math.abs(x - absX); bestX = x; }
+          if (bd < Infinity) absX = bestX;
+        }
       }
       const did = `${R.id}_split_door_${k}`;
       const wallY = circWall === 'BOTTOM' ? pt.y + pt.h : pt.y;
@@ -1906,19 +1964,65 @@ function splitOversizedBedrooms(roomsIn: FloorRoom[], W: number, H: number, isTo
       }
     }
 
+    // v8: kisi bhi part ka circulation door stair ke samne aa gaya ho to usse nazdiki khuli jagah par khisakao
+    {
+      const stairBlock = (rooms as any[]).find((r: any) => r.embeddedStair && !r.isSubRoom);
+      if (stairBlock) {
+        const e = stairBlock.embeddedStair;
+        const sx = (stairBlock.x || 0) + (e.relX ?? 0), sy = (stairBlock.y || 0) + (e.relY ?? 0);
+        for (const pt of parts) {
+          const wallYb = circWall === 'BOTTOM' ? pt.y + pt.h : pt.y;
+          if (!(wallYb >= sy - 3.6 && wallYb <= sy + e.h + 3.6)) continue;
+          for (const d of (pt.doors || [])) {
+            if (d.wall !== circWall || d.renderSymbol === false) continue;
+            const dw = d.widthFeet || 3, ax = pt.x + (d.offsetFeet || 0);
+            const bad = (x: number) => x < sx + e.w + 0.3 && x + dw > sx - 0.3;
+            if (!bad(ax)) continue;
+            let lo = pt.x + 0.4, hi = pt.x + pt.w - dw - 0.4;
+            if (passage) { lo = Math.max(lo, passage.x + 0.3); hi = Math.min(hi, passage.x + passage.w - dw - 0.3); }
+            let bestX = ax, bd = Infinity;
+            for (let x = lo; x <= hi + 1e-6; x += 0.25) if (!bad(x) && Math.abs(x - ax) < bd) { bd = Math.abs(x - ax); bestX = x; }
+            if (bd === Infinity) continue;
+            const nb: any = rooms.find((r: any) => r !== pt && (r.doors || []).some((q: any) => (q.sharedOpeningId || q.id) === (d.sharedOpeningId || d.id) && q !== d));
+            d.offsetFeet = Number((bestX - pt.x).toFixed(2));
+            d.hingeSide = bestX + dw / 2 > pt.x + pt.w / 2 ? 'END' : 'START';
+            if (nb) for (const q of nb.doors) if ((q.sharedOpeningId || q.id) === (d.sharedOpeningId || d.id) && q !== d) q.offsetFeet = Number((bestX - (nb.x || 0)).toFixed(2));
+          }
+        }
+      }
+    }
+
     // --- attached toilets / dressing: x-center ke hisaab se part ko; jis part me toilet nahi, naya
+    // v7: toilet jo bedroom ke bahar (side strip) me hai use sabse NAZDIKI part ko do
+    // (pehle parts[0] ko mil jata tha -> ek bedroom ke 2 toilet / door bina toilet).
     const owner = (t: any) => {
       const c = t.x + t.w / 2;
-      const kk = parts.findIndex((pt: any) => c >= pt.x - 1e-6 && c < pt.x + pt.w - 1e-6);
-      return parts[kk < 0 ? 0 : kk];
+      let best = parts[0], bd = Infinity;
+      for (const pt of parts) {
+        const d = c < pt.x ? pt.x - c : c > pt.x + pt.w ? c - (pt.x + pt.w) : 0;
+        if (d < bd - 1e-6) { bd = d; best = pt; }
+      }
+      return best;
     };
     for (const t of origAttached as any[]) { const o = owner(t); t.attachedTo = o.id; t.subZoneOf = o.id; }
+    // v8: bedroom ke andar wale toilet ko itna patla karo ki bacha hua bedroom min net size (master 10 / bedroom 9 ft) rakhe
+    for (const t of insideToilets as any[]) {
+      const o: any = parts.find((pt: any) => pt.id === t.attachedTo); if (!o) continue;
+      const minNet = (o === parts[0] && /MASTER/.test(String(o.name))) ? 10 : 9;
+      const maxW = Number(Math.max(5.0, Math.min(t.w, o.w - minNet)).toFixed(2));
+      if (t.w <= maxW + 0.01) continue;
+      const atRight = Math.abs((t.x + t.w) - (o.x + o.w)) < Math.abs(t.x - o.x);
+      t.w = maxW; t.x = atRight ? Number((o.x + o.w - maxW).toFixed(3)) : o.x;
+      for (const q of [...(t.doors || []), ...(t.windows || [])]) {
+        if (q.wall === 'TOP' || q.wall === 'BOTTOM') { const len = q.widthFeet || q.lengthFeet || 2; q.offsetFeet = Number(Math.max(0.3, Math.min(q.offsetFeet || 0, maxW - len - 0.3)).toFixed(2)); }
+      }
+    }
     if (hadToilet) {
       for (let k = 0; k < parts.length; k++) {
         const pt = parts[k];
         const has = rooms.some((t: any) => t.attachedTo === pt.id && /TOILET/.test(String(t.name)));
         if (has) continue;
-        const tw = pt.w < 12 ? 5.5 : 6.5;
+        const tw = Number(Math.max(5.0, Math.min(pt.w < 12 ? 5.5 : 6.5, pt.w - ((k === 0 && /MASTER/.test(String(R.name))) ? 10 : 9))).toFixed(2));
         const th = Number(Math.max(5, Math.min(8, pt.h - 4.5)).toFixed(2));
         if (pt.h - th < 4 || pt.w < 9) continue;
         const atRight = k === parts.length - 1 || k > 0 && k < parts.length - 1 ? true : false;
@@ -1939,16 +2043,189 @@ function splitOversizedBedrooms(roomsIn: FloorRoom[], W: number, H: number, isTo
   return rooms;
 }
 
+/* v7: stair ke pehle riser (entry face) ke samne agar passage/living ki wall aa rahi ho to
+   stair ki chaudai jitna OPENING (bina door) kaat do — taaki chadhne ka arrow wall se na takraye. */
+function openStairEntryWall(rooms: FloorRoom[]): FloorRoom[] {
+  const OPEN_OK = /PASSAGE|LIVING|KITCHEN|DINING|LOUNGE|FOYER/;
+  for (const L of rooms as any[]) {
+    const e = L.embeddedStair;
+    if (!e || L.isSubRoom) continue;
+    const face = e.entryFace;
+    if (face !== 'TOP' && face !== 'BOTTOM') continue;
+    const sx = (L.x || 0) + (e.relX ?? 0), sy = (L.y || 0) + (e.relY ?? 0);
+    const wallY = face === 'TOP' ? sy : sy + e.h;
+    const livingEdge = face === 'TOP' ? (L.y || 0) : (L.y || 0) + (L.h || 0);
+    if (Math.abs(wallY - livingEdge) > 0.3) continue;      // entry living ke andar khula hai (wall nahi)
+    const nb: any = rooms.find((r: any) => r !== L && OPEN_OK.test(String(r.name)) &&
+      (face === 'TOP' ? Math.abs((r.y || 0) + (r.h || 0) - livingEdge) < 0.3 : Math.abs((r.y || 0) - livingEdge) < 0.3) &&
+      Math.min(sx + e.w, (r.x || 0) + (r.w || 0)) - Math.max(sx, r.x || 0) > 2.5);
+    if (!nb) continue;
+    const lo = Math.max(sx, nb.x || 0, L.x || 0), hi = Math.min(sx + e.w, (nb.x || 0) + (nb.w || 0), (L.x || 0) + (L.w || 0));
+    if (hi - lo < 2.5) continue;
+    const wallL = face, wallN = face === 'TOP' ? 'BOTTOM' : 'TOP';
+    const overlaps = (d: any, room: any) => {
+      const a = (room.x || 0) + (d.offsetFeet || 0), b = a + (d.widthFeet || 3);
+      return Math.min(b, hi) - Math.max(a, lo) > 0.05;
+    };
+    const dropIds = new Set<string>();
+    for (const d of (L.doors || [])) if (d.wall === wallL && overlaps(d, L)) dropIds.add(d.sharedOpeningId || d.id);
+    for (const d of (nb.doors || [])) if (d.wall === wallN && overlaps(d, nb)) dropIds.add(d.sharedOpeningId || d.id);
+    for (const r of rooms as any[]) if (r.doors) r.doors = r.doors.filter((d: any) => !dropIds.has(d.sharedOpeningId || d.id));
+    const id = `stair_entry_open_${L.id}`;
+    const mk = (room: any, wall: string) => ({
+      id, wall, widthFeet: Number((hi - lo).toFixed(2)), offsetFeet: Number((lo - (room.x || 0)).toFixed(2)),
+      doorType: 'OPENING', renderSymbol: false, swingDirection: 'NONE', sharedOpeningId: id,
+    });
+    L.doors = [...(L.doors || []), mk(L, wallL)];
+    nb.doors = [...(nb.doors || []), mk(nb, wallN)];
+    e.entryOpening = { from: Number(lo.toFixed(2)), to: Number(hi.toFixed(2)), neighbor: nb.name };
+  }
+  return rooms;
+}
+
+/* v8: upper floor — bedroom ka darwaza stair (ya uski landing) ke samne ho to
+   (1) usi wall par khuli jagah par khisakao, (2) jagah hi na ho to sath wale bedroom me merge (access pehle). */
+function fixBlockedBedroomDoors(rooms: FloorRoom[]): FloorRoom[] {
+  const L: any = (rooms as any[]).find((r: any) => r.embeddedStair && !r.isSubRoom);
+  if (!L) return rooms;
+  const e = L.embeddedStair;
+  const sx = (L.x || 0) + (e.relX ?? 0), sy = (L.y || 0) + (e.relY ?? 0);
+  const isBed = (r: any) => /BEDROOM/.test(String(r.name)) && !r.isSubRoom && !r.subZoneOf;
+  const bad = (x: number, dw: number) => x < sx + e.w + 0.3 && x + dw > sx - 0.3;
+  const blockedDoor = (B: any) => (B.doors || []).find((d: any) => (d.wall === 'BOTTOM' || d.wall === 'TOP') && d.renderSymbol !== false && d.doorType !== 'MAIN' &&
+    (d.wall === 'BOTTOM' ? B.y + B.h : B.y) >= sy - 3.6 && (d.wall === 'BOTTOM' ? B.y + B.h : B.y) <= sy + e.h + 3.6 && bad(B.x + (d.offsetFeet || 0), d.widthFeet || 3));
+  let guard = 0;
+  for (const B of (rooms as any[]).filter(isBed)) {
+    if (guard++ > 20) break;
+    const d = blockedDoor(B); if (!d) continue;
+    const dw = d.widthFeet || 3;
+    let bestX = Infinity, bd = Infinity; const ax = B.x + (d.offsetFeet || 0);
+    for (let x = B.x + 0.4; x <= B.x + B.w - dw - 0.4 + 1e-6; x += 0.25)
+      if (!bad(x, dw) && Math.abs(x - ax) < bd) { bd = Math.abs(x - ax); bestX = x; }
+    if (bd < Infinity) {   // (1) khisakao (+ shared counterpart)
+      const nb: any = (rooms as any[]).find((r: any) => r !== B && (r.doors || []).some((q: any) => q !== d && (q.sharedOpeningId || q.id) === (d.sharedOpeningId || d.id)));
+      d.offsetFeet = Number((bestX - B.x).toFixed(2));
+      if (nb) for (const q of nb.doors) if (q !== d && (q.sharedOpeningId || q.id) === (d.sharedOpeningId || d.id)) q.offsetFeet = Number((bestX - (nb.x || 0)).toFixed(2));
+      continue;
+    }
+    // (2) merge with sibling bedroom (same row)
+    const sib: any = (rooms as any[]).find((r: any) => r !== B && isBed(r) && Math.abs(r.y - B.y) < 0.06 && Math.abs(r.h - B.h) < 0.06 &&
+      (Math.abs(r.x + r.w - B.x) < 0.06 || Math.abs(B.x + B.w - r.x) < 0.06) && !blockedDoor(r));
+    if (!sib) { console.warn('[BED DOOR] stair ke samne door khisak nahi saka, merge partner nahi mila', B.name); continue; }
+    const newX = Math.min(sib.x, B.x), newW = sib.w + B.w;
+    for (const q of (sib.doors || [])) if (q.wall === 'TOP' || q.wall === 'BOTTOM') q.offsetFeet = Number(((q.offsetFeet || 0) + (sib.x - newX)).toFixed(2));
+    sib.doors = (sib.doors || []).filter((q: any) => q.wall === 'TOP' || q.wall === 'BOTTOM');
+    sib.x = newX; sib.w = Number(newW.toFixed(3)); sib.areaPerRoom = Number((sib.w * sib.h).toFixed(2));
+    // sibling ke attached toilet agar merged room ke bahar na ho to wahi rahe; B ke sub rooms hatao
+    const gone = new Set<any>([B]);
+    for (const t of (rooms as any[])) if (t.attachedTo === B.id || t.subZoneOf === B.id) gone.add(t);
+    // B ke circulation door ke shared counterpart (living side) bhi hatao
+    const sid = new Set<string>((B.doors || []).map((q: any) => q.sharedOpeningId || q.id));
+    for (const r of (rooms as any[])) if (r !== B && !gone.has(r) && r.doors) r.doors = r.doors.filter((q: any) => !sid.has(q.sharedOpeningId || q.id) || (q.sharedOpeningId || q.id) === undefined);
+    const arr = rooms as any[];
+    for (let i = arr.length - 1; i >= 0; i--) if (gone.has(arr[i])) arr.splice(i, 1);
+    console.warn('[BED DOOR] stair ke samne darwaze ki jagah nahi thi -> do bedroom ek bade bedroom me merge', B.name);
+  }
+  return rooms;
+}
+
+/* v10: UPPER FLOOR par stair wale hisse ke alawa bacha hua bada lounge (e.g. 30x50: 23x12 ft) bekaar jata hai.
+   Stair jis taraf nahi hai us taraf ke front/rear bedroom ko lounge me badhao; beech me sirf 4 ft ka PASSAGE
+   (bedroom darwaze + stair tak raasta) bachao. Living sirf stair-wale hisse tak simat jata hai. */
+function reclaimUpperLounge(rooms: FloorRoom[]): FloorRoom[] {
+  const CORR = 4.0, SIDE_MIN = 3.5;
+  const all = rooms as any[];
+  if (all.some(r => /PARKING/.test(String(r.name)))) return rooms;               // sirf upper floor
+  const L: any = all.find(r => r.embeddedStair && !r.isSubRoom && /LIVING/.test(String(r.name)) && r.upperFloorLiving);
+  if (!L) return rooms;
+  const e = L.embeddedStair;
+  const S = { x: L.x + (e.relX ?? 0), w: e.w };
+  const L0 = L.x, L1 = L.x + L.w;                                                  // original living x-range
+  const top = all.filter(r => !r.isSubRoom && !r.subZoneOf && /BEDROOM/.test(String(r.name)));
+  const front = top.filter(b => Math.abs(b.y + b.h - L.y) < 0.15);
+  const rear = top.filter(b => Math.abs(b.y - (L.y + L.h)) < 0.15);
+  const stairLeft = S.x + S.w / 2 < (L0 + L1) / 2;
+  const freeSide = (b: any) => stairLeft ? b.x >= S.x + S.w + SIDE_MIN - 0.01 : b.x + b.w <= S.x - SIDE_MIN + 0.01;
+  const ef = front.filter(freeSide), er = rear.filter(freeSide);
+  const xs = [...ef, ...er];
+  if (!xs.length) return rooms;
+  const edge = (b: any) => stairLeft ? b.x : b.x + b.w;
+  const xcut = edge(xs[0]);
+  if (xs.some(b => Math.abs(edge(b) - xcut) > 0.15)) return rooms;                 // common edge chahiye
+  // free side ke bedrooms living ke poore free hisse ko cover karen
+  const coverEnd = stairLeft ? Math.max(...xs.map(b => b.x + b.w)) : Math.min(...xs.map(b => b.x));
+  if (Math.abs(coverEnd - (stairLeft ? L1 : L0)) > 0.2) return rooms;
+  const avail = L.h - CORR;
+  if (avail < 3) return rooms;                                                     // C stair: lounge pehle hi patla
+  const hasF = ef.length > 0, hasR = er.length > 0;
+  const snap = (v: number) => Math.round(v * 4) / 4;
+  const extF = hasF ? (hasR ? snap(avail / 2) : Number(avail.toFixed(3))) : 0;
+  const extR = hasR ? Number((avail - extF).toFixed(3)) : 0;
+  const grow = (b: any, up: boolean, ext: number) => {
+    const oldH = b.h, oldY = b.y;
+    if (up) b.y = Number((b.y - ext).toFixed(3));
+    b.h = Number((oldH + ext).toFixed(3));
+    b.areaPerRoom = Number((b.w * b.h).toFixed(2));
+    for (const t of all.filter(t => (t.attachedTo === b.id || t.subZoneOf === b.id) && t.isSubRoom)) {
+      if (Math.abs(t.h - oldH) < 0.06) { t.h = b.h; t.y = b.y; }
+      else if (up && Math.abs((t.y + t.h) - (oldY + oldH)) < 0.06) t.y = Number((b.y + b.h - t.h).toFixed(3));
+    }
+  };
+  for (const b of ef) grow(b, false, extF);
+  for (const b of er) grow(b, true, extR);
+  const corrY = Number((L.y + extF).toFixed(3));
+
+  // living -> sirf stair-side hissa; passage -> free-side corridor
+  const newLW = Number((Math.abs(xcut - (stairLeft ? L0 : L1))).toFixed(3));
+  const passX = stairLeft ? xcut : L0, passW = Number((L1 - L0 - newLW).toFixed(3));
+  const livNewX = stairLeft ? L0 : Number((L1 - newLW).toFixed(3));
+  const dx = livNewX - L0;                                                         // living ka x shift (right-stair me)
+  const movedDoors: any[] = [];
+  L.doors = (L.doors || []).filter((d: any) => {
+    if (d.wall !== 'TOP' && d.wall !== 'BOTTOM') return true;
+    const ax0 = L0 + (d.offsetFeet || 0), ax1 = ax0 + (d.widthFeet || 3);
+    const mid = (ax0 + ax1) / 2;
+    const inPass = stairLeft ? mid > xcut : mid < xcut;
+    if (inPass) { movedDoors.push({ ...d, __ax0: ax0 }); return false; }
+    return true;
+  });
+  L.x = livNewX; L.w = newLW;
+  for (const d of L.doors) if (d.wall === 'TOP' || d.wall === 'BOTTOM') d.offsetFeet = Number(((d.offsetFeet || 0) - dx).toFixed(2));
+  if (e) { e.relX = Number(((S.x) - L.x).toFixed(3)); }                            // stair absolute x wahi rahe
+  const pass: any = {
+    id: `upper_passage_${L.id}`, name: 'PASSAGE', x: passX, y: corrY, w: passW, h: CORR,
+    dimensionsFitted: true, publicCore: true, upperPassage: true, areaPerRoom: Number((passW * CORR).toFixed(2)),
+    doors: [], windows: [],
+  };
+  for (const d of movedDoors) {
+    const wallP = d.wall;                                                          // passage ki wahi wall (TOP: front bedroom, BOTTOM: rear)
+    const { __ax0, ...dd } = d;
+    pass.doors.push({ ...dd, offsetFeet: Number((__ax0 - passX).toFixed(2)) });
+  }
+  // living <-> passage opening (poori corridor chaudai)
+  const oid = `upper_pass_open_${L.id}`;
+  const mk = (wall: string, off: number) => ({ id: oid, wall, widthFeet: CORR, offsetFeet: Number(off.toFixed(2)), doorType: 'OPENING', renderSymbol: false, swingDirection: 'NONE', sharedOpeningId: oid });
+  L.doors.push(mk(stairLeft ? 'RIGHT' : 'LEFT', corrY - L.y));
+  pass.doors.push(mk(stairLeft ? 'LEFT' : 'RIGHT', 0));
+  rooms.push(pass);
+  (L as any).loungeReclaimed = { passage: pass.id, extFront: extF, extRear: extR };
+  return rooms;
+}
+
 export function buildResidentialLayout(
   ...args: Parameters<typeof buildResidentialLayoutCore>
 ): FloorRoom[] {
   const out = buildResidentialLayoutCore(...args);
+  let res = out;
   try {
-    return splitOversizedBedrooms(out, args[2], args[3], !!args[10]);
+    res = splitOversizedBedrooms(out, args[2], args[3], !!args[10]);
   } catch (e) {
     console.warn('[SPLIT BEDROOMS] skipped', e);
-    return out;
   }
+  try { res = openStairEntryWall(res); } catch (e) { console.warn('[STAIR ENTRY OPEN] skipped', e); }
+  try { res = reclaimUpperLounge(res); } catch (e) { console.warn('[UPPER LOUNGE] skipped', e); }
+  try { res = fixBlockedBedroomDoors(res); } catch (e) { console.warn('[BED DOOR FIX] skipped', e); }
+  return res;
 }
 
 function buildResidentialLayoutCore(
@@ -2093,7 +2370,7 @@ function buildResidentialLayoutCore(
     W >= 8 &&
     W <= 90 &&
     // ✅ FIX: 15x30 / 10x30 me 4\" walls ke baad clear length = 29.33 ft -> pehle (H >= 30) koi branch match nahi hota tha (blank plan)
-    H >= 16 &&
+    H >= 12 &&
     H <= 120
   ) {
     // ✅ SIZE-ADAPTIVE ROOM PROGRAM: jagah kam ho to pehle ground bedroom (+attached toilet) hatao,
@@ -2637,7 +2914,11 @@ function buildResidentialLayoutCore(
       const doorId = `bed_door_${zoneName.toLowerCase()}`;
       const stairRel: [number, number] | null = stairSpanGlobal ? [stairSpanGlobal[0] - x0, stairSpanGlobal[1] - x0] : null;
       // Side-strip toilet tabhi jab bedroom itna lamba na ho ki toilet elongated (> 2.4:1) ban jaye; warna horizontal door-side toilet
-      const stripWUp = Math.min(5.0, bw * 0.4);
+      // v8: toilet ki chaudai bedroom ke hisaab se: bedroom >= 12 ft chauda (aur furniture fit) bachne tak toilet badhao (5..7 ft)
+      const stripWUp = (() => {
+        for (let w = 7; w >= 5 - 1e-6; w -= 0.25) if (bw - w >= 12 && bedFits(bw - w, h, key)) return Number(w.toFixed(2));
+        return Math.min(5.0, bw * 0.4);
+      })();
       let colNarrow = fourBeds ? true : (bw < ATTACHED_VERTICAL_MIN_W_FT || (h / Math.max(1, stripWUp)) > 2.4);
       // ✅ DYNAMIC CHECK: horizontal toilet ke baad bedroom me furniture aata hai? Nahi to side strip / far-wall corner try
       let plan: DoorSideToiletPlan | null = null;
@@ -2686,7 +2967,7 @@ function buildResidentialLayoutCore(
         }
       } else {
         // W >= 15: side strip toilet, bedroom ka door passage wali wall par
-        const attachedW = hasAttached ? Math.min(5.0, bw * 0.4) : 0;
+        const attachedW = hasAttached ? stripWUp : 0;
         const bedW = bw - attachedW;
         const doorOffset = pickDoorOffset(bedW, BED_DOOR_W, [], stairRel);
         addRoom(key, x0, y, bedW, h, {
@@ -3337,7 +3618,9 @@ function evaluateStairVariant(ground: ArchitecturalPlanResult, upper: Architectu
   out.score = landingScore
     + Math.min(free, 4) * 40
     + Math.min(out.minBedDepth, 12) * 30
-    + Math.min(bedArea, 400) / 8
+    // v10: bedroom ka kul area ab 1500 sq.ft tak count hota hai (pehle 400 par saturate -> bade plot me U/C barabar,
+    // upper floor par bekaar lounge bachta tha). C stair upper floor par bedroom ko gehra karti hai.
+    + Math.min(bedArea, 1500) / 10
     + Math.min(gMin, 10) * 12
     - ground.warnings.filter(w => /UNUSABLE|OVERLAP|exceeds/i.test(w)).length * 400
     - upper.warnings.filter(w => /UNUSABLE|OVERLAP|exceeds/i.test(w)).length * 400

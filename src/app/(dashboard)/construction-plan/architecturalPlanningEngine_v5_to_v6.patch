@@ -1,0 +1,57 @@
+--- proj/construction-plan/engine/architecturalPlanningEngine.ts	2026-10-09 21:03:17.821826785 +0000
++++ src6/engine/architecturalPlanningEngine.ts	2026-10-09 21:09:54.855923991 +0000
+@@ -537,13 +537,17 @@
+   const settings = payload?.floorSettings || payload?.floor_settings || {};
+   const orientation = getRoadOrientation(payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)');
+ 
+-  let groundStairPos: { x: number; y: number; w?: number; h?: number } | null = payload?.groundStairPosition || null;
++  let groundStairPos: { x: number; y: number; w?: number; h?: number; spec?: any; corner?: string; entryFace?: string; exitFace?: string; flightDirection?: string; staircaseType?: string } | null = payload?.groundStairPosition || null;
+   let groundStairOffset: { dx: number; dy: number } | null = payload?.groundStairRelativeOffset || null;
+   let groundFloorProgram: string[] = payload?.groundFloorProgram || [];
+ 
+   const groundKey = selectedFloors.find(f => f.includes('GROUND'));
+ 
+-  if (groundKey && (!groundStairPos || !groundStairOffset || groundFloorProgram.length === 0)) {
++  // v6: ground floor isi call me REAL settings ke saath generate hota hai; stair uske
++  // asli result se nikalte hain (stale parent values ignore). Pre-pass sirf tab jab ground select nahi.
++  if (groundKey) {
++    groundStairPos = null; groundStairOffset = null; groundFloorProgram = [];
++  } else if (false) {
+     const gInput = floorDataInput[groundKey] || floorDataInput[groundKey.toUpperCase()] || {};
+     const gW = Math.max(1, num(gInput.width, maxFootprint.width));
+     const gL = Math.max(1, num(gInput.length, maxFootprint.length));
+@@ -600,7 +604,8 @@
+   const generatedFloorData: Record<string, any> = {};
+   const generatedFloorRooms: Record<string, FloorRoom[]> = {};
+ 
+-  for (const floorName of selectedFloors) {
++  const floorOrder = [...selectedFloors].sort((a, b) => (b.includes('GROUND') ? 1 : 0) - (a.includes('GROUND') ? 1 : 0));
++  for (const floorName of floorOrder) {
+     const input = floorDataInput[floorName] || floorDataInput[floorName.toUpperCase()] || {};
+     const width = Math.max(1, num(input.width, maxFootprint.width));
+     const length = Math.max(1, num(input.length, maxFootprint.length));
+@@ -616,12 +621,23 @@
+       hasParking: isGround,
+       planningArea: Math.max(1, num(input.area, width * length)),
+       groundFloorProgram: isGround ? undefined : groundFloorProgram,
+-      groundStairPosition: isGround ? undefined : (groundStairPos ? { x: groundStairPos.x, y: groundStairPos.y, w: groundStairPos.w, h: groundStairPos.h } : undefined),
++      groundStairPosition: isGround ? undefined : (groundStairPos ? { ...groundStairPos } : undefined),
+       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
+     }, maxFootprint);
+ 
+     floors[floorName] = plan;
+ 
++    if (isGround) {
++      try {
++        const si: any = extractStairPositionFromResult(plan as any);
++        if (si) {
++          groundStairPos = { x: si.x, y: si.y, w: si.w, h: si.h, spec: si.spec, corner: si.corner, entryFace: si.entryFace, exitFace: si.exitFace, flightDirection: si.flightDirection, staircaseType: si.staircaseType };
++          groundStairOffset = si.relativeOffset;
++        }
++        groundFloorProgram = plan.rooms.map((r: any) => String(r.name || '').toLowerCase().replace(/\s+/g, '_'));
++      } catch (e) { console.error('[PLANNING ENGINE] ground stair extract failed', e); }
++    }
++
+     if (typeof console !== 'undefined') {
+       console.log('[PLANNING ENGINE] FLOOR FINAL', {
+         floor: floorName,

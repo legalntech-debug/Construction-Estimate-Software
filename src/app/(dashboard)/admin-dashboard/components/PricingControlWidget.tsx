@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/lib/auth-context';
 import { Save, X, Check, AlertCircle, Clock, RefreshCw } from 'lucide-react';
@@ -60,13 +60,11 @@ function canApprovePricing(profile: any): boolean {
 // ═══════════════════════════════════════════════════════════
 const roundTwo = (n: number) => Math.round(n * 100) / 100;
 
-/** MRP + Price se auto % nikalna */
 const syncPercentFromPrice = (mrp: number, price: number): number | null => {
   if (!mrp || mrp <= 0 || price >= mrp) return null;
   return roundTwo(((mrp - price) / mrp) * 100);
 };
 
-/** MRP + % se auto price nikalna */
 const syncPriceFromPercent = (mrp: number, pct: number | null): number => {
   if (pct === null || pct <= 0 || !mrp || mrp <= 0) return mrp;
   return Math.round(mrp - (mrp * pct) / 100);
@@ -79,9 +77,16 @@ export default function PricingControlWidget() {
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [pendingRequests, setPendingRequests] = useState<ChangeRequest[]>([]);
 
-  const [filterCaseType, setFilterCaseType] = useState('ALL');
-  const [filterState, setFilterState] = useState('ALL');
-  const [search, setSearch] = useState('');
+  // ✅ Column-wise inline filters (Case Type + State dropdowns)
+  const [colFilters, setColFilters] = useState({
+    caseType: '',   // exact value from dropdown
+    state: '',      // exact value from dropdown
+    mrp: '',
+    price: '',
+    discount: '',
+    pct: '',
+    status: '',
+  });
 
   const [editingRow, setEditingRow] = useState<PricingRow | null>(null);
   const [editForm, setEditForm] = useState({
@@ -158,12 +163,91 @@ export default function PricingControlWidget() {
     })();
   }, [canEdit, fetchRows, fetchPendingRequests]);
 
+  // ✅ Unique case types & states for dropdowns
+  const uniqueCaseTypes = useMemo(() => {
+    return Array.from(new Set(rows.map((r) => r.case_type).filter(Boolean))).sort();
+  }, [rows]);
+
+  const uniqueStates = useMemo(() => {
+    return Array.from(new Set(rows.map((r) => r.state_name).filter(Boolean))).sort();
+  }, [rows]);
+
+  // ═══════════════════════════════════════════════════════════
+  // Filtered rows
+  // ═══════════════════════════════════════════════════════════
+  const filteredRows = useMemo(() => {
+    return rows.filter((r) => {
+      const f = colFilters;
+
+      if (f.caseType && r.case_type !== f.caseType) return false;
+      if (f.state && r.state_name !== f.state) return false;
+
+      if (f.mrp) {
+        const q = f.mrp.replace(/[^0-9.-]/g, '');
+        if (!String(Number(r.mrp)).includes(q)) return false;
+      }
+      if (f.price) {
+        const q = f.price.replace(/[^0-9.-]/g, '');
+        if (!String(Number(r.price)).includes(q)) return false;
+      }
+      if (f.discount) {
+        const isOn = r.discount_enabled ? 'on' : 'off';
+        if (f.discount.toLowerCase() !== isOn) return false;
+      }
+      if (f.pct) {
+        const pct = r.discount_enabled && r.mrp > r.price
+          ? r.discount_percent ?? Math.round(((r.mrp - r.price) / r.mrp) * 100)
+          : 0;
+        if (!String(pct).includes(f.pct)) return false;
+      }
+      if (f.status) {
+        const st = r.active ? 'live' : 'inactive';
+        if (f.status.toLowerCase() !== st) return false;
+      }
+      return true;
+    });
+  }, [rows, colFilters]);
+
+  // Computed totals for footer
+  const totals = useMemo(() => {
+    let liveCount = 0;
+    let inactiveCount = 0;
+    let totalMrp = 0;
+    let totalPrice = 0;
+    let totalDiscount = 0;
+
+    filteredRows.forEach((r) => {
+      if (r.active) liveCount++;
+      else inactiveCount++;
+      totalMrp += Number(r.mrp || 0);
+      totalPrice += Number(r.price || 0);
+      if (r.discount_enabled && r.mrp > r.price) {
+        totalDiscount += r.mrp - r.price;
+      }
+    });
+
+    return { liveCount, inactiveCount, totalMrp, totalPrice, totalDiscount };
+  }, [filteredRows]);
+
+  const hasAnyFilter = Object.values(colFilters).some((v) => v !== '');
+
+  const clearAllFilters = () => {
+    setColFilters({
+      caseType: '',
+      state: '',
+      mrp: '',
+      price: '',
+      discount: '',
+      pct: '',
+      status: '',
+    });
+  };
+
   const handleSave = async () => {
     if (!editingRow || !currentUser) return;
     setSaving(true);
 
     try {
-      // ═══ AUTO-SYNC: price और % dono consistent karo ═══
       const finalMrp = Number(editForm.mrp);
       const finalPrice = Number(editForm.price);
       const autoPercent = syncPercentFromPrice(finalMrp, finalPrice);
@@ -253,7 +337,6 @@ export default function PricingControlWidget() {
   const handleApprove = async () => {
     if (!approvingReq || !currentUser) return;
 
-    // ═══ AUTO-SYNC: agar admin ne % nahi diya to price se auto nikaalo ═══
     const finalMrp = Number(adminEditedValues.mrp ?? approvingReq.new_values.mrp);
     const finalPrice = Number(adminEditedValues.price ?? approvingReq.new_values.price);
     const finalDiscountPercent =
@@ -347,22 +430,6 @@ export default function PricingControlWidget() {
     await fetchPendingRequests();
   };
 
-  const filteredRows = rows.filter((r) => {
-    if (filterCaseType !== 'ALL' && r.case_type !== filterCaseType) return false;
-    if (filterState !== 'ALL' && r.state_name !== filterState) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      return (
-        r.case_type.toLowerCase().includes(q) ||
-        r.state_name.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
-
-  const uniqueCaseTypes = Array.from(new Set(rows.map((r) => r.case_type)));
-  const uniqueStates = Array.from(new Set(rows.map((r) => r.state_name)));
-
   if (!canEdit) {
     return (
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
@@ -388,70 +455,108 @@ export default function PricingControlWidget() {
   }
 
   return (
-    <div className="bg-white p-4 sm:p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
-            💰 Pricing Control Panel
-            <span
-              className={`text-[10px] font-black px-2 py-0.5 rounded ${
-                canApprove
-                  ? 'bg-purple-100 text-purple-700'
-                  : 'bg-blue-100 text-blue-700'
-              }`}
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* HEADER                                                       */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div className="relative bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 sm:px-5 py-3 border-b border-slate-700 shrink-0">
+        <div
+          className="absolute inset-0 opacity-[0.04] pointer-events-none"
+          style={{
+            backgroundImage: `linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)`,
+            backgroundSize: '24px 24px',
+          }}
+        />
+        <div className="relative flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="relative shrink-0">
+              <div className="absolute inset-0 rounded-lg bg-amber-500/40 blur-md" />
+              <div className="relative w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                <span className="text-lg">💰</span>
+              </div>
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-white text-sm sm:text-base tracking-tight leading-tight">
+                  Pricing Control Panel
+                </h3>
+                <span
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
+                    canApprove
+                      ? 'bg-purple-500/15 border border-purple-500/30 text-purple-300'
+                      : 'bg-blue-500/15 border border-blue-500/30 text-blue-300'
+                  }`}
+                >
+                  {canApprove ? '👑 Admin' : '📩 Editor'}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-tight mt-0.5">
+                State-wise pricing, MRP & discount control
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-md px-2.5 py-1 backdrop-blur-sm">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                Rows
+              </span>
+              <span className="text-[12px] font-black text-white tabular-nums">
+                {filteredRows.length}
+              </span>
+            </div>
+
+            {canApprove && pendingRequests.length > 0 && (
+              <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-md px-2.5 py-1 backdrop-blur-sm animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="text-[10px] font-bold text-amber-400 tabular-nums">
+                  {pendingRequests.length}
+                </span>
+                <span className="text-[9px] font-semibold text-amber-500/80 uppercase tracking-wider">
+                  Pending
+                </span>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                fetchRows();
+                fetchPendingRequests();
+              }}
+              className="px-2.5 py-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-md text-[10px] font-bold transition flex items-center gap-1 backdrop-blur-sm"
             >
-              {canApprove ? 'ADMIN — Direct Edit + Approve' : 'EDIT → Submit for Approval'}
-            </span>
-          </h3>
-          <p className="text-xs text-slate-500 mt-1">
-            State-wise pricing, MRP, discount toggle, aur CEO/Co-Partner approvals manage karein.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canApprove && pendingRequests.length > 0 && (
-            <span className="px-3 py-1.5 bg-amber-100 text-amber-800 rounded-xl text-xs font-black animate-pulse">
-              ⏳ {pendingRequests.length} Pending
-            </span>
-          )}
-          <button
-            onClick={() => {
-              fetchRows();
-              fetchPendingRequests();
-            }}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1"
-          >
-            <RefreshCw size={12} /> Refresh
-          </button>
+              <RefreshCw size={11} /> Refresh
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* PENDING APPROVALS QUEUE */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* PENDING APPROVALS QUEUE                                      */}
+      {/* ══════════════════════════════════════════════════════════ */}
       {canApprove && pendingRequests.length > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 space-y-2">
-          <h4 className="text-xs font-black text-amber-800 uppercase flex items-center gap-2">
-            <Clock size={14} /> Pending Approvals
+        <div className="bg-amber-50 border-b border-amber-200 p-3 space-y-2">
+          <h4 className="text-[11px] font-black text-amber-800 uppercase flex items-center gap-2">
+            <Clock size={13} /> Pending Approvals ({pendingRequests.length})
           </h4>
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-[220px] overflow-y-auto">
             {pendingRequests.map((req) => (
               <div
                 key={req.id}
-                className="bg-white border border-amber-200 rounded-xl p-3 flex flex-col sm:flex-row justify-between gap-3"
+                className="bg-white border border-amber-200 rounded-lg p-2.5 flex flex-col sm:flex-row justify-between gap-2"
               >
-                <div className="text-xs flex-1">
-                  <p className="font-bold text-slate-800">
+                <div className="text-[11px] flex-1 min-w-0">
+                  <p className="font-bold text-slate-800 truncate">
                     <span className="text-blue-600">{req.requester_name}</span>{' '}
-                    <span className="text-[10px] text-slate-500">({req.requested_by_role})</span>
+                    <span className="text-[9px] text-slate-500">({req.requested_by_role})</span>
                   </p>
-                  <p className="text-[11px] text-slate-600 mt-1">
+                  <p className="text-[10px] text-slate-600 mt-0.5 truncate">
                     <strong>{req.case_type}</strong> × <strong>{req.state_name}</strong>
                   </p>
-                  <p className="text-[11px] text-slate-600 mt-0.5">{req.change_summary}</p>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    {new Date(req.requested_at).toLocaleString('en-IN')}
-                  </p>
+                  <p className="text-[10px] text-slate-500 mt-0.5 truncate">{req.change_summary}</p>
                 </div>
-                <div className="flex gap-2 shrink-0 items-center">
+                <div className="flex gap-1.5 shrink-0 items-center">
                   <button
                     onClick={() => {
                       setApprovingReq(req);
@@ -463,15 +568,15 @@ export default function PricingControlWidget() {
                       });
                       setAdminNote('');
                     }}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1"
+                    className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-bold flex items-center gap-1"
                   >
-                    <Check size={12} /> Review
+                    <Check size={11} /> Review
                   </button>
                   <button
                     onClick={() => handleReject(req)}
-                    className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg text-xs font-bold flex items-center gap-1"
+                    className="px-2.5 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-md text-[10px] font-bold flex items-center gap-1"
                   >
-                    <X size={12} /> Reject
+                    <X size={11} /> Reject
                   </button>
                 </div>
               </div>
@@ -480,104 +585,198 @@ export default function PricingControlWidget() {
         </div>
       )}
 
-      {/* FILTERS */}
-      <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
-        <select
-          value={filterCaseType}
-          onChange={(e) => setFilterCaseType(e.target.value)}
-          className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="ALL">ALL CASE TYPES</option>
-          {uniqueCaseTypes.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
+      {/* ══════════════════════════════════════════════════════════ */}
+      {/* TABLE — Fixed height + sticky header + sticky footer         */}
+      {/* ══════════════════════════════════════════════════════════ */}
+      <div
+        className="overflow-y-auto overflow-x-auto"
+        style={{ height: 'calc(100vh - 380px)', minHeight: '360px' }}
+      >
+        <table className="w-full text-left text-xs table-fixed">
+          <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-20 shadow-sm">
+            <tr>
+              {/* CASE TYPE — DROPDOWN */}
+              <th className="py-1.5 px-2 w-[20%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Case Type</span>
+                  <select
+                    value={colFilters.caseType}
+                    onChange={(e) => setColFilters({ ...colFilters, caseType: e.target.value })}
+                    className={`w-full px-1.5 py-0.5 text-[10px] bg-white border rounded font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case ${
+                      colFilters.caseType ? 'border-blue-300 text-blue-700 font-semibold' : 'border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="">All Case Types</option>
+                    {uniqueCaseTypes.map((ct) => (
+                      <option key={ct} value={ct}>
+                        {ct}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </th>
 
-        <select
-          value={filterState}
-          onChange={(e) => setFilterState(e.target.value)}
-          className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="ALL">ALL STATES</option>
-          {uniqueStates.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+              {/* STATE — DROPDOWN */}
+              <th className="py-1.5 px-2 w-[18%] bg-slate-50">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">State</span>
+                  <select
+                    value={colFilters.state}
+                    onChange={(e) => setColFilters({ ...colFilters, state: e.target.value })}
+                    className={`w-full px-1.5 py-0.5 text-[10px] bg-white border rounded font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case ${
+                      colFilters.state ? 'border-blue-300 text-blue-700 font-semibold' : 'border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    <option value="">All States</option>
+                    {uniqueStates.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </th>
 
-        <input
-          type="text"
-          placeholder="🔍 Search..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 min-w-[180px] px-3 py-1.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+              {/* MRP */}
+              <th className="py-1.5 px-2 w-[11%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1 items-center">
+                  <span className="text-[9px] text-slate-500">MRP</span>
+                  <input
+                    type="text"
+                    placeholder="₹"
+                    value={colFilters.mrp}
+                    onChange={(e) => setColFilters({ ...colFilters, mrp: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center normal-case"
+                  />
+                </div>
+              </th>
 
-        <span className="text-[10px] font-bold text-slate-500 px-2">
-          {filteredRows.length} rows
-        </span>
-      </div>
+              {/* PRICE */}
+              <th className="py-1.5 px-2 w-[11%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1 items-center">
+                  <span className="text-[9px] text-slate-500">Price</span>
+                  <input
+                    type="text"
+                    placeholder="₹"
+                    value={colFilters.price}
+                    onChange={(e) => setColFilters({ ...colFilters, price: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center normal-case"
+                  />
+                </div>
+              </th>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* 1. DESKTOP TABLE VIEW */}
-      {/* ═══════════════════════════════════════════════════════════ */}
-      <div className="hidden md:block rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="bg-slate-900 text-white">
+              {/* DISCOUNT */}
+              <th className="py-1.5 px-2 w-[10%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Discount</span>
+                  <select
+                    value={colFilters.discount}
+                    onChange={(e) => setColFilters({ ...colFilters, discount: e.target.value })}
+                    className="w-full px-1 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case"
+                  >
+                    <option value="">All</option>
+                    <option value="on">On</option>
+                    <option value="off">Off</option>
+                  </select>
+                </div>
+              </th>
+
+              {/* % OFF */}
+              <th className="py-1.5 px-2 w-[10%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1 items-center">
+                  <span className="text-[9px] text-slate-500">% Off</span>
+                  <input
+                    type="text"
+                    placeholder="%"
+                    value={colFilters.pct}
+                    onChange={(e) => setColFilters({ ...colFilters, pct: e.target.value })}
+                    className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center normal-case"
+                  />
+                </div>
+              </th>
+
+              {/* STATUS */}
+              <th className="py-1.5 px-2 w-[10%] bg-slate-50 text-center">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[9px] text-slate-500">Status</span>
+                  <select
+                    value={colFilters.status}
+                    onChange={(e) => setColFilters({ ...colFilters, status: e.target.value })}
+                    className="w-full px-1 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 cursor-pointer normal-case"
+                  >
+                    <option value="">All</option>
+                    <option value="live">Live</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+              </th>
+
+              {/* ACTION */}
+              <th className="py-1.5 px-2 w-[10%] bg-slate-50 text-center">
+                <span className="text-[9px] text-slate-500">Action</span>
+              </th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-slate-100">
+            {filteredRows.length === 0 ? (
               <tr>
-                <th className="p-3 text-left font-bold">CASE TYPE</th>
-                <th className="p-3 text-left font-bold">STATE</th>
-                <th className="p-3 text-right font-bold">MRP</th>
-                <th className="p-3 text-right font-bold">PRICE</th>
-                <th className="p-3 text-center font-bold">DISCOUNT</th>
-                <th className="p-3 text-center font-bold">% OFF</th>
-                <th className="p-3 text-center font-bold">STATUS</th>
-                <th className="p-3 text-center font-bold">ACTION</th>
+                <td colSpan={8} className="p-8 text-center text-slate-400 text-xs">
+                  No pricing rows found matching your filters.
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredRows.map((row) => {
+            ) : (
+              filteredRows.map((row) => {
                 const pct =
                   row.discount_enabled && row.mrp > row.price
-                    ? row.discount_percent ??
-                      Math.round(((row.mrp - row.price) / row.mrp) * 100)
+                    ? row.discount_percent ?? Math.round(((row.mrp - row.price) / row.mrp) * 100)
                     : 0;
+
                 return (
-                  <tr key={row.id} className="hover:bg-slate-50 transition">
-                    <td className="p-3 font-bold text-slate-800">{row.case_type}</td>
-                    <td className="p-3 font-bold text-blue-700">{row.state_name}</td>
-                    <td className="p-3 text-right font-mono text-slate-600">
+                  <tr key={row.id} className="hover:bg-blue-50/40 transition-colors">
+                    <td className="py-1 px-2 font-bold text-slate-800 text-[11px] truncate">
+                      <span title={row.case_type}>{row.case_type}</span>
+                    </td>
+                    <td className="py-1 px-2">
+                      <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[9px] font-bold uppercase truncate inline-block max-w-full">
+                        {row.state_name}
+                      </span>
+                    </td>
+                    <td className="py-1 px-2 text-center font-mono text-slate-600 text-[11px] whitespace-nowrap tabular-nums">
                       ₹{row.mrp.toLocaleString('en-IN')}
                     </td>
-                    <td className="p-3 text-right font-mono font-bold text-emerald-600">
+                    <td className="py-1 px-2 text-center font-mono font-bold text-emerald-600 text-[12px] whitespace-nowrap tabular-nums">
                       ₹{row.price.toLocaleString('en-IN')}
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="py-1 px-2 text-center">
                       {row.discount_enabled ? (
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded font-bold text-[10px]">
-                          ON
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded-full border border-emerald-200 text-[9px] font-bold uppercase">
+                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                          on
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded font-bold text-[10px]">
-                          OFF
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-full border border-slate-200 text-[9px] font-bold uppercase">
+                          <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                          off
                         </span>
                       )}
                     </td>
-                    <td className="p-3 text-center font-bold text-amber-600">
+                    <td className="py-1 px-2 text-center font-bold text-amber-600 text-[11px] tabular-nums">
                       {pct ? `${pct}%` : '—'}
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="py-1 px-2 text-center">
                       <span
-                        className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[9px] font-bold uppercase ${
                           row.active
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-rose-100 text-rose-700'
+                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-100 text-rose-700 border-rose-200'
                         }`}
                       >
-                        {row.active ? 'LIVE' : 'INACTIVE'}
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {row.active ? 'live' : 'inactive'}
                       </span>
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="py-1 px-2 text-center">
                       <button
                         onClick={() => {
                           setEditingRow(row);
@@ -588,120 +787,86 @@ export default function PricingControlWidget() {
                             discount_percent: row.discount_percent,
                           });
                         }}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold"
+                        className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-[10px] font-bold transition"
                       >
                         ✎ Edit
                       </button>
                     </td>
                   </tr>
                 );
-              })}
-              {filteredRows.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 text-xs">
-                    No pricing rows found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              })
+            )}
+          </tbody>
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* 2. MOBILE CARD VIEW */}
-      {/* ═══════════════════════════════════════════════════════════ */}
-      <div className="block md:hidden space-y-3">
-        {filteredRows.length === 0 ? (
-          <div className="p-6 text-center text-slate-400 text-xs bg-slate-50 rounded-2xl">
-            No pricing rows found.
-          </div>
-        ) : (
-          filteredRows.map((row) => {
-            const pct =
-              row.discount_enabled && row.mrp > row.price
-                ? row.discount_percent ??
-                  Math.round(((row.mrp - row.price) / row.mrp) * 100)
-                : 0;
-            return (
-              <div
-                key={row.id}
-                className="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 space-y-2"
-              >
-                <div className="flex justify-between items-start gap-2 border-b border-slate-200 pb-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-slate-900 text-xs truncate">{row.case_type}</div>
-                    <div className="text-[11px] text-blue-700 font-semibold truncate">
-                      📍 {row.state_name}
-                    </div>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 rounded font-bold text-[9px] uppercase shrink-0 ${
-                      row.active
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-rose-100 text-rose-700'
-                    }`}
-                  >
-                    {row.active ? 'LIVE' : 'INACTIVE'}
+          {/* ✅ STICKY FOOTER */}
+          <tfoot className="sticky bottom-0 z-20">
+            <tr className="bg-gradient-to-r from-slate-900 to-slate-800 text-white font-bold">
+              <td colSpan={2} className="py-2 px-3 border-t-2 border-slate-700">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-300">
+                    TOTAL — Filtered
                   </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="block text-[9px] text-slate-400 font-bold uppercase">MRP</span>
-                    <span className="font-mono text-slate-600 text-[11px] mt-0.5 block">
-                      ₹{row.mrp.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="block text-[9px] text-slate-400 font-bold uppercase">Price</span>
-                    <span className="font-mono font-bold text-emerald-600 text-[11px] mt-0.5 block">
-                      ₹{row.price.toLocaleString('en-IN')}
-                    </span>
-                  </div>
-
-                  <div className="bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="block text-[9px] text-slate-400 font-bold uppercase">Discount</span>
-                    <span
-                      className={`font-bold text-[10px] mt-0.5 block ${
-                        row.discount_enabled ? 'text-emerald-600' : 'text-slate-400'
-                      }`}
+                  <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] font-bold tabular-nums">
+                    {filteredRows.length} rows
+                  </span>
+                  <span className="text-[9px] text-emerald-400">
+                    ● {totals.liveCount} live
+                  </span>
+                  <span className="text-[9px] text-rose-400">
+                    ● {totals.inactiveCount} inactive
+                  </span>
+                  {hasAnyFilter && (
+                    <button
+                      onClick={clearAllFilters}
+                      className="px-1.5 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded text-[9px] font-bold uppercase transition"
                     >
-                      {row.discount_enabled ? '✅ ON' : '❌ OFF'}
-                    </span>
-                  </div>
-
-                  <div className="bg-white p-2 rounded-xl border border-slate-200">
-                    <span className="block text-[9px] text-slate-400 font-bold uppercase">% OFF</span>
-                    <span className="font-bold text-amber-600 text-[11px] mt-0.5 block">
-                      {pct ? `${pct}%` : '—'}
-                    </span>
-                  </div>
+                      ✕ Clear Filters
+                    </button>
+                  )}
                 </div>
-
-                <button
-                  onClick={() => {
-                    setEditingRow(row);
-                    setEditForm({
-                      mrp: row.mrp,
-                      price: row.price,
-                      discount_enabled: row.discount_enabled,
-                      discount_percent: row.discount_percent,
-                    });
-                  }}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition"
-                >
-                  ✎ Edit Pricing
-                </button>
-              </div>
-            );
-          })
-        )}
+              </td>
+              <td className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Total MRP
+                </span>
+                <span className="text-slate-200 text-[12px] font-bold tabular-nums">
+                  ₹{totals.totalMrp.toLocaleString('en-IN')}
+                </span>
+              </td>
+              <td className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Total Price
+                </span>
+                <span className="text-emerald-400 text-[12px] font-black tabular-nums">
+                  ₹{totals.totalPrice.toLocaleString('en-IN')}
+                </span>
+              </td>
+              <td colSpan={2} className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Total Savings
+                </span>
+                <span className="text-amber-400 text-[12px] font-black tabular-nums">
+                  ₹{totals.totalDiscount.toLocaleString('en-IN')}
+                </span>
+              </td>
+              <td colSpan={2} className="py-2 px-3 border-t-2 border-slate-700 text-center whitespace-nowrap">
+                <span className="text-[9px] text-slate-400 uppercase tracking-wider font-bold block leading-none">
+                  Avg Discount
+                </span>
+                <span className="text-amber-400 text-[12px] font-black tabular-nums">
+                  {totals.totalMrp > 0
+                    ? ((totals.totalDiscount / totals.totalMrp) * 100).toFixed(1)
+                    : 0}
+                  %
+                </span>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* EDIT MODAL — AUTO-SYNC ENABLED */}
+      {/* EDIT MODAL — SAME AS BEFORE                                 */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {editingRow && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -725,7 +890,6 @@ export default function PricingControlWidget() {
               </p>
             </div>
 
-            {/* Quick % Buttons */}
             <div>
               <label className="text-[10px] font-bold text-slate-500 uppercase">
                 Quick Discount
@@ -768,7 +932,6 @@ export default function PricingControlWidget() {
             </div>
 
             <div className="space-y-3">
-              {/* MRP Input */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">MRP (₹)</label>
                 <input
@@ -776,7 +939,6 @@ export default function PricingControlWidget() {
                   value={editForm.mrp}
                   onChange={(e) => {
                     const newMrp = Number(e.target.value);
-                    // Agar % diya hua hai → price recalculate
                     const newPrice =
                       editForm.discount_percent !== null
                         ? syncPriceFromPercent(newMrp, editForm.discount_percent)
@@ -791,7 +953,6 @@ export default function PricingControlWidget() {
                 />
               </div>
 
-              {/* Price Input → % auto */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">Price (₹)</label>
                 <input
@@ -814,7 +975,6 @@ export default function PricingControlWidget() {
                 )}
               </div>
 
-              {/* Discount Toggle */}
               <div className="flex items-center gap-2 bg-emerald-50 p-3 rounded-xl border border-emerald-200">
                 <input
                   type="checkbox"
@@ -830,7 +990,6 @@ export default function PricingControlWidget() {
                 </label>
               </div>
 
-              {/* Discount % Input → Price auto */}
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">
                   Discount % (blank = auto)
@@ -854,7 +1013,6 @@ export default function PricingControlWidget() {
                 </p>
               </div>
 
-              {/* Live Preview */}
               <div className="bg-slate-900 text-white p-3 rounded-xl">
                 <p className="text-[10px] font-bold uppercase text-slate-400">Live Preview</p>
                 <div className="flex items-baseline gap-2 mt-1 flex-wrap">
@@ -905,7 +1063,7 @@ export default function PricingControlWidget() {
       )}
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* APPROVE MODAL — AUTO-SYNC ENABLED */}
+      {/* APPROVE MODAL — SAME AS BEFORE                               */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {approvingReq && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -964,14 +1122,12 @@ export default function PricingControlWidget() {
                           onChange={(e) => {
                             const val = Number(e.target.value);
                             const updated = { ...adminEditedValues, [f]: val };
-                            // Agar price badla → % auto-sync
                             if (f === 'price') {
                               const mrp = Number(
                                 updated.mrp ?? approvingReq.new_values.mrp
                               );
                               updated.discount_percent = syncPercentFromPrice(mrp, val);
                             }
-                            // Agar mrp badla → price auto (agar % tha)
                             if (f === 'mrp' && updated.discount_percent !== null && updated.discount_percent !== undefined) {
                               updated.price = syncPriceFromPercent(
                                 val,

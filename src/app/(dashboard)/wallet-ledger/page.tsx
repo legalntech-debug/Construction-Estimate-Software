@@ -63,7 +63,15 @@ const INDIAN_STATES_AND_DISTRICTS: { [key: string]: string[] } = {
 // MAIN CONTENT — uses useSearchParams (must be inside Suspense)
 // ═══════════════════════════════════════════════════════════════════
 function WalletLedgerContent() {
+  // ═══════════════════════════════════════════════════════════
+  // ✅ Search params — recharge mode detection
+  // ═══════════════════════════════════════════════════════════
+  const searchParams = useSearchParams();
+  const isRechargeMode = searchParams.get('recharge') === '1';
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [authReady, setAuthReady] = useState<boolean>(false);
+
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string>('');
@@ -106,8 +114,6 @@ function WalletLedgerContent() {
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<any>(null);
 
-  // ✅ Now inside Suspense — safe
-  const searchParams = useSearchParams();
   const [isRechargeOpen, setIsRechargeOpen] = useState<boolean>(false);
 
   const supabaseClient = createBrowserClient(
@@ -115,21 +121,37 @@ function WalletLedgerContent() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  // ═══════════════════════════════════════════════════════════
+  // ✅ INITIAL AUTH DECISION
+  //    - ?recharge=1 → bypass password gate + auto-open recharge modal
+  //    - sessionStorage flag → previously authed
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (isRechargeMode) {
+      setIsAuthenticated(true);
+      setIsRechargeOpen(true);
+      try {
+        sessionStorage.setItem('ledger_authenticated', 'true');
+      } catch {}
+      setAuthReady(true);
+      return;
+    }
+
+    try {
+      const alreadyAuthed = sessionStorage.getItem('ledger_authenticated') === 'true';
+      if (alreadyAuthed) setIsAuthenticated(true);
+    } catch {}
+
+    setAuthReady(true);
+  }, [isRechargeMode]);
+
   useEffect(() => {
     fetchInitialData();
   }, []);
 
   // ═══════════════════════════════════════════════════════════
-  // Recharge param handler
+  // Realtime subscription
   // ═══════════════════════════════════════════════════════════
-  useEffect(() => {
-    if (searchParams.get('recharge') === '1') {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('ledger_authenticated', 'true');
-      setIsRechargeOpen(true);
-    }
-  }, [searchParams]);
-
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -213,6 +235,9 @@ function WalletLedgerContent() {
     };
   }, [selectedUserId, isAuthenticated, selectedMonth, fromDate, toDate, profile?.id]);
 
+  // ═══════════════════════════════════════════════════════════
+  // Idle timeout (20 min)
+  // ═══════════════════════════════════════════════════════════
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -235,7 +260,9 @@ function WalletLedgerContent() {
   }, [isAuthenticated]);
 
   const handleAutoLogoutDueToInactivity = () => {
-    sessionStorage.removeItem('ledger_authenticated');
+    try {
+      sessionStorage.removeItem('ledger_authenticated');
+    } catch {}
     window.location.href = '/dashboard';
   };
 
@@ -356,7 +383,9 @@ function WalletLedgerContent() {
 
     await supabaseClient.from('user_security_logs').upsert({ user_id: profile.id, failed_attempts: 0, locked_until: null });
 
-    sessionStorage.setItem('ledger_authenticated', 'true');
+    try {
+      sessionStorage.setItem('ledger_authenticated', 'true');
+    } catch {}
     setIsAuthenticated(true);
     setAuthLoading(false);
   };
@@ -760,6 +789,9 @@ function WalletLedgerContent() {
 
   const isWalletNegative = (targetProfile?.wallet_balance ?? 0) < 0;
 
+  // ═══════════════════════════════════════════════════════════
+  // ✅ Password gate — ONLY when NOT authenticated
+  // ═══════════════════════════════════════════════════════════
   if (!isAuthenticated) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center p-4 font-sans bg-slate-50">
@@ -1294,7 +1326,7 @@ function WalletLedgerContent() {
         </div>
       )}
 
-      {/* ✅ Existing Modals */}
+      {/* Existing Modals */}
       <WithdrawalModal 
         isOpen={showRefundModal} 
         onClose={() => setShowRefundModal(false)} 
@@ -1311,9 +1343,7 @@ function WalletLedgerContent() {
         profile={profile} 
       />
 
-      {/* ═══════════════════════════════════════════════════════════ */}
-      {/* RechargeModal — URL ?recharge=1 par auto-open                */}
-      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* RechargeModal — auto-open when ?recharge=1 */}
       <RechargeModal
         isOpen={isRechargeOpen}
         onClose={() => {
@@ -1339,7 +1369,7 @@ function WalletLedgerContent() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ✅ DEFAULT EXPORT — Wraps content in Suspense (required by Next.js 15)
+// ✅ DEFAULT EXPORT — Suspense wrapper (Next.js 15 requirement)
 // ═══════════════════════════════════════════════════════════════════
 export default function WalletLedgerPage() {
   return (

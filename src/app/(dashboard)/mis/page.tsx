@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { AlertCircle, Mail, MessageSquare } from 'lucide-react';
@@ -19,10 +19,10 @@ interface MISRecord {
   client?: string;
   representative: string;
   case_type: string;
-  fee_standard: number; 
+  fee_standard: number;
   status: 'Received' | 'Pending' | 'Waived';
   remark: string;
-  client_plan_type?: 'BASIC' | 'PREMIUM'; 
+  client_plan_type?: 'BASIC' | 'PREMIUM';
   hours_elapsed?: number;
   account_status?: 'ACTIVE' | 'INACTIVE';
   mobile_no?: string;
@@ -35,15 +35,18 @@ interface MISRecord {
   property_address?: string;
   plot_area?: string;
   rate_per_sqft?: number;
-  source_table?: 'mis_records' | 'service_records'; // Kis table se data aaya hai track karne ke liye
-  record_category?: 'ESTIMATE' | 'SERVICE'; // Category differentiate karne ke liye
+  source_table?: 'mis_records' | 'service_records';
+  record_category?: 'ESTIMATE' | 'SERVICE';
+  // ✅ NEW: service_records ke fee columns
+  user_payment?: number;
+  user_service_fee?: number;
 }
 
 export default function MISPage() {
   const router = useRouter();
   const [records, setRecords] = useState<MISRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Filter States
   const [filterRefNo, setFilterRefNo] = useState('');
   const [filterDate, setFilterDate] = useState('');
@@ -56,13 +59,12 @@ export default function MISPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
-    const [authError, setAuthError] = useState('');
+  const [authError, setAuthError] = useState('');
   const [walletBalance, setWalletBalance] = useState<number>(100);
-  const [userPlanType, setUserPlanType] = useState<string>('BASIC PLAN'); // ← NEW
-  const [userRole, setUserRole] = useState<string>('user'); // ← NEW (admin ke liye bhi allow karne ke liye)
-  
+  const [userPlanType, setUserPlanType] = useState<string>('BASIC PLAN');
+  const [userRole, setUserRole] = useState<string>('user');
 
-  // Wallet and Data Fetching logic
+  // ========== Data Fetching ==========
   useEffect(() => {
     const fetchUserWalletAndData = async () => {
       try {
@@ -70,23 +72,21 @@ export default function MISPage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { setLoading(false); return; }
 
-               const { data: profile } = await supabase
+        const { data: profile } = await supabase
           .from('profiles')
-          .select('wallet_balance, role, plan_type')   // ← plan_type add kiya
+          .select('wallet_balance, role, plan_type')
           .eq('id', user.id)
           .single();
-        
+
         if (profile) {
           setWalletBalance(profile.wallet_balance || 0);
-          setUserPlanType(profile.plan_type || 'BASIC PLAN');  // ← NEW
-          setUserRole(profile.role || 'user');                  // ← NEW
+          setUserPlanType(profile.plan_type || 'BASIC PLAN');
+          setUserRole(profile.role || 'user');
         }
 
         const isAdmin = profile?.role === 'admin';
 
         // 1. Fetch Estimate Data from 'mis_records'
-                // 1. Fetch Estimate Data from 'mis_records'
-        // ✅ FIX: Direct user_id filter — no join needed (mis_records already has user_id)
         let misQuery = supabase.from('mis_records').select('*');
         if (!isAdmin) {
           misQuery = misQuery.eq('user_id', user.id);
@@ -102,26 +102,26 @@ export default function MISPage() {
         const { data: serviceData, error: serviceError } = await serviceQuery;
         if (serviceError) throw serviceError;
 
-        // 3. Format and tag Estimate Records (`mis_records`)
+        // 3. Format Estimate Records (`mis_records`)
         const formattedEstimates = (misData || []).map((item: any) => ({
           ...item,
           source_table: 'mis_records' as const,
           record_category: 'ESTIMATE' as const,
           case_type: item.case_type || 'Estimate Case',
+          fee_standard: item.fee_standard ?? item.fee ?? 0,
           mobile_no: item.mobile_no || "",
           email_id: item.email_id || ""
         }));
 
-       // 4. Format and tag Service Records (`service_records`)
+        // 4. Format Service Records (`service_records`)
         const formattedServices = (serviceData || []).map((item: any) => {
-          // Extract buyer name safely from form_snapshot JSON if available
           let extractedBuyerName = item.customer_name;
           if (!extractedBuyerName && item.form_snapshot) {
             try {
-              const snapshot = typeof item.form_snapshot === 'string' 
-                ? JSON.parse(item.form_snapshot) 
+              const snapshot = typeof item.form_snapshot === 'string'
+                ? JSON.parse(item.form_snapshot)
                 : item.form_snapshot;
-              
+
               if (snapshot?.buyers && Array.isArray(snapshot.buyers) && snapshot.buyers.length > 0) {
                 extractedBuyerName = snapshot.buyers[0]?.name;
               }
@@ -137,17 +137,23 @@ export default function MISPage() {
             record_category: 'SERVICE' as const,
             created_date: item.created_date || item.created_at || new Date().toISOString(),
             case_type: item.case_type || 'DEED_DRAFT',
-            fee_standard: item.user_service_fee || item.fee_standard || item.fee || 0,
+            // ✅ FIX: user_payment ko sabse pehle priority
+            fee_standard:
+              item.user_payment ??
+              item.user_service_fee ??
+              item.fee_standard ??
+              item.fee ??
+              0,
             mobile_no: item.mobile_no || "",
             email_id: item.email_id || ""
           };
         });
 
-        // 5. Combine Both Datasets
+        // 5. Combine + Sort
         const combinedRecords = [...formattedEstimates, ...formattedServices];
-        
-        // Sort by date (latest first)
-        combinedRecords.sort((a, b) => new Date(b.created_date).getTime() - new Date(a.created_date).getTime());
+        combinedRecords.sort((a, b) =>
+          new Date(b.created_date).getTime() - new Date(a.created_date).getTime()
+        );
 
         setRecords(combinedRecords as MISRecord[]);
       } catch (err) {
@@ -159,6 +165,7 @@ export default function MISPage() {
     fetchUserWalletAndData();
   }, []);
 
+  // ========== Create Entry ==========
   const handleCreateClick = () => {
     if (walletBalance < 100) {
       alert("Access Denied: Wallet balance is less than ₹100. Please recharge first.");
@@ -167,10 +174,16 @@ export default function MISPage() {
     router.push('/estimate');
   };
 
+  // ========== Case Type Normalizer ==========
+  // DB me "CONSTRUCTION_PLAN" hai, dropdown me "CONSTRUCTION PLAN" — dono ko match karne ke liye
+  const normalizeCaseType = (val: string) =>
+    (val || "").toUpperCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // ========== Filtered Records ==========
   const filteredRecords = useMemo(() => {
     return records.filter(rec => {
       const matchRef = (rec.ref_no || "").toLowerCase().includes(filterRefNo.toLowerCase());
-      
+
       let formattedDateStr = "";
       if (rec.created_date) {
         const d = new Date(rec.created_date);
@@ -183,34 +196,41 @@ export default function MISPage() {
 
       const matchClient = (rec.client_name || "").toLowerCase().includes(filterClient.toLowerCase());
       const matchRep = (rec.representative || "").toLowerCase().includes(filterRepresentative.toLowerCase());
-      const matchCase = filterCaseType === 'ALL' || (rec.case_type || "").toUpperCase().includes(filterCaseType.toUpperCase());
-      const matchStatus = filterStatus === 'ALL' || (rec.status || "").toUpperCase() === filterStatus.toUpperCase();
+
+      // ✅ FIX: exact match + normalization
+      const matchCase =
+        filterCaseType === 'ALL' ||
+        normalizeCaseType(rec.case_type || "") === normalizeCaseType(filterCaseType);
+
+      const matchStatus =
+        filterStatus === 'ALL' ||
+        (rec.status || "").toUpperCase() === filterStatus.toUpperCase();
 
       return matchRef && matchDate && matchClient && matchRep && matchCase && matchStatus;
     });
   }, [records, filterRefNo, filterDate, filterClient, filterRepresentative, filterCaseType, filterStatus]);
 
+  // ========== Metrics ==========
   const metrics = useMemo(() => {
     return filteredRecords.reduce((acc, curr) => {
       const currentStatus = (curr.status || "").toUpperCase();
       const fee = (curr.fee_standard || 0);
-      
+
       acc.total += fee;
       acc.count += 1;
       if (currentStatus === 'RECEIVED') acc.received += fee;
       if (currentStatus === 'PENDING') acc.pending += fee;
       if (currentStatus === 'WAIVED') acc.waived += fee;
-      
+
       return acc;
     }, { total: 0, received: 0, pending: 0, waived: 0, count: 0 });
   }, [filteredRecords]);
 
-  // Core Mutation Engine for Status Handling and Revenue Auditing (#PROTECT & #SYNC)
+  // ========== Update Status ==========
   const updateStatus = async (id: string, newStatus: string) => {
     try {
       setActiveMenuId(null);
 
-      // 1. Session state verification to protect multi-tenant integrity (#PROTECT)
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         alert("⚠️ CRITICAL SECURITY WARNING: Session expired. Action blocked.");
@@ -219,13 +239,11 @@ export default function MISPage() {
 
       const exactUppercaseStatus = newStatus.toUpperCase();
 
-      // 2. Multi-layer validation constraint for revenue loss prevention
       if (exactUppercaseStatus === 'WAIVED') {
         const verifyWaived = confirm("WARNING: Are you sure you want to mark this consulting fee as WAIVED? This will immediately affect revenue metrics.");
         if (!verifyWaived) return;
       }
 
-      // 3. Dynamic Table Resolution & Secure database write transaction (#SYNC)
       const targetRecord = records.find(r => String(r.id) === String(id));
       const targetTable = targetRecord?.source_table || 'mis_records';
 
@@ -233,7 +251,7 @@ export default function MISPage() {
         .from(targetTable)
         .update({ status: exactUppercaseStatus })
         .eq('id', id)
-        .select(); // Real-time row return to verify commit execution
+        .select();
 
       if (error) throw error;
 
@@ -242,14 +260,17 @@ export default function MISPage() {
         return;
       }
 
-      // 4. Guaranteed Local UI Synchronization matrix allocation (#CLEAN)
-      setRecords(prev => prev.map(r => String(r.id) === String(id) ? { ...r, status: exactUppercaseStatus as any } : r));
-      
+      setRecords(prev =>
+        prev.map(r =>
+          String(r.id) === String(id) ? { ...r, status: exactUppercaseStatus as any } : r
+        )
+      );
     } catch (error: any) {
       alert("Error processing mutation status updates: " + error.message);
     }
   };
 
+  // ========== Reopen ==========
   const handleReopen = async (record: any) => {
     try {
       let parsedFloorDetails = record.floor_details;
@@ -264,7 +285,6 @@ export default function MISPage() {
       const currentStatus = (record.status || "").trim().toUpperCase();
       const isPaidAlready = currentStatus === "RECEIVED" || currentStatus === "PAID" || currentStatus === "SUCCESS";
 
-      // Comprehensive payload with fallback mapping keys
       const reopenData = {
         id: record.id,
         ref_no: record.ref_no,
@@ -285,26 +305,26 @@ export default function MISPage() {
         status: currentStatus,
         isAlreadyPaid: isPaidAlready,
         is_paid: isPaidAlready,
-        // Form mapping fallback keys
         name: record.customer_name || "",
         address: record.property_address || "",
         client: record.client_name || ""
       };
 
       const caseTypeUpper = (record.case_type || "").trim().toUpperCase();
-      
+
       if (caseTypeUpper.includes("RENOVATION")) {
         localStorage.setItem("renovationEstimatePreview", JSON.stringify(reopenData));
-        window.location.href = "/renovation-estimate"; // Full reload to prevent stale cache
+        window.location.href = "/renovation-estimate";
       } else {
         localStorage.setItem("estimatePreview", JSON.stringify(reopenData));
-        window.location.href = "/estimate"; // Full reload to prevent stale cache
+        window.location.href = "/estimate";
       }
     } catch (err: any) {
       alert("Failed to reopen case: " + err.message);
     }
   };
 
+  // ========== Archive (Delete) ==========
   const handleArchive = (id: string) => {
     setRecordToDelete(id);
     setConfirmPassword('');
@@ -331,8 +351,12 @@ export default function MISPage() {
         return;
       }
 
+      // ✅ FIX: Dynamic table resolution (mis_records ya service_records)
+      const targetRecord = records.find(r => String(r.id) === String(recordToDelete));
+      const targetTable = targetRecord?.source_table || 'mis_records';
+
       const { error: deleteError } = await supabase
-        .from('mis_records')
+        .from(targetTable)
         .delete()
         .eq('id', recordToDelete);
 
@@ -348,12 +372,11 @@ export default function MISPage() {
     }
   };
 
- // Broadcast Communication Features Channels (Grouped by Client & Representative for Pending Cases)
+  // ========== WhatsApp Broadcast ==========
   const triggerWhatsAppBroadcast = async () => {
     try {
       setLoading(true);
 
-      // Get logged-in user details using profiles table schema (full_name, mobile, email)
       const { data: { user } } = await supabase.auth.getUser();
       let loggedInUserName = "Admin / Executive";
       let loggedInUserMobile = "";
@@ -373,7 +396,6 @@ export default function MISPage() {
         }
       }
 
-      // 1. Get filtered records from current view (Case-insensitive check for PENDING or FINALIZED)
       let targetRecords = filteredRecords.filter(r => {
         const s = String(r.status || "").trim().toUpperCase();
         return s === 'PENDING' || s === 'FINALIZED';
@@ -392,7 +414,6 @@ export default function MISPage() {
         return;
       }
 
-      // 2. Group records by Client Name & Representative combination
       const groupedMap: { [key: string]: any[] } = {};
 
       targetRecords.forEach(record => {
@@ -400,34 +421,29 @@ export default function MISPage() {
         const repName = record.representative || "General";
         const groupKey = `${clientGroupKey}_|_${repName}`;
 
-        if (!groupedMap[groupKey]) {
-          groupedMap[groupKey] = [];
-        }
+        if (!groupedMap[groupKey]) groupedMap[groupKey] = [];
         groupedMap[groupKey].push(record);
       });
 
       let broadcastCount = 0;
       let emailFallbackCount = 0;
 
-      // 3. Loop through each unique group and build message
       for (const groupKey of Object.keys(groupedMap)) {
         const [clientName, repName] = groupKey.split('_|_');
         const recordsGroup = groupedMap[groupKey];
-        
+
         let targetMobile = "";
         let targetEmail = "";
 
-        // Check if mobile or email exists directly in the record
         for (const rec of recordsGroup) {
           if (rec.mobile_no) targetMobile = rec.mobile_no;
           if (rec.email_id) targetEmail = rec.email_id;
           if (targetMobile && targetEmail) break;
-          
+
           if (rec.clients?.mobile_no) targetMobile = rec.clients.mobile_no;
           if (rec.clients?.email_id) targetEmail = rec.clients.email_id;
         }
 
-        // If not in record, fetch from 'clients' table using client_name
         if ((!targetMobile || !targetEmail) && clientName !== "Valued Client") {
           try {
             const { data: clientDbData } = await supabase
@@ -443,7 +459,6 @@ export default function MISPage() {
           } catch (e) {}
         }
 
-        // If still no mobile, check representative in clients or profiles table
         if (!targetMobile && repName && repName !== "General") {
           try {
             const { data: repClientData } = await supabase
@@ -476,10 +491,8 @@ export default function MISPage() {
           if (!isNaN(fee)) totalPendingFee += fee;
         });
 
-        // 4. Constructing Professional Message Format
         let message = `Hello ${clientName} ${repName},\n\n`;
         message += `Here is the summary of your Pending Cases list (${repName}):\n\n`;
-        
         message += `REF NO | DATE | CUSTOMER | TYPE | FEE | STATUS\n`;
         message += `--------------------------------------------------\n`;
 
@@ -490,7 +503,6 @@ export default function MISPage() {
           const type = rec.case_type || 'Standard';
           const fee = rec.fee_standard || rec.fee || 0;
           const status = rec.status || 'Pending';
-          
           message += `${index + 1}. ${ref} | ${date} | ${customer} | ${type} | ₹${fee} | ${status}\n`;
         });
 
@@ -498,16 +510,12 @@ export default function MISPage() {
         message += `Total Pending Cases: ${recordsGroup.length}\n`;
         message += `Total Pending Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
         message += `Please review and clear the dues at your earliest convenience.\n\n`;
-        
         message += `Thanks & Regards,\n`;
         message += `${loggedInUserName}`;
-        if (loggedInUserMobile) {
-          message += `\n📞 ${loggedInUserMobile}`;
-        }
+        if (loggedInUserMobile) message += `\n📞 ${loggedInUserMobile}`;
 
         const cleanMobile = String(targetMobile || "").replace(/\D/g, '');
 
-        // 5. Send via WhatsApp if valid mobile exists, otherwise fallback to Email if email exists
         if (cleanMobile.length >= 10) {
           const encodedMessage = encodeURIComponent(message);
           const whatsappUrl = `https://wa.me/91${cleanMobile}?text=${encodedMessage}`;
@@ -519,8 +527,6 @@ export default function MISPage() {
           const mailtoUrl = `mailto:${targetEmail}?subject=${emailSubject}&body=${emailBody}`;
           window.open(mailtoUrl, '_blank');
           emailFallbackCount++;
-        } else {
-          
         }
       }
 
@@ -529,20 +535,18 @@ export default function MISPage() {
       } else {
         alert("⚠️ Could not send broadcast. Please ensure valid mobile numbers or email IDs are saved in the database.");
       }
-
     } catch (error: any) {
-      
       alert("An error occurred while generating the broadcast.");
     } finally {
       setLoading(false);
     }
   };
 
-const triggerEmailBroadcast = async () => {
+  // ========== Email Broadcast ==========
+  const triggerEmailBroadcast = async () => {
     try {
       setLoading(true);
 
-      // Get logged-in user details
       const { data: { user } } = await supabase.auth.getUser();
       let loggedInUserName = "Admin / Executive";
       let loggedInUserEmail = "";
@@ -565,7 +569,6 @@ const triggerEmailBroadcast = async () => {
         }
       }
 
-      // 1. Get filtered records
       let targetRecords = filteredRecords.filter(r => {
         const s = String(r.status || "").trim().toUpperCase();
         return s === 'PENDING' || s === 'FINALIZED';
@@ -584,7 +587,6 @@ const triggerEmailBroadcast = async () => {
         return;
       }
 
-      // 2. Group records by Client & Representative
       const groupedMap: { [key: string]: any[] } = {};
 
       targetRecords.forEach(record => {
@@ -592,19 +594,16 @@ const triggerEmailBroadcast = async () => {
         const repName = record.representative || "General";
         const groupKey = `${clientGroupKey}_|_${repName}`;
 
-        if (!groupedMap[groupKey]) {
-          groupedMap[groupKey] = [];
-        }
+        if (!groupedMap[groupKey]) groupedMap[groupKey] = [];
         groupedMap[groupKey].push(record);
       });
 
       let emailCount = 0;
 
-      // 3. Loop through each group
       for (const groupKey of Object.keys(groupedMap)) {
         const [clientName, repName] = groupKey.split('_|_');
         const recordsGroup = groupedMap[groupKey];
-        
+
         let targetEmail = "";
 
         for (const rec of recordsGroup) {
@@ -624,10 +623,7 @@ const triggerEmailBroadcast = async () => {
           } catch (e) {}
         }
 
-        if (!targetEmail || !targetEmail.includes('@')) {
-          
-          continue;
-        }
+        if (!targetEmail || !targetEmail.includes('@')) continue;
 
         let totalPendingFee = 0;
         recordsGroup.forEach(rec => {
@@ -635,10 +631,8 @@ const triggerEmailBroadcast = async () => {
           if (!isNaN(fee)) totalPendingFee += fee;
         });
 
-        // Build Email Content
         let emailBody = `Hello ${clientName},\n\n`;
         emailBody += `Here is the summary of your Pending Cases (Representative: ${repName}):\n\n`;
-        
         emailBody += `REF NO | DATE | CUSTOMER | TYPE | FEE | STATUS\n`;
         emailBody += `--------------------------------------------------\n`;
 
@@ -649,7 +643,6 @@ const triggerEmailBroadcast = async () => {
           const type = rec.case_type || 'Standard';
           const fee = rec.fee_standard || rec.fee || 0;
           const status = rec.status || 'Pending';
-          
           emailBody += `${index + 1}. ${ref} | ${date} | ${customer} | ${type} | ₹${fee} | ${status}\n`;
         });
 
@@ -657,7 +650,6 @@ const triggerEmailBroadcast = async () => {
         emailBody += `Total Pending Cases: ${recordsGroup.length}\n`;
         emailBody += `Total Pending Amount: ₹${totalPendingFee.toLocaleString('en-IN')}\n\n`;
         emailBody += `Please review and clear the dues at your earliest convenience.\n\n`;
-        
         emailBody += `Thanks & Regards,\n`;
         emailBody += `${loggedInUserName}`;
         if (loggedInUserMobile) emailBody += `\n📞 ${loggedInUserMobile}`;
@@ -665,7 +657,6 @@ const triggerEmailBroadcast = async () => {
 
         const emailSubject = `Pending Cases Summary - ${clientName} (${repName})`;
 
-        // 4. ASK USER: Gmail ya Outlook kisme kholna hai?
         const choice = window.prompt(
           `Recipient Email: ${targetEmail}\n\nChoose your preferred email client:\nType 'gmail' for Google Gmail\nType 'outlook' for Microsoft Outlook\n(Click 'Cancel' to skip)`,
           'gmail'
@@ -677,10 +668,8 @@ const triggerEmailBroadcast = async () => {
         const lowerChoice = choice.trim().toLowerCase();
 
         if (lowerChoice.includes('gmail')) {
-          // Direct web Gmail composer link
           emailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(targetEmail)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         } else {
-          // Direct web Outlook composer link (Works in browser without opening native desktop app)
           emailUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(targetEmail)}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
         }
 
@@ -693,16 +682,14 @@ const triggerEmailBroadcast = async () => {
       } else {
         alert("⚠️ No valid emails found to broadcast.");
       }
-
     } catch (error: any) {
-      
       alert("An error occurred while generating the email broadcast.");
     } finally {
       setLoading(false);
     }
   };
 
-    // ============ EXCEL DOWNLOAD FUNCTION ============
+  // ========== Excel Download ==========
   const downloadExcel = () => {
     if (filteredRecords.length === 0) {
       alert("⚠️ No records available to export. Please adjust your filters.");
@@ -710,17 +697,8 @@ const triggerEmailBroadcast = async () => {
     }
 
     const headers = [
-      "Ref No",
-      "Date",
-      "Customer Name",
-      "Client",
-      "Representative",
-      "Case Type",
-      "Fee Standard",
-      "Status",
-      "Remark",
-      "Mobile No",
-      "Email ID",
+      "Ref No", "Date", "Customer Name", "Client", "Representative",
+      "Case Type", "Fee Standard", "Status", "Remark", "Mobile No", "Email ID",
     ];
 
     const rows = filteredRecords.map((rec) => {
@@ -795,16 +773,14 @@ const triggerEmailBroadcast = async () => {
     URL.revokeObjectURL(url);
   };
 
-  
-
+  // ========== JSX ==========
   return (
     <div className="space-y-4 max-w-[1600px] mx-auto p-2 bg-slate-50 min-h-screen">
-      
+
       {/* Header Panel */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 bg-white px-5 py-3 rounded border border-slate-200 shadow-xs">
         <h1 className="text-sm font-black tracking-wider text-slate-800 uppercase">MIS Analytics Engine</h1>
-                       <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
-          {/* ✅ PREMIUM / ADMIN ONLY — WhatsApp, Email, Excel */}
+        <div className="flex flex-wrap items-center justify-center gap-2 w-full md:w-auto">
           {(userPlanType === 'PREMIUM PLAN' || userRole === 'admin') && (
             <>
               <button onClick={triggerWhatsAppBroadcast} disabled={loading} className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md font-medium text-xs flex items-center gap-1.5 flex-1 md:flex-initial justify-center">
@@ -819,7 +795,6 @@ const triggerEmailBroadcast = async () => {
             </>
           )}
 
-          {/* ✅ SABHI USERS — Create Entry */}
           <button onClick={handleCreateClick} className="bg-blue-950 hover:bg-slate-900 text-white text-[10px] font-bold uppercase px-3 py-2 rounded transition-all tracking-wider flex-1 md:flex-initial justify-center">
             + Create Entry
           </button>
@@ -828,47 +803,45 @@ const triggerEmailBroadcast = async () => {
 
       <MetricsBar metrics={metrics} />
 
-      {/* Embedded Dynamic Table Matrix for Desktop / Cards for Mobile */}
-      
-      {/* 1. MOBILE CARD VIEW & FILTERS (Visible only on small screens) */}
+      {/* ========== MOBILE VIEW ========== */}
       <div className="block md:hidden space-y-3">
-        
-        {/* Mobile Search & Filter Box */}
         <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs space-y-2">
           <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Quick Filters (Mobile)</div>
-          
+
           <div className="grid grid-cols-2 gap-2">
-            <input 
-              type="text" 
-              value={filterRefNo} 
-              onChange={e => setFilterRefNo(e.target.value)} 
-              placeholder="Search Ref No..." 
-              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500" 
+            <input
+              type="text"
+              value={filterRefNo}
+              onChange={e => setFilterRefNo(e.target.value)}
+              placeholder="Search Ref No..."
+              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
             />
-            <input 
-              type="text" 
-              value={filterClient} 
-              onChange={e => setFilterClient(e.target.value)} 
-              placeholder="Client Name..." 
-              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500" 
+            <input
+              type="text"
+              value={filterClient}
+              onChange={e => setFilterClient(e.target.value)}
+              placeholder="Client Name..."
+              className="bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            <select 
-              value={filterCaseType} 
-              onChange={e => setFilterCaseType(e.target.value)} 
+            <select
+              value={filterCaseType}
+              onChange={e => setFilterCaseType(e.target.value)}
               className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
             >
               <option value="ALL">All Case Types</option>
-              <option value="Construction">New Construction</option>
-              <option value="Renovation">Renovation</option>
-              <option value="Route">Route Map</option>
+              <option value="NEW CONSTRUCTION">New Construction</option>
+              <option value="RENOVATION">Renovation</option>
+              <option value="ROUTE MAP">Route Map</option>
+              <option value="CONSTRUCTION PLAN">Construction Plan</option>
+              <option value="DEED_DRAFT">Deed Drafting</option>
             </select>
 
-            <select 
-              value={filterStatus} 
-              onChange={e => setFilterStatus(e.target.value)} 
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
               className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-xs text-slate-800 uppercase font-bold focus:outline-none focus:border-blue-500"
             >
               <option value="ALL">All Status</option>
@@ -879,7 +852,6 @@ const triggerEmailBroadcast = async () => {
           </div>
         </div>
 
-        {/* Existing Mobile Cards Loop */}
         {loading ? (
           <div className="bg-white p-4 rounded text-center text-slate-400 text-xs">Syncing active engine tables...</div>
         ) : filteredRecords.length === 0 ? (
@@ -888,24 +860,20 @@ const triggerEmailBroadcast = async () => {
           </div>
         ) : (
           filteredRecords.map((rec) => {
-            // ... card elements loop ...
             const cleanName = (rec.customer_name || "").split(/s\/o|d\/o|w\/o/i)[0].replace(/[,.-]+$/, "").trim().toUpperCase();
             return (
               <div key={rec.id} className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-xs space-y-2.5">
-                
-                {/* Top Row: Ref No & Date */}
                 <div className="flex items-center justify-between text-[11px] border-b border-slate-100 pb-2">
                   <span className="font-mono font-bold text-blue-700">{rec.ref_no}</span>
                   <span className="text-slate-500">{rec.created_date ? new Date(rec.created_date).toLocaleDateString('en-GB') : "-"}</span>
                 </div>
 
-                {/* Customer & Details */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black text-slate-900 uppercase">{cleanName}</span>
                     <span className="text-xs font-black text-slate-900">₹{(rec.fee_standard || 0).toLocaleString('en-IN')}</span>
                   </div>
-                  
+
                   <div className="grid grid-cols-2 gap-1 text-[11px] text-slate-600 font-medium">
                     <div><span className="text-slate-400">Client:</span> {rec.client_name ? rec.client_name.toUpperCase() : "N/A"}</div>
                     <div><span className="text-slate-400">Rep:</span> {rec.representative ? rec.representative.toUpperCase() : "N/A"}</div>
@@ -916,13 +884,12 @@ const triggerEmailBroadcast = async () => {
                   </div>
                 </div>
 
-                {/* Bottom Row: Status Dropdown & Action Options */}
                 <div className="flex items-center justify-between pt-2 border-t border-slate-100 gap-2">
-                  <select 
-                    value={(rec.status || 'PENDING').toUpperCase()} 
+                  <select
+                    value={(rec.status || 'PENDING').toUpperCase()}
                     onChange={(e) => updateStatus(String(rec.id), e.target.value)}
                     className={`px-2 py-1 rounded font-black uppercase text-[10px] cursor-pointer outline-none border flex-1 ${
-                      (rec.status || '').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 
+                      (rec.status || '').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' :
                       (rec.status || '').toUpperCase() === 'WAIVED' ? 'bg-slate-100 text-slate-600 border-slate-200' :
                       'bg-red-100 text-red-600 border-red-200'
                     }`}
@@ -935,9 +902,8 @@ const triggerEmailBroadcast = async () => {
                   <div className="flex items-center gap-1">
                     {rec.mobile_no && <a href={`https://wa.me/91${rec.mobile_no}`} target="_blank" className="p-1.5 bg-emerald-50 text-emerald-600 rounded border border-emerald-200"><MessageSquare size={14} /></a>}
                     {rec.email_id && <a href={`mailto:${rec.email_id}`} className="p-1.5 bg-blue-50 text-blue-600 rounded border border-blue-200"><Mail size={14} /></a>}
-                    
-                    {/* Action Menu for Mobile */}
-                    <button 
+
+                    <button
                       onClick={() => setActiveMenuId(activeMenuId === rec.id ? null : rec.id)}
                       className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] font-bold rounded border border-slate-300"
                     >
@@ -946,7 +912,6 @@ const triggerEmailBroadcast = async () => {
                   </div>
                 </div>
 
-                {/* Inline Action Dropdown for Mobile if Active */}
                 {activeMenuId === rec.id && (
                   <div className="flex gap-2 pt-2 border-t border-dashed border-slate-200">
                     <button onClick={() => handleReopen(rec)} className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 py-1.5 rounded text-[10px] font-bold border border-blue-200">
@@ -957,84 +922,83 @@ const triggerEmailBroadcast = async () => {
                     </button>
                   </div>
                 )}
-
               </div>
             );
           })
         )}
       </div>
 
-
-      {/* 2. DESKTOP TABLE VIEW (Hidden on mobile, visible on desktop md+) */}
+      {/* ========== DESKTOP VIEW ========== */}
       <div className="hidden md:block bg-white border border-slate-300 rounded shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse table-fixed min-w-[1300px]">
             <thead>
               <tr className="bg-blue-950 text-white text-[11px] font-extrabold tracking-wider uppercase border-b border-blue-900">
                 <th className="p-2 border-r border-blue-900 w-[14%] text-center">
-                  <input 
-                    type="text" 
-                    value={filterRefNo} 
-                    onChange={e => setFilterRefNo(e.target.value)} 
-                    placeholder="REF NO" 
-                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center" 
+                  <input
+                    type="text"
+                    value={filterRefNo}
+                    onChange={e => setFilterRefNo(e.target.value)}
+                    placeholder="REF NO"
+                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center"
                   />
                 </th>
 
                 <th className="p-2 border-r border-blue-900 w-[10%] text-center">
-                  <input 
-                    type="text" 
-                    value={filterDate} 
-                    onChange={e => setFilterDate(e.target.value)} 
-                    placeholder="DATE (DD/MM)" 
-                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center" 
+                  <input
+                    type="text"
+                    value={filterDate}
+                    onChange={e => setFilterDate(e.target.value)}
+                    placeholder="DATE (DD/MM)"
+                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center"
                   />
                 </th>
 
                 <th className="p-3 border-r border-blue-900 w-[16%] text-center">CUSTOMER NAME</th>
-                
+
                 <th className="p-2 border-r border-blue-900 w-[13%] text-center">
-                  <input 
-                    type="text" 
-                    value={filterClient} 
-                    onChange={e => setFilterClient(e.target.value)} 
-                    placeholder="CLIENT" 
-                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[10px] font-black focus:outline-none tracking-wider text-center" 
-                  />
-                </th>
-                
-                <th className="p-2 border-r border-blue-900 w-[13%] text-center">
-                  <input 
-                    type="text" 
-                    value={filterRepresentative} 
-                    onChange={e => setFilterRepresentative(e.target.value)} 
-                    placeholder="REPRESENTATIVE" 
-                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center" 
+                  <input
+                    type="text"
+                    value={filterClient}
+                    onChange={e => setFilterClient(e.target.value)}
+                    placeholder="CLIENT"
+                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[10px] font-black focus:outline-none tracking-wider text-center"
                   />
                 </th>
 
+                <th className="p-2 border-r border-blue-900 w-[13%] text-center">
+                  <input
+                    type="text"
+                    value={filterRepresentative}
+                    onChange={e => setFilterRepresentative(e.target.value)}
+                    placeholder="REPRESENTATIVE"
+                    className="w-full bg-transparent placeholder-blue-200/60 text-white uppercase text-[11px] font-black focus:outline-none tracking-wider text-center"
+                  />
+                </th>
+
+                {/* ✅ FIXED: Case Type Dropdown — unique values */}
                 <th className="p-2 border-r border-blue-900 w-[12%] text-center">
-                  <select 
-                    value={filterCaseType} 
-                    onChange={e => setFilterCaseType(e.target.value)} 
-                    className="w-full bg-transparent text-white font-black text-[11px] uppercase focus:outline-none cursor-pointer text-center border-none" 
+                  <select
+                    value={filterCaseType}
+                    onChange={e => setFilterCaseType(e.target.value)}
+                    className="w-full bg-transparent text-white font-black text-[11px] uppercase focus:outline-none cursor-pointer text-center border-none"
                     style={{ textAlignLast: 'center' }}
                   >
                     <option value="ALL" className="text-slate-900 font-bold">CASE TYPE</option>
-                    <option value="Construction" className="text-slate-900 font-bold">NEW CONSTRUCTION</option>
-                    <option value="Renovation" className="text-slate-900 font-bold">RENOVATION</option>
-                    <option value="Route" className="text-slate-900 font-bold">ROUTE MAP</option>
-                    <option value="Route" className="text-slate-900 font-bold">CONSTRUCTION PLAN</option>
-                    <option value="Route" className="text-slate-900 font-bold">DEED DRAFTING</option>
+                    <option value="NEW CONSTRUCTION" className="text-slate-900 font-bold">NEW CONSTRUCTION</option>
+                    <option value="RENOVATION" className="text-slate-900 font-bold">RENOVATION</option>
+                    <option value="ROUTE MAP" className="text-slate-900 font-bold">ROUTE MAP</option>
+                    <option value="CONSTRUCTION PLAN" className="text-slate-900 font-bold">CONSTRUCTION PLAN</option>
+                    <option value="DEED_DRAFT" className="text-slate-900 font-bold">DEED_DRAFT</option>
                   </select>
                 </th>
 
                 <th className="p-3 border-r border-blue-900 w-[9%] text-center">FEE STANDARD</th>
 
                 <th className="p-2 border-r border-blue-900 w-[12%] text-center">
-                  <select 
-                    value={filterStatus} 
-                    onChange={e => setFilterStatus(e.target.value)} 
+                  <select
+                    value={filterStatus}
+                    onChange={e => setFilterStatus(e.target.value)}
                     className="w-full bg-transparent text-white font-black text-[11px] uppercase focus:outline-none cursor-pointer text-center border-none"
                   >
                     <option value="ALL" className="text-slate-900 font-bold">STATUS</option>
@@ -1077,11 +1041,11 @@ const triggerEmailBroadcast = async () => {
                       <td className="p-2 text-slate-900 text-center">{rec.case_type ? rec.case_type.toUpperCase() : "N/A"}</td>
                       <td className="p-2 text-center">₹{(rec.fee_standard || 0).toLocaleString('en-IN')}</td>
                       <td className="p-2 text-center">
-                        <select 
-                          value={(rec.status || 'PENDING').toUpperCase()} 
+                        <select
+                          value={(rec.status || 'PENDING').toUpperCase()}
                           onChange={(e) => updateStatus(String(rec.id), e.target.value)}
                           className={`px-2 py-1.5 rounded font-black uppercase text-[10px] cursor-pointer outline-none border ${
-                            (rec.status || '').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 
+                            (rec.status || '').toUpperCase() === 'RECEIVED' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' :
                             (rec.status || '').toUpperCase() === 'WAIVED' ? 'bg-slate-100 text-slate-600 border-slate-200' :
                             'bg-red-100 text-red-600 border-red-200'
                           }`}
@@ -1091,8 +1055,8 @@ const triggerEmailBroadcast = async () => {
                           <option value="WAIVED" className="text-slate-600 font-bold bg-white">WAIVED</option>
                         </select>
                       </td>
-                      
-                      <ActionMenu 
+
+                      <ActionMenu
                         rec={rec}
                         activeMenuId={activeMenuId}
                         setActiveMenuId={setActiveMenuId}
@@ -1107,6 +1071,16 @@ const triggerEmailBroadcast = async () => {
           </table>
         </div>
       </div>
+
+      {/* ========== AuthModal — actual props match ========== */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        setIsOpen={setIsAuthModalOpen}
+        confirmPassword={confirmPassword}
+        setConfirmPassword={setConfirmPassword}
+        authError={authError}
+        executeSecureDelete={executeSecureDelete}
+      />
     </div>
   );
 }

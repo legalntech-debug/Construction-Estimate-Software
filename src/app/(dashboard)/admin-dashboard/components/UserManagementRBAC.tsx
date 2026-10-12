@@ -19,18 +19,12 @@ interface UserManagementRBACProps {
   supabaseClient?: any;
 }
 
-/* ------------------------------------------------------------------ */
-/* Constants                                                          */
-/* ------------------------------------------------------------------ */
 const EST_CHUNK = 50;
 const SRV_CHUNK = 100;
 const PAGE_SIZE = 1000;
 const TOKEN_EXPIRY_BUFFER = 30;
 const MIN_WALLET_BALANCE = 36;
 
-/* ------------------------------------------------------------------ */
-/* Utilities                                                          */
-/* ------------------------------------------------------------------ */
 const toNum = (v: any) => {
   const n = Number(v ?? 0);
   return isNaN(n) ? 0 : n;
@@ -70,22 +64,16 @@ const groupByUser = (rows: any[], ids: string[]) => {
 const localDateStr = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/* ------------------------------------------------------------------ */
-/* JWT helpers                                                        */
-/* ------------------------------------------------------------------ */
 const JWT_RE = /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/;
 
 function isTokenExpired(token: string): boolean {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return true;
-
     const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
     const decoded = JSON.parse(atob(padded));
-
     if (!decoded?.exp) return false;
-
     const now = Math.floor(Date.now() / 1000);
     return decoded.exp - now < TOKEN_EXPIRY_BUFFER;
   } catch {
@@ -142,9 +130,6 @@ function readCookieMap(): { [name: string]: string } {
   return map;
 }
 
-/* ------------------------------------------------------------------ */
-/* Token acquisition                                                  */
-/* ------------------------------------------------------------------ */
 async function getAccessToken(client: any): Promise<string | null> {
   if (client?.auth?.getSession) {
     try {
@@ -154,7 +139,6 @@ async function getAccessToken(client: any): Promise<string | null> {
       } else if (data?.session?.access_token) {
         const token = data.session.access_token;
         if (!isTokenExpired(token)) return token;
-
         if (client.auth.refreshSession) {
           const { data: refreshed, error: rErr } = await client.auth.refreshSession();
           if (!rErr && refreshed?.session?.access_token) {
@@ -197,9 +181,6 @@ async function getAccessToken(client: any): Promise<string | null> {
   return null;
 }
 
-/* ------------------------------------------------------------------ */
-/* Fetchers                                                           */
-/* ------------------------------------------------------------------ */
 async function fetchEstimatesChunk(client: any, ids: string[]) {
   const rows: any[] = [];
   let from = 0;
@@ -211,7 +192,6 @@ async function fetchEstimatesChunk(client: any, ids: string[]) {
         .in('user_id', ids)
         .order('id', { ascending: true })
         .range(from, from + PAGE_SIZE - 1);
-
       if (error) {
         console.warn('[RBAC] estimates fetch error:', error.message);
         return { rows, ok: false };
@@ -258,12 +238,10 @@ async function fetchServicesChunk(client: any, ids: string[]) {
     if (res.status === 401 || res.status === 403) {
       return { rows: [], ok: false };
     }
-
     if (!res.ok) {
       console.warn('[RBAC] service-records API failed:', res.status);
       return { rows: [], ok: false };
     }
-
     const json = await res.json();
     return { rows: (json.data || []) as any[], ok: true };
   } catch (e) {
@@ -272,9 +250,6 @@ async function fetchServicesChunk(client: any, ids: string[]) {
   }
 }
 
-/* ================================================================== */
-/* Component                                                          */
-/* ================================================================== */
 export default function UserManagementRBAC({
   filteredProfiles,
   userTableSearch,
@@ -299,7 +274,6 @@ export default function UserManagementRBAC({
 
   const [lockFilter, setLockFilter] = useState<'ALL' | 'ACTIVE' | 'LOCKED'>('ALL');
 
-  // ✅ Column-wise inline header filters
   const [colFilters, setColFilters] = useState({
     user: '',
     category: '',
@@ -308,6 +282,9 @@ export default function UserManagementRBAC({
     estsrv: '',
     revenue: '',
   });
+
+  // ✅ Mobile: collapsible filter panel
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
 
   const loadedRef = useRef<Set<string>>(new Set());
   const pendingRef = useRef(0);
@@ -456,7 +433,6 @@ export default function UserManagementRBAC({
       (p: any) => !p._isAdminUser && p._isPremium
     ).length;
 
-    // Apply lock filter + column filters
     const list = baseList.filter((p: any) => {
       if (lockFilter === 'LOCKED' && !p._isUserLocked) return false;
       if (lockFilter === 'ACTIVE' && (p._isUserLocked || p._isAdminUser || p._isPremium))
@@ -582,20 +558,39 @@ export default function UserManagementRBAC({
     lockFilter !== 'ALL' ||
     hasAnyColFilter;
 
+  /* ✅ Shared helpers */
+  const getLockBadge = (p: any) => {
+    if (p._isAdminUser)
+      return { label: 'Admin', cls: 'bg-purple-50 text-purple-700 border-purple-200' };
+    if (p._isPremium)
+      return { label: 'Exempt', cls: 'bg-blue-50 text-blue-700 border-blue-200' };
+    if (p._isUserLocked)
+      return { label: '🔒 Locked', cls: 'bg-rose-100 text-rose-700 border-rose-200 animate-pulse' };
+    return { label: 'Active', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' };
+  };
+
+  const getWalletCls = (balance: number) =>
+    balance < 0
+      ? 'text-rose-700'
+      : balance === 0
+      ? 'text-amber-700'
+      : 'text-emerald-700';
+
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col">
+
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* COMPACT HEADER — Title + Filters in one line                */}
+      {/* COMPACT HEADER                                              */}
       {/* ═══════════════════════════════════════════════════════════ */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 px-4 pt-4 pb-2">
-        <div className="min-w-0">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 px-3 sm:px-4 pt-4 pb-2">
+        <div className="min-w-0 w-full lg:w-auto">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-bold text-slate-800 text-sm sm:text-base whitespace-nowrap">
+            <h3 className="font-bold text-slate-800 text-[13px] sm:text-base whitespace-nowrap">
               RBAC User Management
             </h3>
 
-            {/* Counters chips — compact inline */}
-            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider">
+            {/* Counters chips */}
+            <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider">
               <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded border border-slate-200">
                 Total <span className="text-slate-900">{counters.total}</span>
               </span>
@@ -620,7 +615,8 @@ export default function UserManagementRBAC({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+        {/* ═══ Desktop Filters (hidden on mobile) ═══ */}
+        <div className="hidden lg:flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
           {/* Date */}
           <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-md px-2 py-1">
             <span className="text-[9px] font-bold text-slate-500 uppercase">From</span>
@@ -685,373 +681,686 @@ export default function UserManagementRBAC({
             {hiddenSections.rbac ? 'Show [+]' : 'Hide [−]'}
           </button>
         </div>
+
+        {/* ═══ Mobile Filter Toggle ═══ */}
+        <div className="flex lg:hidden items-center gap-1.5 w-full">
+          <button
+            onClick={() => setShowMobileFilters(!showMobileFilters)}
+            className="flex-1 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[11px] font-bold transition flex items-center justify-center gap-1"
+          >
+            🔍 {showMobileFilters ? 'Hide Filters' : 'Show Filters'}
+            {showResetBtn && (
+              <span className="bg-blue-500 text-white text-[9px] rounded-full px-1.5 py-0.5 ml-0.5">
+                ON
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => toggleSection('rbac')}
+            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-[10px] font-bold transition whitespace-nowrap"
+          >
+            {hiddenSections.rbac ? 'Show [+]' : 'Hide [−]'}
+          </button>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
-      {/* TABLE — Header me hi filter inputs                          */}
+      {/* MOBILE FILTERS PANEL                                        */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {!hiddenSections.rbac && showMobileFilters && (
+        <div className="lg:hidden bg-slate-50 border-y border-slate-200 p-3 space-y-2">
+          {/* Date + Month row */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-0.5 bg-white border border-slate-200 rounded-md px-2 py-1.5">
+              <span className="text-[9px] font-bold text-slate-500 uppercase">From Date</span>
+              <input
+                type="date"
+                value={modalSelectedDate && modalFilterType === 'date' ? modalSelectedDate : ''}
+                onChange={(e) => {
+                  setModalSelectedDate(e.target.value);
+                  setModalFilterType('date');
+                }}
+                className="text-[11px] bg-transparent focus:outline-none font-semibold text-slate-800 w-full"
+              />
+            </div>
+            <div className="flex flex-col gap-0.5 bg-white border border-slate-200 rounded-md px-2 py-1.5">
+              <span className="text-[9px] font-bold text-slate-500 uppercase">Month</span>
+              <input
+                type="month"
+                value={modalSelectedMonth}
+                onChange={(e) => {
+                  setModalSelectedMonth(e.target.value);
+                  setModalFilterType('month');
+                }}
+                className="text-[11px] bg-transparent focus:outline-none font-semibold text-slate-800 w-full"
+              />
+            </div>
+          </div>
+
+          {/* User filter */}
+          <input
+            type="text"
+            placeholder="Filter by name / email / mobile…"
+            value={colFilters.user}
+            onChange={(e) => setColFilters({ ...colFilters, user: e.target.value })}
+            className="w-full px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+
+          {/* Category filter */}
+          <input
+            type="text"
+            placeholder="Filter by category / firm…"
+            value={colFilters.category}
+            onChange={(e) => setColFilters({ ...colFilters, category: e.target.value })}
+            className="w-full px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+
+          {/* Wallet + Lock row */}
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              placeholder="₹ Wallet…"
+              value={colFilters.wallet}
+              onChange={(e) => setColFilters({ ...colFilters, wallet: e.target.value })}
+              className="px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            <select
+              value={lockFilter}
+              onChange={(e) => setLockFilter(e.target.value as any)}
+              className={`px-2.5 py-2 text-xs bg-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold ${
+                lockFilter === 'LOCKED'
+                  ? 'border-rose-300 text-rose-600'
+                  : lockFilter === 'ACTIVE'
+                  ? 'border-emerald-300 text-emerald-600'
+                  : 'border-slate-200 text-slate-700'
+              }`}
+            >
+              <option value="ALL">All Lock Status</option>
+              <option value="ACTIVE">🟢 Active</option>
+              <option value="LOCKED">🔒 Locked</option>
+            </select>
+          </div>
+
+          {/* Est/Srv + Revenue row */}
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="text"
+              placeholder="Est+Srv (e.g., 5+2)"
+              value={colFilters.estsrv}
+              onChange={(e) => setColFilters({ ...colFilters, estsrv: e.target.value })}
+              className="px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+            <input
+              type="text"
+              placeholder="₹ Revenue…"
+              value={colFilters.revenue}
+              onChange={(e) => setColFilters({ ...colFilters, revenue: e.target.value })}
+              className="px-2.5 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+
+          {/* Clear */}
+          {showResetBtn && (
+            <button
+              onClick={clearAllFilters}
+              className="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold uppercase transition"
+            >
+              ✕ Clear All Filters
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* DESKTOP TABLE                                               */}
       {/* ═══════════════════════════════════════════════════════════ */}
       {!hiddenSections.rbac && (
-        <div
-          className="overflow-y-auto overflow-x-auto mx-4 mb-4 rounded-xl border border-slate-100"
-          style={{
-            maxHeight: 'calc(100vh - 250px)',
-            minHeight: '400px',
-          }}
-        >
-          <table className="w-full text-left text-sm table-fixed">
-            <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10">
-              <tr>
-                {/* User — header me inline filter */}
-                <th className="py-1.5 px-2 w-[22%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">User</span>
-                    <input
-                      type="text"
-                      placeholder="Filter…"
-                      value={colFilters.user}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, user: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px]"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 w-[18%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">Category & Firm</span>
-                    <input
-                      type="text"
-                      placeholder="Filter…"
-                      value={colFilters.category}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, category: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px]"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 text-center w-[8%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">Wallet</span>
-                    <input
-                      type="text"
-                      placeholder="₹"
-                      value={colFilters.wallet}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, wallet: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 text-center w-[8%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">Lock</span>
-                    <input
-                      type="text"
-                      placeholder="act/lock"
-                      value={colFilters.lock}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, lock: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] text-center"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 text-center w-[10%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">Est / Srv</span>
-                    <input
-                      type="text"
-                      placeholder="5+2"
-                      value={colFilters.estsrv}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, estsrv: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] text-center"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 w-[8%] bg-slate-50">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[9px]">Revenue</span>
-                    <input
-                      type="text"
-                      placeholder="₹"
-                      value={colFilters.revenue}
-                      onChange={(e) =>
-                        setColFilters({ ...colFilters, revenue: e.target.value })
-                      }
-                      className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center"
-                    />
-                  </div>
-                </th>
-
-                <th className="py-1.5 px-2 w-[8%] bg-slate-50 text-center">
-                  <span className="text-[9px]">Role</span>
-                </th>
-                <th className="py-1.5 px-2 w-[9%] bg-slate-50 text-center">
-                  <span className="text-[9px]">Status</span>
-                </th>
-                <th className="py-1.5 px-2 text-right w-[9%] bg-slate-50">
-                  <span className="text-[9px]">Action</span>
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-slate-100">
-              {processedProfiles.length === 0 ? (
+        <>
+          {/* ─── Desktop Table (hidden on mobile) ─── */}
+          <div
+            className="hidden lg:block overflow-y-auto overflow-x-auto mx-4 mb-4 rounded-xl border border-slate-100"
+            style={{
+              maxHeight: 'calc(100vh - 250px)',
+              minHeight: '400px',
+            }}
+          >
+            <table className="w-full text-left text-sm table-fixed">
+              <thead className="bg-slate-50 text-slate-500 uppercase text-[10px] tracking-wider font-bold sticky top-0 z-10">
                 <tr>
-                  <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">
-                    No profiles found matching your search or filter criteria.
-                  </td>
+                  <th className="py-1.5 px-2 w-[22%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">User</span>
+                      <input
+                        type="text"
+                        placeholder="Filter…"
+                        value={colFilters.user}
+                        onChange={(e) => setColFilters({ ...colFilters, user: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px]"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 w-[18%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">Category & Firm</span>
+                      <input
+                        type="text"
+                        placeholder="Filter…"
+                        value={colFilters.category}
+                        onChange={(e) => setColFilters({ ...colFilters, category: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px]"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 text-center w-[8%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">Wallet</span>
+                      <input
+                        type="text"
+                        placeholder="₹"
+                        value={colFilters.wallet}
+                        onChange={(e) => setColFilters({ ...colFilters, wallet: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 text-center w-[8%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">Lock</span>
+                      <input
+                        type="text"
+                        placeholder="act/lock"
+                        value={colFilters.lock}
+                        onChange={(e) => setColFilters({ ...colFilters, lock: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] text-center"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 text-center w-[10%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">Est / Srv</span>
+                      <input
+                        type="text"
+                        placeholder="5+2"
+                        value={colFilters.estsrv}
+                        onChange={(e) => setColFilters({ ...colFilters, estsrv: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 placeholder:text-[9px] text-center"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 w-[8%] bg-slate-50">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-[9px]">Revenue</span>
+                      <input
+                        type="text"
+                        placeholder="₹"
+                        value={colFilters.revenue}
+                        onChange={(e) => setColFilters({ ...colFilters, revenue: e.target.value })}
+                        className="w-full px-1.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded text-slate-700 font-normal focus:outline-none focus:ring-1 focus:ring-blue-400 placeholder:text-slate-400 text-center"
+                      />
+                    </div>
+                  </th>
+
+                  <th className="py-1.5 px-2 w-[8%] bg-slate-50 text-center">
+                    <span className="text-[9px]">Role</span>
+                  </th>
+                  <th className="py-1.5 px-2 w-[9%] bg-slate-50 text-center">
+                    <span className="text-[9px]">Status</span>
+                  </th>
+                  <th className="py-1.5 px-2 text-right w-[9%] bg-slate-50">
+                    <span className="text-[9px]">Action</span>
+                  </th>
                 </tr>
-              ) : (
-                processedProfiles.map((p: any) => {
-                  const userId = p.id;
-                  const userWalletBalance = Number(p.wallet_balance ?? 0);
-                  const isAdminUser = p._isAdminUser;
-                  const isPremium = p._isPremium;
-                  const isUserLocked = p._isUserLocked;
+              </thead>
 
-                  const userCategory =
-                    p.category ||
-                    p.user_category ||
-                    p.user_type ||
-                    p.account_type ||
-                    'Individual';
-                  const userFirmName =
-                    p.firm_name || p.company_name || p.business_name || 'N/A';
-                  const isSuspended =
-                    (p.status || '').toLowerCase() === 'suspended';
+              <tbody className="divide-y divide-slate-100">
+                {processedProfiles.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-6 text-center text-slate-400 text-sm">
+                      No profiles found matching your search or filter criteria.
+                    </td>
+                  </tr>
+                ) : (
+                  processedProfiles.map((p: any) => {
+                    const userId = p.id;
+                    const userWalletBalance = Number(p.wallet_balance ?? 0);
+                    const isAdminUser = p._isAdminUser;
+                    const isPremium = p._isPremium;
+                    const isUserLocked = p._isUserLocked;
 
-                  return (
-                    <tr key={userId} className="hover:bg-slate-50/60 transition">
-                      <td className="py-1 px-2 truncate">
-                        <div
-                          className="font-bold text-slate-900 text-[12px] truncate leading-tight"
-                          title={p.full_name || p.name || 'N/A'}
-                        >
-                          {p.full_name || p.name || 'N/A'}
-                        </div>
-                        <div
-                          className="text-[10px] text-slate-500 truncate leading-tight"
-                          title={p.email || 'No Email'}
-                        >
-                          {p.email || 'No Email'}
-                        </div>
-                        <div
-                          className="text-[10px] text-slate-600 font-medium truncate leading-tight"
-                          title={p.mobile || 'N/A'}
-                        >
-                          📞 {p.mobile || 'N/A'}
-                        </div>
-                      </td>
+                    const userCategory =
+                      p.category ||
+                      p.user_category ||
+                      p.user_type ||
+                      p.account_type ||
+                      'Individual';
+                    const userFirmName =
+                      p.firm_name || p.company_name || p.business_name || 'N/A';
+                    const isSuspended = (p.status || '').toLowerCase() === 'suspended';
 
-                      <td className="py-1 px-2 truncate">
-                        <span
-                          className="px-1.5 py-0 bg-indigo-50 text-indigo-700 rounded text-[9px] font-bold truncate inline-block max-w-full leading-tight"
-                          title={userCategory}
-                        >
-                          {userCategory}
-                        </span>
-                        <div
-                          className="font-semibold text-slate-800 text-[10px] truncate leading-tight"
-                          title={userFirmName}
-                        >
-                          🏢 {userFirmName}
-                        </div>
-                      </td>
+                    return (
+                      <tr key={userId} className="hover:bg-slate-50/60 transition">
+                        <td className="py-1 px-2 truncate">
+                          <div
+                            className="font-bold text-slate-900 text-[12px] truncate leading-tight"
+                            title={p.full_name || p.name || 'N/A'}
+                          >
+                            {p.full_name || p.name || 'N/A'}
+                          </div>
+                          <div
+                            className="text-[10px] text-slate-500 truncate leading-tight"
+                            title={p.email || 'No Email'}
+                          >
+                            {p.email || 'No Email'}
+                          </div>
+                          <div
+                            className="text-[10px] text-slate-600 font-medium truncate leading-tight"
+                            title={p.mobile || 'N/A'}
+                          >
+                            📞 {p.mobile || 'N/A'}
+                          </div>
+                        </td>
 
-                      <td className="py-1 px-2 text-center">
-                        <span
-                          className={`px-1.5 py-0 rounded text-[9px] font-bold border inline-block whitespace-nowrap leading-tight ${
-                            userWalletBalance < 0
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : userWalletBalance === 0
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          }`}
-                        >
-                          {userWalletBalance < 0
-                            ? `-₹${Math.abs(userWalletBalance)}`
-                            : `₹${userWalletBalance}`}
-                        </span>
-                      </td>
-
-                      <td className="py-1 px-2 text-center">
-                        {isAdminUser ? (
-                          <span className="px-1.5 py-0 bg-purple-50 text-purple-700 rounded text-[8px] font-extrabold uppercase leading-tight">
-                            Admin
+                        <td className="py-1 px-2 truncate">
+                          <span
+                            className="px-1.5 py-0 bg-indigo-50 text-indigo-700 rounded text-[9px] font-bold truncate inline-block max-w-full leading-tight"
+                            title={userCategory}
+                          >
+                            {userCategory}
                           </span>
-                        ) : isPremium ? (
-                          <span className="px-1.5 py-0 bg-blue-50 text-blue-700 rounded text-[8px] font-extrabold uppercase leading-tight">
-                            Exempt
-                          </span>
-                        ) : isUserLocked ? (
-                          <span className="px-1.5 py-0 bg-rose-100 text-rose-700 rounded text-[8px] font-extrabold uppercase animate-pulse leading-tight">
-                            🔒 Locked
-                          </span>
-                        ) : (
-                          <span className="px-1.5 py-0 bg-emerald-100 text-emerald-700 rounded text-[8px] font-extrabold uppercase leading-tight">
-                            Active
-                          </span>
-                        )}
-                      </td>
+                          <div
+                            className="font-semibold text-slate-800 text-[10px] truncate leading-tight"
+                            title={userFirmName}
+                          >
+                            🏢 {userFirmName}
+                          </div>
+                        </td>
 
-                      <td className="py-1 px-2 text-center">
-                        <button
-                          onClick={() => {
-                            const serviceRows = (p.filteredServices || []).map(
-                              (srv: any) => ({
+                        <td className="py-1 px-2 text-center">
+                          <span
+                            className={`px-1.5 py-0 rounded text-[9px] font-bold border inline-block whitespace-nowrap leading-tight ${
+                              userWalletBalance < 0
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : userWalletBalance === 0
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}
+                          >
+                            {userWalletBalance < 0
+                              ? `-₹${Math.abs(userWalletBalance)}`
+                              : `₹${userWalletBalance}`}
+                          </span>
+                        </td>
+
+                        <td className="py-1 px-2 text-center">
+                          {isAdminUser ? (
+                            <span className="px-1.5 py-0 bg-purple-50 text-purple-700 rounded text-[8px] font-extrabold uppercase leading-tight">
+                              Admin
+                            </span>
+                          ) : isPremium ? (
+                            <span className="px-1.5 py-0 bg-blue-50 text-blue-700 rounded text-[8px] font-extrabold uppercase leading-tight">
+                              Exempt
+                            </span>
+                          ) : isUserLocked ? (
+                            <span className="px-1.5 py-0 bg-rose-100 text-rose-700 rounded text-[8px] font-extrabold uppercase animate-pulse leading-tight">
+                              🔒 Locked
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0 bg-emerald-100 text-emerald-700 rounded text-[8px] font-extrabold uppercase leading-tight">
+                              Active
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="py-1 px-2 text-center">
+                          <button
+                            onClick={() => {
+                              const serviceRows = (p.filteredServices || []).map((srv: any) => ({
                                 ...srv,
                                 entry_type: 'SERVICE',
                                 source_table: 'service_records',
                                 user_payment: srv?.gateway_fee ?? 0,
-                              })
-                            );
-                            const estimateRows = (p.filteredEstimates || []).map(
-                              (est: any) => ({
+                              }));
+                              const estimateRows = (p.filteredEstimates || []).map((est: any) => ({
                                 ...est,
                                 entry_type: est?.entry_type || 'ESTIMATE',
                                 source_table: 'estimates',
-                              })
-                            );
-                            const allRows = [...estimateRows, ...serviceRows].sort(
-                              (a: any, b: any) =>
-                                new Date(b?.created_at || b?.date || 0).getTime() -
-                                new Date(a?.created_at || a?.date || 0).getTime()
-                            );
-                            const payload = {
-                              ...p,
-                              estimates_list: allRows,
-                              service_records: serviceRows,
-                              combined_records: allRows,
-                            };
-                            handleOpenUserEstimates(payload);
-                          }}
-                          className="px-1.5 py-0 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[9px] font-bold transition border border-blue-200 whitespace-nowrap inline-flex items-center gap-0.5 leading-tight"
-                          title="Estimates + Service Records"
+                              }));
+                              const allRows = [...estimateRows, ...serviceRows].sort(
+                                (a: any, b: any) =>
+                                  new Date(b?.created_at || b?.date || 0).getTime() -
+                                  new Date(a?.created_at || a?.date || 0).getTime()
+                              );
+                              const payload = {
+                                ...p,
+                                estimates_list: allRows,
+                                service_records: serviceRows,
+                                combined_records: allRows,
+                              };
+                              handleOpenUserEstimates(payload);
+                            }}
+                            className="px-1.5 py-0 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[9px] font-bold transition border border-blue-200 whitespace-nowrap inline-flex items-center gap-0.5 leading-tight"
+                            title="Estimates + Service Records"
+                          >
+                            📊 <span className="text-blue-900 font-black">{p.calculatedEstCount}</span>{' '}
+                            + <span className="text-indigo-900 font-black">{p.calculatedSrvCount}</span>
+                          </button>
+                        </td>
+
+                        <td className="py-1 px-2 font-semibold text-emerald-600 text-[10px] whitespace-nowrap leading-tight">
+                          ₹{Number(p.calculatedRevenue).toLocaleString('en-IN')}
+                        </td>
+
+                        <td className="py-1 px-2">
+                          <select
+                            value={p.role || 'user'}
+                            onChange={(e) => handleUpdateUserRbac(userId, 'role', e.target.value)}
+                            className={`px-1 py-0 rounded text-[9px] font-bold cursor-pointer border focus:outline-none w-full leading-tight ${
+                              p.role === 'admin'
+                                ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                : p.role === 'premium'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}
+                          >
+                            <option value="user">user</option>
+                            <option value="premium">premium</option>
+                          </select>
+                        </td>
+
+                        <td className="py-1 px-2">
+                          <select
+                            value={p.status || 'Active'}
+                            onChange={(e) => handleUpdateUserRbac(userId, 'status', e.target.value)}
+                            className={`px-1 py-0 rounded text-[9px] font-bold cursor-pointer border focus:outline-none w-full leading-tight ${
+                              isSuspended
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}
+                          >
+                            <option value="Active">Active</option>
+                            <option value="suspended">suspended</option>
+                          </select>
+                        </td>
+
+                        <td className="py-1 px-2 text-right">
+                          <button
+                            onClick={() =>
+                              handleUpdateUserRbac(
+                                userId,
+                                'status',
+                                isSuspended ? 'Active' : 'suspended'
+                              )
+                            }
+                            className={`px-1.5 py-0 text-[9px] font-semibold rounded transition whitespace-nowrap leading-tight ${
+                              isSuspended
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-600'
+                            }`}
+                          >
+                            {isSuspended ? 'Activate' : 'Suspend'}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+
+              <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-900 text-xs sticky bottom-0 z-10">
+                <tr>
+                  <td colSpan={2} className="py-1.5 px-2 bg-slate-50">
+                    <div className="flex flex-col gap-0">
+                      <span className="text-blue-700 font-black text-[11px] leading-tight">
+                        TOTAL (Filtered):
+                      </span>
+                      <span className="text-slate-500 text-[10px] leading-tight">
+                        Active: <strong className="text-emerald-600">{totals.active}</strong> |
+                        Suspended: <strong className="text-rose-600">{totals.suspended}</strong>
+                      </span>
+                    </div>
+                  </td>
+                  <td
+                    className={`py-1.5 px-2 text-center align-middle border text-[11px] bg-slate-50 leading-tight ${
+                      totals.wallet < 0
+                        ? 'text-rose-700'
+                        : totals.wallet === 0
+                        ? 'text-amber-700'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {totals.wallet < 0 ? `-₹${Math.abs(totals.wallet)}` : `₹${totals.wallet}`}
+                  </td>
+                  <td className="py-1.5 px-2 bg-slate-50"></td>
+                  <td className="py-1.5 px-2 text-center text-blue-700 text-[11px] whitespace-nowrap font-bold bg-slate-50 leading-tight">
+                    {totals.est} Est + {totals.srv} Srv
+                  </td>
+                  <td
+                    colSpan={4}
+                    className="py-1.5 px-2 text-emerald-700 text-[11px] whitespace-nowrap bg-slate-50 leading-tight"
+                  >
+                    ₹{totals.revenue.toLocaleString('en-IN')}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* ─── Mobile Cards (hidden on desktop) ─── */}
+          <div className="lg:hidden p-2.5 space-y-2.5">
+            {processedProfiles.length === 0 ? (
+              <div className="bg-white p-6 rounded-xl border border-slate-100 text-center text-slate-400 text-xs">
+                No profiles found matching your search or filter criteria.
+              </div>
+            ) : (
+              processedProfiles.map((p: any) => {
+                const userId = p.id;
+                const userWalletBalance = Number(p.wallet_balance ?? 0);
+                const isSuspended = (p.status || '').toLowerCase() === 'suspended';
+
+                const userCategory =
+                  p.category ||
+                  p.user_category ||
+                  p.user_type ||
+                  p.account_type ||
+                  'Individual';
+                const userFirmName =
+                  p.firm_name || p.company_name || p.business_name || 'N/A';
+
+                const lockBadge = getLockBadge(p);
+
+                return (
+                  <div
+                    key={userId}
+                    className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow"
+                  >
+                    {/* TOP: Name + Lock Badge */}
+                    <div className="flex items-start justify-between gap-2 mb-2 pb-2 border-b border-slate-100">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-slate-900 text-[13px] leading-tight truncate">
+                          {p.full_name || p.name || 'N/A'}
+                        </div>
+                        <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                          {p.email || 'No Email'}
+                        </div>
+                        <div className="text-[10px] text-slate-600 font-medium truncate mt-0.5">
+                          📞 {p.mobile || 'N/A'}
+                        </div>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-full border text-[9px] font-extrabold uppercase shrink-0 ${lockBadge.cls}`}
+                      >
+                        {lockBadge.label}
+                      </span>
+                    </div>
+
+                    {/* CATEGORY + FIRM */}
+                    <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[9px] font-bold">
+                        {userCategory}
+                      </span>
+                      <span className="text-[10px] text-slate-600 font-semibold truncate">
+                        🏢 {userFirmName}
+                      </span>
+                    </div>
+
+                    {/* 3-Stat Grid: Wallet | Est+Srv | Revenue */}
+                    <div className="grid grid-cols-3 gap-1.5 mb-2.5">
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center border border-slate-100">
+                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">
+                          Wallet
+                        </div>
+                        <div
+                          className={`text-[12px] font-black tabular-nums ${getWalletCls(
+                            userWalletBalance
+                          )}`}
                         >
-                          📊 <span className="text-blue-900 font-black">{p.calculatedEstCount}</span>{' '}
-                          +{' '}
-                          <span className="text-indigo-900 font-black">
-                            {p.calculatedSrvCount}
-                          </span>
-                        </button>
-                      </td>
+                          {userWalletBalance < 0
+                            ? `-₹${Math.abs(userWalletBalance)}`
+                            : `₹${userWalletBalance}`}
+                        </div>
+                      </div>
 
-                      <td className="py-1 px-2 font-semibold text-emerald-600 text-[10px] whitespace-nowrap leading-tight">
-                        ₹{Number(p.calculatedRevenue).toLocaleString('en-IN')}
-                      </td>
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center border border-slate-100">
+                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">
+                          Est / Srv
+                        </div>
+                        <div className="text-[11px] font-black tabular-nums">
+                          <span className="text-blue-700">{p.calculatedEstCount}</span>
+                          <span className="text-slate-400 mx-0.5">+</span>
+                          <span className="text-indigo-700">{p.calculatedSrvCount}</span>
+                        </div>
+                      </div>
 
-                      <td className="py-1 px-2">
-                        <select
-                          value={p.role || 'user'}
-                          onChange={(e) =>
-                            handleUpdateUserRbac(userId, 'role', e.target.value)
-                          }
-                          className={`px-1 py-0 rounded text-[9px] font-bold cursor-pointer border focus:outline-none w-full leading-tight ${
-                            p.role === 'admin'
-                              ? 'bg-purple-50 text-purple-700 border-purple-200'
-                              : p.role === 'premium'
-                              ? 'bg-amber-50 text-amber-700 border-amber-200'
-                              : 'bg-slate-100 text-slate-700 border-slate-200'
-                          }`}
-                        >
-                          <option value="user">user</option>
-                          <option value="premium">premium</option>
-                        </select>
-                      </td>
+                      <div className="bg-slate-50 rounded-lg px-2 py-1.5 text-center border border-slate-100">
+                        <div className="text-[8px] text-slate-500 font-bold uppercase tracking-wider">
+                          Revenue
+                        </div>
+                        <div className="text-[11px] font-black text-emerald-600 tabular-nums truncate">
+                          ₹{Number(p.calculatedRevenue).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                    </div>
 
-                      <td className="py-1 px-2">
-                        <select
-                          value={p.status || 'Active'}
-                          onChange={(e) =>
-                            handleUpdateUserRbac(userId, 'status', e.target.value)
-                          }
-                          className={`px-1 py-0 rounded text-[9px] font-bold cursor-pointer border focus:outline-none w-full leading-tight ${
-                            isSuspended
-                              ? 'bg-rose-50 text-rose-700 border-rose-200'
-                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          }`}
-                        >
-                          <option value="Active">Active</option>
-                          <option value="suspended">suspended</option>
-                        </select>
-                      </td>
+                    {/* ACTIONS ROW: Role | Status | Suspend/Activate | View */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select
+                        value={p.role || 'user'}
+                        onChange={(e) => handleUpdateUserRbac(userId, 'role', e.target.value)}
+                        className={`px-2 py-1.5 rounded text-[10px] font-bold cursor-pointer border focus:outline-none ${
+                          p.role === 'admin'
+                            ? 'bg-purple-50 text-purple-700 border-purple-200'
+                            : p.role === 'premium'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        <option value="user">Role: user</option>
+                        <option value="premium">Role: premium</option>
+                      </select>
 
-                      <td className="py-1 px-2 text-right">
-                        <button
-                          onClick={() =>
-                            handleUpdateUserRbac(
-                              userId,
-                              'status',
-                              isSuspended ? 'Active' : 'suspended'
-                            )
-                          }
-                          className={`px-1.5 py-0 text-[9px] font-semibold rounded transition whitespace-nowrap leading-tight ${
-                            isSuspended
-                              ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                              : 'bg-rose-50 hover:bg-rose-100 text-rose-600'
-                          }`}
-                        >
-                          {isSuspended ? 'Activate' : 'Suspend'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
+                      <select
+                        value={p.status || 'Active'}
+                        onChange={(e) => handleUpdateUserRbac(userId, 'status', e.target.value)}
+                        className={`px-2 py-1.5 rounded text-[10px] font-bold cursor-pointer border focus:outline-none ${
+                          isSuspended
+                            ? 'bg-rose-50 text-rose-700 border-rose-200'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        }`}
+                      >
+                        <option value="Active">Status: Active</option>
+                        <option value="suspended">Status: suspended</option>
+                      </select>
 
-            <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-900 text-xs sticky bottom-0 z-10">
-              <tr>
-                <td colSpan={2} className="py-1.5 px-2 bg-slate-50">
-                  <div className="flex flex-col gap-0">
-                    <span className="text-blue-700 font-black text-[11px] leading-tight">
-                      TOTAL (Filtered):
-                    </span>
-                    <span className="text-slate-500 text-[10px] leading-tight">
-                      Active:{' '}
-                      <strong className="text-emerald-600">{totals.active}</strong> |
-                      Suspended:{' '}
-                      <strong className="text-rose-600">{totals.suspended}</strong>
-                    </span>
+                      <button
+                        onClick={() => {
+                          const serviceRows = (p.filteredServices || []).map((srv: any) => ({
+                            ...srv,
+                            entry_type: 'SERVICE',
+                            source_table: 'service_records',
+                            user_payment: srv?.gateway_fee ?? 0,
+                          }));
+                          const estimateRows = (p.filteredEstimates || []).map((est: any) => ({
+                            ...est,
+                            entry_type: est?.entry_type || 'ESTIMATE',
+                            source_table: 'estimates',
+                          }));
+                          const allRows = [...estimateRows, ...serviceRows].sort(
+                            (a: any, b: any) =>
+                              new Date(b?.created_at || b?.date || 0).getTime() -
+                              new Date(a?.created_at || a?.date || 0).getTime()
+                          );
+                          handleOpenUserEstimates({
+                            ...p,
+                            estimates_list: allRows,
+                            service_records: serviceRows,
+                            combined_records: allRows,
+                          });
+                        }}
+                        className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded text-[10px] font-bold transition border border-blue-200 whitespace-nowrap flex items-center justify-center gap-1"
+                      >
+                        📊 View Records
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          handleUpdateUserRbac(
+                            userId,
+                            'status',
+                            isSuspended ? 'Active' : 'suspended'
+                          )
+                        }
+                        className={`px-2 py-1.5 text-[10px] font-bold rounded transition whitespace-nowrap ${
+                          isSuspended
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200'
+                        }`}
+                      >
+                        {isSuspended ? '✓ Activate' : '⏸ Suspend'}
+                      </button>
+                    </div>
                   </div>
-                </td>
-                <td
-                  className={`py-1.5 px-2 text-center align-middle border text-[11px] bg-slate-50 leading-tight ${
-                    totals.wallet < 0
-                      ? 'text-rose-700'
-                      : totals.wallet === 0
-                      ? 'text-amber-700'
-                      : 'text-emerald-700'
-                  }`}
-                >
-                  {totals.wallet < 0
-                    ? `-₹${Math.abs(totals.wallet)}`
-                    : `₹${totals.wallet}`}
-                </td>
-                <td className="py-1.5 px-2 bg-slate-50"></td>
-                <td className="py-1.5 px-2 text-center text-blue-700 text-[11px] whitespace-nowrap font-bold bg-slate-50 leading-tight">
-                  {totals.est} Est + {totals.srv} Srv
-                </td>
-                <td
-                  colSpan={4}
-                  className="py-1.5 px-2 text-emerald-700 text-[11px] whitespace-nowrap bg-slate-50 leading-tight"
-                >
-                  ₹{totals.revenue.toLocaleString('en-IN')}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+                );
+              })
+            )}
+
+            {/* Mobile Totals Footer */}
+            <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-xl p-3 shadow-lg mt-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300 mb-2">
+                Total — Filtered ({processedProfiles.length} users)
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="text-[9px] text-slate-400 uppercase font-bold">Wallet</div>
+                  <div className={`text-[13px] font-black tabular-nums ${totals.wallet < 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {totals.wallet < 0 ? `-₹${Math.abs(totals.wallet)}` : `₹${totals.wallet}`}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-400 uppercase font-bold">Est / Srv</div>
+                  <div className="text-[12px] font-black tabular-nums text-white">
+                    {totals.est} + {totals.srv}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[9px] text-slate-400 uppercase font-bold">Revenue</div>
+                  <div className="text-[13px] font-black tabular-nums text-emerald-400">
+                    ₹{totals.revenue.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-700">
+                <span>Active: <strong className="text-emerald-400">{totals.active}</strong></span>
+                <span>Suspended: <strong className="text-rose-400">{totals.suspended}</strong></span>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

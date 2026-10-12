@@ -147,14 +147,13 @@ export default function AdminRazorpayLiveWidget({
         client_name: item.client_name || resolvedCustomerName,
         reference_no:
           item.ref_no || item.reference_no || item.razorpay_payment_id || item.id || 'N/A',
-        // ✅ Normalized status for counters
         _normalizedStatus: normalizedStatus,
       };
     });
   }, [transactions, estimates, serviceRecords]);
 
   // ═══════════════════════════════════════════════════════════════
-  // ✅ KPI computations — DYNAMIC (using _normalizedStatus)
+  // ✅ KPI computations
   // ═══════════════════════════════════════════════════════════════
   const totalRevenue = useMemo(
     () =>
@@ -184,9 +183,9 @@ export default function AdminRazorpayLiveWidget({
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* SMART CORPORATE HEADER                                          */}
+      {/* SMART CORPORATE HEADER — Responsive (Mobile + Desktop)         */}
       {/* ══════════════════════════════════════════════════════════════ */}
-      <div className="relative bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-4 sm:px-5 py-3 border-b border-slate-700 shrink-0">
+      <div className="relative bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 px-3 sm:px-5 py-3 border-b border-slate-700 shrink-0">
         <div
           className="absolute inset-0 opacity-[0.04] pointer-events-none"
           style={{
@@ -197,14 +196,15 @@ export default function AdminRazorpayLiveWidget({
         />
 
         <div className="relative flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
-          {/* LEFT */}
-          <div className="flex items-center gap-3 min-w-0">
+
+          {/* ─── LEFT: Title + Live badge ─── */}
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 w-full lg:w-auto">
             <div className="relative shrink-0">
               <div className="absolute inset-0 rounded-lg bg-blue-500/40 blur-md" />
-              <div className="relative w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
+              <div className="relative w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="w-5 h-5 text-white"
+                  className="w-4 h-4 sm:w-5 sm:h-5 text-white"
                   fill="none"
                   viewBox="0 0 24 24"
                   strokeWidth={2.2}
@@ -219,12 +219,12 @@ export default function AdminRazorpayLiveWidget({
               </div>
             </div>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-white text-sm sm:text-base tracking-tight leading-tight">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h3 className="font-bold text-white text-[13px] sm:text-base tracking-tight leading-tight">
                   Payment Gateway & Dispute Operations
                 </h3>
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 rounded text-[9px] font-bold uppercase tracking-wider text-emerald-400">
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider text-emerald-400">
                   <span className="relative flex h-1.5 w-1.5">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400" />
@@ -232,70 +232,74 @@ export default function AdminRazorpayLiveWidget({
                   Live
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 leading-tight mt-0.5">
+              <p className="text-[9px] sm:text-[10px] text-slate-400 leading-tight mt-0.5 truncate">
                 Razorpay · Real-time gateway collections & settlement
               </p>
             </div>
           </div>
 
-          {/* RIGHT — KPI Chips */}
+          {/* ─── RIGHT: KPI Chips (Mobile: full-width wrap, Desktop: inline) ─── */}
           <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
-            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-md px-2.5 py-1 backdrop-blur-sm">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+
+            {/* Revenue */}
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-md px-2 sm:px-2.5 py-1 backdrop-blur-sm">
+              <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-wider">
                 Revenue
               </span>
-              <span className="text-[12px] font-black text-emerald-400 tabular-nums">
+              <span className="text-[11px] sm:text-[12px] font-black text-emerald-400 tabular-nums">
                 ₹{totalRevenue.toLocaleString('en-IN')}
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-md px-2.5 py-1 backdrop-blur-sm">
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                Total Txn
+            {/* Total Txn */}
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-md px-2 sm:px-2.5 py-1 backdrop-blur-sm">
+              <span className="text-[8px] sm:text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                Txn
               </span>
-              <span className="text-[12px] font-black text-white tabular-nums">
+              <span className="text-[11px] sm:text-[12px] font-black text-white tabular-nums">
                 {formattedTransactions.length}
               </span>
             </div>
 
-            {/* ✅ Paid — dynamic */}
-            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-md px-2.5 py-1 backdrop-blur-sm">
+            {/* Paid */}
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-md px-2 sm:px-2.5 py-1 backdrop-blur-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span className="text-[10px] font-bold text-emerald-400 tabular-nums">
+              <span className="text-[10px] sm:text-[10px] font-bold text-emerald-400 tabular-nums">
                 {paidCount}
               </span>
-              <span className="text-[9px] font-semibold text-emerald-500/80 uppercase tracking-wider">
+              <span className="text-[8px] sm:text-[9px] font-semibold text-emerald-500/80 uppercase tracking-wider">
                 Paid
               </span>
             </div>
 
-            {/* ✅ Pending — dynamic */}
-            <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-md px-2.5 py-1 backdrop-blur-sm">
+            {/* Pending */}
+            <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-md px-2 sm:px-2.5 py-1 backdrop-blur-sm">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              <span className="text-[10px] font-bold text-amber-400 tabular-nums">
+              <span className="text-[10px] sm:text-[10px] font-bold text-amber-400 tabular-nums">
                 {pendingCount}
               </span>
-              <span className="text-[9px] font-semibold text-amber-500/80 uppercase tracking-wider">
+              <span className="text-[8px] sm:text-[9px] font-semibold text-amber-500/80 uppercase tracking-wider">
                 Pending
               </span>
             </div>
 
-            {/* ✅ Failed — sirf dikhao agar > 0 ho */}
+            {/* Failed (only if > 0) */}
             {failedCount > 0 && (
-              <div className="flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/30 rounded-md px-2.5 py-1 backdrop-blur-sm">
+              <div className="flex items-center gap-1.5 bg-rose-500/10 border border-rose-500/30 rounded-md px-2 sm:px-2.5 py-1 backdrop-blur-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
                 <span className="text-[10px] font-bold text-rose-400 tabular-nums">
                   {failedCount}
                 </span>
-                <span className="text-[9px] font-semibold text-rose-500/80 uppercase tracking-wider">
+                <span className="text-[8px] sm:text-[9px] font-semibold text-rose-500/80 uppercase tracking-wider">
                   Failed
                 </span>
               </div>
             )}
 
+            {/* Hide/Show button — full width on mobile, inline on desktop */}
             <button
               onClick={() => setIsHidden(!isHidden)}
-              className="ml-auto lg:ml-0 px-2.5 py-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-md text-[10px] font-bold transition whitespace-nowrap backdrop-blur-sm"
+              className="w-full sm:w-auto lg:ml-0 px-2.5 py-1.5 sm:py-1 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-md text-[10px] font-bold transition whitespace-nowrap backdrop-blur-sm"
             >
               {isHidden ? 'Show [+]' : 'Hide [−]'}
             </button>
@@ -304,7 +308,7 @@ export default function AdminRazorpayLiveWidget({
       </div>
 
       {/* ══════════════════════════════════════════════════════════════ */}
-      {/* TABLE                                                            */}
+      {/* TABLE / CARDS — RazorpayTableWithFilter handles responsive     */}
       {/* ══════════════════════════════════════════════════════════════ */}
       {!isHidden && (
         <div

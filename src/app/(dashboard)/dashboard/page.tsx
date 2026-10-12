@@ -135,7 +135,6 @@ export default function DashboardPage() {
   const [adminView, setAdminView] = useState<'dashboard' | 'analytics'>('dashboard');
 
   // ✅ Analytics Filters
-   // ✅ Analytics Filters
   const [analyticsFY, setAnalyticsFY] = useState('ALL');
   const [analyticsMonth, setAnalyticsMonth] = useState('ALL');
   const [analyticsState, setAnalyticsState] = useState('ALL');
@@ -533,51 +532,55 @@ export default function DashboardPage() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50 p-2 sm:p-4">
       {/* HEADER */}
-      <div className="flex justify-between items-center bg-white px-3 py-2.5 sm:p-4 rounded-xl shadow-sm border border-slate-200 shrink-0">
-        <div className="flex items-center gap-2.5">
+      <div className="flex justify-between items-center gap-2 bg-white px-3 py-2.5 sm:p-4 rounded-xl shadow-sm border border-slate-200 shrink-0">
+        {/* LEFT: Menu + Switcher / Title (shrinkable, so right side never gets pushed out) */}
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
           <button
             onClick={() => { setShowMenuDrawer(true); setShowProfile(false); setShowNotifications(false); }}
-            className="text-slate-800 hover:text-blue-600 focus:outline-none cursor-pointer p-1"
+            className="text-slate-800 hover:text-blue-600 focus:outline-none cursor-pointer p-1 shrink-0"
           >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
             </svg>
           </button>
           {userData.isAdmin ? (
-            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 shrink-0">
               <button
                 onClick={() => setAdminView('dashboard')}
-                className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                title="Dashboard"
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
                   adminView === 'dashboard' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                Dashboard
+                <LayoutDashboard className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Dashboard</span>
               </button>
               <button
                 onClick={() => setAdminView('analytics')}
-                className={`px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                title="Revenue Analytics"
+                className={`px-2 sm:px-4 py-1.5 sm:py-2 rounded-md text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
                   adminView === 'analytics'
                     ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                <BarChart3 className="w-3.5 h-3.5" />
+                <BarChart3 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                 <span className="hidden sm:inline">Revenue Analytics</span>
-                <span className="sm:hidden">Revenue</span>
               </button>
             </div>
           ) : (
-            <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight">
+            <h1 className="text-xs sm:text-xl font-black text-slate-800 uppercase tracking-tight truncate">
               LNT DASHBOARD
             </h1>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-3">
+        {/* RIGHT: Bell + Notification + Help + Profile (never shrinks, always visible) */}
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           {userData.isApprover && <ApprovalNotificationBell />}
 
-          <div className="relative">
+          {/* Notification — Admin / CEO / Co-Partner ke liye mobile par hide, baaki sabke liye visible */}
+          <div className={`relative ${userData.isApprover ? 'hidden sm:block' : ''}`}>
             <button
               onClick={async () => {
                 setShowNotifications(!showNotifications);
@@ -589,7 +592,7 @@ export default function DashboardPage() {
                   new Notification('L&T Consultant Services', { body: 'Notifications enabled.', icon: '/favicon.ico' });
                 }
               }}
-              className="relative p-2 sm:p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition shadow-sm border border-slate-200 cursor-pointer"
+              className="relative p-2 sm:p-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 transition shadow-sm border border-slate-200 cursor-pointer shrink-0"
             >
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 sm:w-5 sm:h-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
@@ -597,8 +600,9 @@ export default function DashboardPage() {
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-600 rounded-full ring-2 ring-white"></span>
             </button>
 
+            {/* Mobile: screen ke andar fixed (left/right 8px), Desktop: button ke niche absolute */}
             {showNotifications && (
-              <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
+              <div className="fixed left-2 right-2 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
                 <div className="bg-slate-900 p-3 text-white flex justify-between items-center">
                   <span className="font-bold text-xs uppercase tracking-wider">Notifications</span>
                   <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer">&times;</button>
@@ -629,7 +633,11 @@ export default function DashboardPage() {
             )}
           </div>
 
-          <button onClick={() => openSupportModal(null)} className="flex items-center gap-1 px-2 py-1.5 sm:gap-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm border border-slate-200 cursor-pointer group shrink-0">
+          {/* Help — Admin / CEO / Co-Partner ke liye mobile par hide, baaki sabke liye visible */}
+          <button
+            onClick={() => openSupportModal(null)}
+            className={`${userData.isApprover ? 'hidden sm:flex' : 'flex'} items-center gap-1 px-2 py-1.5 sm:gap-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm border border-slate-200 cursor-pointer group shrink-0`}
+          >
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-600 group-hover:text-emerald-600 transition-colors shrink-0">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
             </svg>
@@ -640,10 +648,11 @@ export default function DashboardPage() {
             </span>
           </button>
 
-          <div className="relative">
+          {/* Profile — hamesha visible */}
+          <div className="relative shrink-0">
             <button
               onClick={() => { setShowProfile(!showProfile); setShowMenuDrawer(false); setShowNotifications(false); }}
-              className="flex items-center gap-1.5 sm:gap-2 p-1.5 pr-2 sm:pr-2.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 sm:gap-2 p-1 sm:p-1.5 pr-1 sm:pr-2.5 rounded-full bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-all cursor-pointer shrink-0"
             >
               <div className="w-8 h-8 sm:w-9 sm:h-9 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-full flex items-center justify-center text-white font-bold text-xs sm:text-sm shadow-sm shrink-0">
                 {getInitials(userData.name)}
@@ -661,8 +670,9 @@ export default function DashboardPage() {
               </svg>
             </button>
 
+            {/* Mobile: screen ke andar fixed (left/right 8px), Desktop: button ke niche absolute */}
             {showProfile && (
-              <div className="absolute right-0 mt-3 w-72 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
+              <div className="fixed left-2 right-2 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
                 <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 text-white">
                   <div className="flex items-center gap-3">
                     <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white font-black text-lg shadow-md shrink-0">
@@ -867,7 +877,7 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
                 <div className="flex items-center justify-between gap-2 p-2 border-t border-slate-200 bg-slate-50">
-                  <div className="flex gap-1.5 overflow-x-auto">
+                  <div className="flex gap-1.5 overflow-x-auto min-w-0">
                     {['All', 'Paid', 'Pending'].map((type) => (
                       <button
                         key={type}
@@ -891,63 +901,63 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-          <div className="flex-1 min-h-[320px] overflow-auto bg-white rounded-xl shadow-sm border border-slate-200">
-            <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
-                  <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
-                      <input type="text" placeholder="Filter..." value={refSearch} onChange={(e) => setRefSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                    <div onMouseDown={handleMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
-                  </th>
-                  <th className="p-3 font-semibold w-24 text-center">DATE</th>
-                  <th className="p-3 font-semibold w-52 text-center">CUSTOMER NAME</th>
-                  <th style={{ width: `${clientWidth}px` }} className="p-2 text-center relative group">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">CLIENT</span>
-                      <input type="text" placeholder="Filter..." value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                    <div onMouseDown={handleClientMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
-                  </th>
-                  <th className="p-2 w-48 text-center">
-                    <div className="flex flex-col gap-1 items-center">
-                      <span className="px-1 text-[10px] font-bold text-slate-300">REPRESENTATIVE</span>
-                      <input type="text" placeholder="Filter..." value={representativeSearch} onChange={(e) => setRepresentativeSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
-                    </div>
-                  </th>
-                  <th className="p-3 font-semibold w-48 text-center">CASE TYPE</th>
-                  <th className="p-3 font-semibold w-28 text-center">FEE STANDARD</th>
-                  <th className="p-3 font-semibold w-28 text-center">STATUS</th>
-                  <th className="p-3 font-semibold w-36 text-center">TRANSACTION</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dataLoading && Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={`sk-${i}`} className="border-t">
-                    <td colSpan={9} className="p-3"><div className="h-4 bg-slate-100 rounded animate-pulse" /></td>
-                  </tr>
-                ))}
-                {!dataLoading && visibleRows.map((est) => (
-                  <TxnRow key={`${est.source_table}-${est.id || est.ref_no}`} est={est} onHistory={openHistory} />
-                ))}
-                {!dataLoading && filteredList.length === 0 && (
-                  <tr><td colSpan={9} className="p-6 text-center text-xs text-slate-400 font-bold uppercase">No records found</td></tr>
+              <div className="flex-1 min-h-[320px] overflow-auto bg-white rounded-xl shadow-sm border border-slate-200">
+                <table className="w-full text-left border-collapse table-fixed min-w-[1250px]">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="bg-slate-900 text-white text-xs uppercase tracking-wider text-center select-none">
+                      <th style={{ width: `${refWidth}px` }} className="p-2 text-center relative group">
+                        <div className="flex flex-col gap-1 items-center">
+                          <span className="px-1 text-[10px] font-bold text-slate-300">REF NO</span>
+                          <input type="text" placeholder="Filter..." value={refSearch} onChange={(e) => setRefSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                        </div>
+                        <div onMouseDown={handleMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                      </th>
+                      <th className="p-3 font-semibold w-24 text-center">DATE</th>
+                      <th className="p-3 font-semibold w-52 text-center">CUSTOMER NAME</th>
+                      <th style={{ width: `${clientWidth}px` }} className="p-2 text-center relative group">
+                        <div className="flex flex-col gap-1 items-center">
+                          <span className="px-1 text-[10px] font-bold text-slate-300">CLIENT</span>
+                          <input type="text" placeholder="Filter..." value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                        </div>
+                        <div onMouseDown={handleClientMouseDown} className="absolute right-0 top-0 bottom-0 w-1.5 bg-transparent group-hover:bg-blue-500 cursor-col-resize transition-colors z-10" />
+                      </th>
+                      <th className="p-2 w-48 text-center">
+                        <div className="flex flex-col gap-1 items-center">
+                          <span className="px-1 text-[10px] font-bold text-slate-300">REPRESENTATIVE</span>
+                          <input type="text" placeholder="Filter..." value={representativeSearch} onChange={(e) => setRepresentativeSearch(e.target.value)} className="w-full px-2 py-1 text-xs rounded border border-slate-700 bg-slate-800 text-white text-center focus:outline-none focus:border-blue-400 font-normal placeholder:text-slate-500" />
+                        </div>
+                      </th>
+                      <th className="p-3 font-semibold w-48 text-center">CASE TYPE</th>
+                      <th className="p-3 font-semibold w-28 text-center">FEE STANDARD</th>
+                      <th className="p-3 font-semibold w-28 text-center">STATUS</th>
+                      <th className="p-3 font-semibold w-36 text-center">TRANSACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dataLoading && Array.from({ length: 6 }).map((_, i) => (
+                      <tr key={`sk-${i}`} className="border-t">
+                        <td colSpan={9} className="p-3"><div className="h-4 bg-slate-100 rounded animate-pulse" /></td>
+                      </tr>
+                    ))}
+                    {!dataLoading && visibleRows.map((est) => (
+                      <TxnRow key={`${est.source_table}-${est.id || est.ref_no}`} est={est} onHistory={openHistory} />
+                    ))}
+                    {!dataLoading && filteredList.length === 0 && (
+                      <tr><td colSpan={9} className="p-6 text-center text-xs text-slate-400 font-bold uppercase">No records found</td></tr>
+                    )}
+                  </tbody>
+                </table>
+                {!dataLoading && filteredList.length > visibleCount && (
+                  <div className="p-3 text-center border-t bg-slate-50">
+                    <button
+                      onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                      className="bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold px-4 py-2 rounded-lg uppercase tracking-wide cursor-pointer"
+                    >
+                      Show more ({filteredList.length - visibleCount} baaki)
+                    </button>
+                  </div>
                 )}
-              </tbody>
-            </table>
-            {!dataLoading && filteredList.length > visibleCount && (
-              <div className="p-3 text-center border-t bg-slate-50">
-                <button
-                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-                  className="bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-bold px-4 py-2 rounded-lg uppercase tracking-wide cursor-pointer"
-                >
-                  Show more ({filteredList.length - visibleCount} baaki)
-                </button>
               </div>
-            )}
-          </div>
             </>
           )}
 
@@ -969,7 +979,7 @@ export default function DashboardPage() {
                 setSelectedProduct={setAnalyticsProduct}
               />
 
-                            {/* KPI Cards */}
+              {/* KPI Cards */}
               <KpiCards
                 data={filteredAnalyticsData}
                 previousPeriodData={deduplicatedList}
@@ -1023,7 +1033,7 @@ export default function DashboardPage() {
 
       {showMenuDrawer && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-start">
-          <div className="bg-white w-80 h-full shadow-2xl flex flex-col justify-between animate-in slide-in-from-left duration-200">
+          <div className="bg-white w-80 max-w-[85vw] h-full shadow-2xl flex flex-col justify-between animate-in slide-in-from-left duration-200">
             <div>
               <div className="bg-slate-900 p-4 text-white flex justify-between items-center">
                 <div className="flex items-center gap-2.5">

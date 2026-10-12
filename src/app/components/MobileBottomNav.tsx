@@ -56,7 +56,7 @@ export default function MobileBottomNav({ onOpenMenu }: MobileBottomNavProps) {
     checkUserSession();
   }, []);
 
-  const isWalletLow = walletBalance < 100;
+  const isWalletLow = walletBalance < 36;
   const isPremium = userPlan.toUpperCase().includes('PREMIUM');
   const isRestricted = !isAdmin && !isPremium && (isWalletLow || !isDataLoaded);
 

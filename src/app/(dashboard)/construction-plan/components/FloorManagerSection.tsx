@@ -443,6 +443,29 @@ interface SetbackType {
   right: number;
 }
 
+/** v13: number input jisme poora number delete karke naya number type kar sakte hain (khali hone par 10 / 0 par wapas nahi jaata). */
+function BufferedNumberInput({ value, onCommit, className }: { value: number; onCommit: (n: number) => void; className?: string }) {
+  const [text, setText] = React.useState<string>(String(value ?? ""));
+  const focused = React.useRef(false);
+  React.useEffect(() => { if (!focused.current) setText(String(value ?? "")); }, [value]);
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      value={text}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => { focused.current = false; const n = Number(text); if (!text || !(n > 0)) setText(String(value ?? "")); }}
+      onChange={(e) => {
+        const t = e.target.value;
+        setText(t);
+        const n = Number(t);
+        if (t !== "" && n > 0) onCommit(n);
+      }}
+      className={className}
+    />
+  );
+}
+
 export default function FloorManagerSection({
   selectedFloors,
   floorData,
@@ -1064,8 +1087,8 @@ export default function FloorManagerSection({
 
           const rawW = Number(data.width);
           const rawL = Number(data.length);
-          const currentWidth = isGround ? (rawW > 0 ? rawW : plotFrontWidth) : (isTower ? 10 : rawW || plotFrontWidth);
-          const currentLength = isGround ? (rawL > 0 ? rawL : plotDepth) : (isTower ? 10 : rawL || plotDepth);
+          const currentWidth = isGround ? (rawW > 0 ? rawW : plotFrontWidth) : (isTower ? (rawW > 0 ? rawW : 10) : rawW || plotFrontWidth);
+          const currentLength = isGround ? (rawL > 0 ? rawL : plotDepth) : (isTower ? (rawL > 0 ? rawL : 10) : rawL || plotDepth);
 
           const floorRoomMap = floorRooms[floor] || {};
           const selectedRoomLabels: string[] = [];
@@ -1087,27 +1110,17 @@ export default function FloorManagerSection({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[9px] font-black block mb-0.5">WIDTH (FT)</label>
-                  <input
-                    type="number"
+                  <BufferedNumberInput
                     value={currentWidth}
-                    onChange={(e) => {
-                      const w = Number(e.target.value) || 0;
-                      if (updateFloorDimensions) updateFloorDimensions(floor, w, currentLength);
-                      updateFloorAreaDirect(floor, Number((w * currentLength).toFixed(2)));
-                    }}
+                    onCommit={(w) => { const l = currentLength; if (updateFloorDimensions) updateFloorDimensions(floor, w, l); updateFloorAreaDirect(floor, Number((w * l).toFixed(2))); }}
                     className="w-full border-2 border-black p-1.5 text-center font-black text-xs bg-white"
                   />
                 </div>
                 <div>
                   <label className="text-[9px] font-black block mb-0.5">LENGTH (FT)</label>
-                  <input
-                    type="number"
+                  <BufferedNumberInput
                     value={currentLength}
-                    onChange={(e) => {
-                      const l = Number(e.target.value) || 0;
-                      if (updateFloorDimensions) updateFloorDimensions(floor, currentWidth, l);
-                      updateFloorAreaDirect(floor, Number((currentWidth * l).toFixed(2)));
-                    }}
+                    onCommit={(l) => { const w = currentWidth; if (updateFloorDimensions) updateFloorDimensions(floor, w, l); updateFloorAreaDirect(floor, Number((w * l).toFixed(2))); }}
                     className="w-full border-2 border-black p-1.5 text-center font-black text-xs bg-white"
                   />
                 </div>
@@ -1252,29 +1265,17 @@ export default function FloorManagerSection({
                     </td>
 
                     <td className="border-r border-black p-2.5 text-center">
-                      <input
-                        type="number"
+                      <BufferedNumberInput
                         value={currentWidth}
-                        onChange={(e) => {
-                          const w = Number(e.target.value) || 0;
-                          const l = currentLength;
-                          if (updateFloorDimensions) updateFloorDimensions(floor, w, l);
-                          updateFloorAreaDirect(floor, Number((w * l).toFixed(2)));
-                        }}
+                        onCommit={(w) => { const l = currentLength; if (updateFloorDimensions) updateFloorDimensions(floor, w, l); updateFloorAreaDirect(floor, Number((w * l).toFixed(2))); }}
                         className="w-20 border-2 border-black p-1.5 text-center font-black text-xs bg-white focus:bg-amber-50"
                       />
                     </td>
 
                     <td className="border-r border-black p-2.5 text-center">
-                      <input
-                        type="number"
+                      <BufferedNumberInput
                         value={currentLength}
-                        onChange={(e) => {
-                          const l = Number(e.target.value) || 0;
-                          const w = currentWidth;
-                          if (updateFloorDimensions) updateFloorDimensions(floor, w, l);
-                          updateFloorAreaDirect(floor, Number((w * l).toFixed(2)));
-                        }}
+                        onCommit={(l) => { const w = currentWidth; if (updateFloorDimensions) updateFloorDimensions(floor, w, l); updateFloorAreaDirect(floor, Number((w * l).toFixed(2))); }}
                         className="w-20 border-2 border-black p-1.5 text-center font-black text-xs bg-white focus:bg-amber-50"
                       />
                     </td>

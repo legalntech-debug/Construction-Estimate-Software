@@ -1,21 +1,63 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { QRCodeSVG } from 'qrcode.react';
-import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";   // ✅ NEW
-import { getItemRate } from "@/lib/pricing";                              // ✅ NEW
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
+import { getItemRate } from "@/lib/pricing";
 
-// Helper function to check percentage change in length of name or address
+// The QR code and share link always point to the production verification page
+const VERIFY_BASE_URL = "https://construction-estimate-software.vercel.app";
+
+// Route of the renovation input form (change this single constant if the route differs)
+const RENOVATION_FORM_ROUTE = "/renovation-estimate";
+
+// localStorage keys used by the renovation flow only (the new-construction "estimatePreview" key is intentionally excluded)
+const RENOVATION_STORAGE_KEYS = ["RenovationEstimatePreview", "renovationEstimatePreview", "renovationEstimateData"];
+const clearRenovationStorage = () => {
+  try { RENOVATION_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k)); } catch {}
+};
+
+// Returns how much a customer name / property address has changed, as a percentage.
+// Uses a character-level (Levenshtein) comparison so that a same-length replacement
+// (e.g. RAMESH -> SURESH) is still counted as a change.
+const NAME_ADDRESS_CHANGE_LIMIT = 15; // Percent; a larger change is treated as a new estimate (new ref no + new payment)
+
+// True for a persisted reference number; false for temporary ones (REF-..., TEMP..., placeholders)
+const isRealRef = (r?: string | null) => !!r && !/^(REF-|TEMP)/i.test(r) && !r.includes("...");
+
+// Snapshot used to detect changes: name, address, plot area, rate, floor areas and totals
+const makeSnapshot = (e: any) => {
+  const fd = e?.floor_details && typeof e.floor_details === "object" ? e.floor_details : {};
+  const floors: Record<string, number> = {};
+  Object.keys(fd).sort().forEach((k) => { floors[k] = Number(fd[k]?.area || 0); });
+  return JSON.stringify({
+    n: String(e?.customer_name || "").trim().toUpperCase(),
+    a: String(e?.property_address || "").trim().toUpperCase(),
+    p: Number(e?.plot_area || 0),
+    r: Number(e?.rate_per_sqft || 0),
+    b: Number(e?.total_builtup_area || 0),
+    t: Math.round(Number(e?.total_value ?? e?.total_construction_cost ?? e?.construction_cost ?? 0)),
+    f: floors,
+  });
+};
+
 const calculatePercentageChange = (str1: string, str2: string) => {
-  if (!str1 || !str2) return 100;
-  const len1 = str1.trim().length;
-  const len2 = str2.trim().length;
-  if (len1 === 0 && len2 === 0) return 0;
-  const diff = Math.abs(len1 - len2);
-  return (diff / Math.max(len1, len2)) * 100;
+  const a = (str1 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const b = (str2 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!a && !b) return 0;
+  if (!a || !b) return 100;
+  let prev = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let x = 1; x <= a.length; x++) {
+    const cur = [x];
+    for (let y = 1; y <= b.length; y++) {
+      cur[y] = Math.min(prev[y] + 1, cur[y - 1] + 1, prev[y - 1] + (a[x - 1] === b[y - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return (prev[b.length] / Math.max(a.length, b.length)) * 100;
 };
 
 const slabConfig: any = {
@@ -88,8 +130,21 @@ export default function RenovationEstimatePreview() {
   const [finalFee, setFinalFee] = useState(150);
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/...");
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+  const [isPdfBusy, setIsPdfBusy] = useState(false);
+  const [justPaid, setJustPaid] = useState(false);
+  const [needsNewPayment, setNeedsNewPayment] = useState(false);
+  const [originalRefNo, setOriginalRefNo] = useState<string | null>(null);
+  const [newPaymentReason, setNewPaymentReason] = useState<string>("");
+  const initialEstimateRef = useRef<string | null>(null); // Snapshot of the estimate as persisted in the database (baseline for change detection)
+  const goingToFormRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const allowPrintRef = useRef(false); // true only while the in-app Print button triggers window.print()
+  // Mobile preview: the A4 page is scaled down to fit the screen width (desktop stays at scale 1)
+  const [previewScale, setPreviewScale] = useState(1);
+  const [scaledHeight, setScaledHeight] = useState<number | null>(null);
 
-  // ✅ NEW: Dynamic Pricing States
+  // Dynamic pricing state
   const [gatewayFeeAmount, setGatewayFeeAmount] = useState<number>(21);
   const [pricingDisplay, setPricingDisplay] = useState({
     mrp: 120,
@@ -119,7 +174,7 @@ export default function RenovationEstimatePreview() {
   const builtupAreaSqMt = totalBuiltupSqFt / 10.764;
 
   // ═══════════════════════════════════════════════════════════
-  // ✅ NEW: State-wise dynamic pricing fetch
+  // State-wise dynamic pricing fetch
   // ═══════════════════════════════════════════════════════════
   useEffect(() => {
     let alive = true;
@@ -185,33 +240,68 @@ export default function RenovationEstimatePreview() {
     return () => { alive = false; };
   }, [estimateStateName, estimate?.state_name, currentUser?.state, userCategory]);
 
-  const checkEstimatePaymentStatus = async (refNo: string) => {
+  const checkEstimatePaymentStatus = async (
+    refNo: string,
+    current?: { customer_name?: string; property_address?: string }
+  ) => {
     if (!refNo) return;
     try {
       const { data: estData } = await supabase
         .from('estimates')
-        .select('platform_payment_status, payment_status, status')
+        .select('*')
         .eq('ref_no', refNo)
         .maybeSingle();
 
-      if (estData && (estData.platform_payment_status === 'paid' || estData.payment_status === 'paid' || estData.status === 'paid')) {
-        setIsAlreadyPaid(true);
-        setIsPaid(true);
-        setRequiresPayment(false);
+      // 15% rule: compare the current name/address with the saved (paid) record
+      const pct = (dbVal: any, curVal: any) =>
+        String(dbVal || "").trim() ? calculatePercentageChange(String(dbVal), String(curVal || "")) : 0;
+      const changedTooMuch = !!(estData && current) && (
+        pct(estData.customer_name, current.customer_name) > NAME_ADDRESS_CHANGE_LIMIT ||
+        pct(estData.property_address, current.property_address) > NAME_ADDRESS_CHANGE_LIMIT
+      );
+
+      let alreadyPaid = !!estData && (estData.platform_payment_status === 'paid' || estData.payment_status === 'paid' || estData.status === 'paid');
+
+      if (!alreadyPaid) {
+        const { data: misData } = await supabase
+          .from('mis_records')
+          .select('platform_payment_status')
+          .eq('ref_no', refNo)
+          .maybeSingle();
+        alreadyPaid = !!misData && misData.platform_payment_status === 'paid';
+      }
+
+      if (!alreadyPaid) return;
+
+      if (changedTooMuch) {
+        // Treat as a new estimate: detach from the old ref/id and require a new payment
+        setNeedsNewPayment(true);
+        setNewPaymentReason("CHANGED");
+        setOriginalRefNo(refNo);
+        setIsAlreadyPaid(false);
+        setIsPaid(false);
+        setRequiresPayment(true);
+        setCurrentRefNo("LNT/26-27/...");
+        setEstimate((prev: any) => (prev ? { ...prev, id: null, ref_no: null } : prev));
         return;
       }
 
-      const { data: misData } = await supabase
-        .from('mis_records')
-        .select('platform_payment_status')
-        .eq('ref_no', refNo)
-        .maybeSingle();
-
-      if (misData && misData.platform_payment_status === 'paid') {
-        setIsAlreadyPaid(true);
-        setIsPaid(true);
-        setRequiresPayment(false);
+      // Baseline: values persisted in the database (used to detect print-only / minor-change cases)
+      if (estData) {
+        initialEstimateRef.current = makeSnapshot({
+          customer_name: estData.customer_name,
+          property_address: estData.property_address,
+          plot_area: estData.plot_area,
+          rate_per_sqft: estData.rate_per_sqft,
+          total_builtup_area: estData.total_builtup_area,
+          total_value: estData.total_construction_cost ?? estData.total_value,
+          floor_details: estData.floor_details,
+        });
       }
+
+      setIsAlreadyPaid(true);
+      setIsPaid(true);
+      setRequiresPayment(false);
     } catch (err) {
       console.error("Error checking payment status:", err);
     }
@@ -228,7 +318,7 @@ export default function RenovationEstimatePreview() {
           const parsedData = JSON.parse(rawData);
           setEstimate(parsedData);
           
-          // ✅ NEW: Set state from estimate
+          // Resolve the pricing state from the estimate
           const resolvedState =
             parsedData.state_name ||
             parsedData.state ||
@@ -237,9 +327,18 @@ export default function RenovationEstimatePreview() {
             "MADHYA PRADESH";
           setEstimateStateName(resolvedState);
 
-          if (parsedData?.ref_no) {
+          if (parsedData?.force_new_ref && !isRealRef(parsedData.ref_no)) {
+            // The input page has already decided on a new ref no + new payment (e.g. estimate older than 60 days)
+            setNeedsNewPayment(true);
+            setNewPaymentReason(parsedData.new_ref_reason || "EXPIRED_60_DAYS");
+            setOriginalRefNo(parsedData.previous_ref_no || null);
+            setCurrentRefNo(parsedData.ref_no || "LNT/26-27/...");
+          } else if (parsedData?.ref_no) {
             setCurrentRefNo(parsedData.ref_no);
-            await checkEstimatePaymentStatus(parsedData.ref_no);
+            await checkEstimatePaymentStatus(parsedData.ref_no, {
+              customer_name: parsedData.customer_name,
+              property_address: parsedData.property_address,
+            });
           }
         }
       } catch (err) {
@@ -283,16 +382,283 @@ export default function RenovationEstimatePreview() {
 
   const handleRazorpayPayment = () => handlePayment();
 
+  // Open the print dialog only after React has rendered the final (paid, with ref no) page
+  const printAfterRender = () =>
+    new Promise<void>((resolve) => {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          // Printing is only permitted when it is started from the in-app Print button
+          allowPrintRef.current = true;
+          try {
+            window.print();
+          } finally {
+            setTimeout(() => { allowPrintRef.current = false; }, 1000);
+          }
+          resolve();
+        })
+      );
+    });
+
   const handleSaveAndPrint = async () => {
     setIsSaving(true);
     try {
-      await handleSaveAndFinalize();
-      window.print();
-      setTimeout(() => { router.push('/dashboard'); }, 5000);
+      const ok = await ensureSaved();
+      if (!ok) return;
+      await printAfterRender();
     } catch (error) {
       console.error("Save failed", error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Print-only / no change              -> database is not touched (same ref no, no update, no new charge)
+  // Minor change (name/address within 15%, or plot/floor area/rate) -> updates the SAME ref no
+  // Major change / new estimate         -> handleSaveAndFinalize creates a new ref no and requires payment
+  const isUnchangedFromSaved = () =>
+    !needsNewPayment &&
+    isRealRef(estimate?.ref_no) &&
+    !!initialEstimateRef.current &&
+    makeSnapshot(estimate) === initialEstimateRef.current;
+
+  const ensureSaved = async (): Promise<boolean> => {
+    if (isFinalized) return true;
+    if (isUnchangedFromSaved()) return true;
+    const ok = await handleSaveAndFinalize();
+    if (ok) await new Promise((r) => setTimeout(r, 500)); // Allow the new ref no to render before capturing/printing
+    return ok;
+  };
+
+  const isExportReady = () =>
+    (isPaid || isAlreadyPaid || userCategory === 'ADMIN') &&
+    !!estimate?.ref_no && !String(estimate.ref_no).startsWith("TEMP") && !String(estimate.ref_no).includes("...");
+
+  const pdfFileName = () =>
+    `Renovation-Estimate-${String(estimate?.ref_no || "estimate").replace(/[^a-zA-Z0-9_-]+/g, "-")}.pdf`;
+
+  // Converts the estimate currently on screen into a paginated A4 PDF.
+  // - Layout is captured at a fixed A4 width so the result does not depend on the screen size.
+  // - Page breaks are only placed between table rows / top-level sections, so no row is ever cut in half.
+  // - A block that does not fit on the current page moves to the next page; the last page is never
+  //   left with only a tiny block (a few preceding rows are carried over with it).
+  // - Every page carries a "Page X of Y" footer.
+  const buildPdfBlob = async (): Promise<Blob> => {
+    const el = printRef.current;
+    if (!el) throw new Error("Estimate area not found");
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import("html2canvas-pro"),
+      import("jspdf"),
+    ]);
+
+    const SCALE = 3;
+    const CAPTURE_WIDTH_PX = 703; // 186 mm (A4 width minus 12 mm side margins) at 96 DPI, same as the print layout
+    const breakCandidatesCss: number[] = []; // safe break offsets (CSS px) measured in the cloned DOM
+
+    // Collect the @media print rules of the page so the PDF uses exactly the same compact layout as the printout
+    let printCss = "";
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try { rules = sheet.cssRules; } catch { continue; } // skip cross-origin stylesheets
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSMediaRule && /print/i.test(rule.media.mediaText)) {
+          for (const inner of Array.from(rule.cssRules)) {
+            if (inner instanceof CSSStyleRule) printCss += inner.cssText + "\n";
+          }
+        }
+      }
+    }
+
+    const canvas = await html2canvas(el, {
+      scale: SCALE,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: 1100,
+      ignoreElements: (node: Element) =>
+        node.classList?.contains("no-print") || node.classList?.contains("draft-watermark"),
+      onclone: (clonedDoc: Document, clonedEl: HTMLElement) => {
+        // Remove UI-only elements from the layout (print.css forces .no-print to display:block, hence !important)
+        clonedDoc.querySelectorAll(".no-print, .draft-watermark").forEach((n) => {
+          (n as HTMLElement).style.setProperty("display", "none", "important");
+        });
+
+        // html2canvas does not lay out <textarea> text reliably (alignment/wrapping), so render them as plain blocks
+        clonedDoc.querySelectorAll("textarea").forEach((node) => {
+          const ta = node as HTMLTextAreaElement;
+          const cs = clonedDoc.defaultView!.getComputedStyle(ta);
+          const block = clonedDoc.createElement("div");
+          block.textContent = ta.value;
+          ["font-family", "font-size", "font-weight", "line-height", "letter-spacing", "color", "text-align", "text-transform"].forEach((p) =>
+            block.style.setProperty(p, cs.getPropertyValue(p))
+          );
+          block.style.whiteSpace = "pre-wrap";
+          block.style.width = "100%";
+          ta.parentNode?.replaceChild(block, ta);
+        });
+
+        // Apply the print rules to the cloned document, then pin the root to the A4 content width
+        const styleEl = clonedDoc.createElement("style");
+        styleEl.textContent = printCss;
+        clonedDoc.head.appendChild(styleEl);
+
+        const root = clonedEl;
+        const force = (prop: string, value: string) => root.style.setProperty(prop, value, "important");
+        force("position", "relative");
+        force("transform", "none");
+        // The mobile preview wrappers must not clip or shrink the capture
+        ["preview-scale-box", "print-shell"].forEach((cls) => {
+          const w = root.closest("." + cls) as HTMLElement | null;
+          if (w) {
+            ["overflow", "width", "height", "padding", "display"].forEach((p) =>
+              w.style.setProperty(p, p === "overflow" ? "visible" : p === "display" ? "block" : p === "padding" ? "0" : "auto", "important")
+            );
+          }
+        });
+        force("top", "0");
+        force("left", "0");
+        force("width", `${CAPTURE_WIDTH_PX}px`);
+        force("max-width", `${CAPTURE_WIDTH_PX}px`);
+        force("min-height", "0");
+        force("margin", "0");
+        force("padding", "0");
+
+        // Measure the positions where a page break is allowed
+        const rootTop = root.getBoundingClientRect().top;
+        const addCandidate = (node: Element) => {
+          const r = node.getBoundingClientRect();
+          if (r.height > 0) breakCandidatesCss.push(r.bottom - rootTop);
+        };
+        // Between table body rows (never right after a table header row)
+        root.querySelectorAll("tr").forEach((tr) => {
+          if (!tr.closest("thead")) addCandidate(tr);
+        });
+        // Between top-level sections (never right after a heading)
+        Array.from(root.children).forEach((child) => {
+          if (!/^H[1-3]$/.test(child.tagName) && !child.querySelector("h1, h2, h3")) addCandidate(child);
+        });
+      },
+    });
+
+    const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const marginX = 12; // identical to the print margins (A4: 12 mm sides, 10 mm top, 14 mm bottom)
+    const marginTop = 10;
+    const marginBottom = 14; // space reserved for the page number footer
+    const imgW = pageW - marginX * 2;
+    const pxPerMm = canvas.width / imgW;
+    const pageContentPx = Math.floor((pageH - marginTop - marginBottom) * pxPerMm);
+    const minFillPx = Math.floor(pageContentPx * 0.3);
+
+    const candidates = Array.from(
+      new Set(
+        breakCandidatesCss
+          .map((v) => Math.round(v * SCALE))
+          .filter((v) => v > 0 && v < canvas.height)
+      )
+    ).sort((a, b) => a - b);
+
+    // Build page edges: break at the last safe position that still fits on the page
+    const edges: number[] = [0];
+    while (canvas.height - edges[edges.length - 1] > pageContentPx) {
+      const start = edges[edges.length - 1];
+      const limit = start + pageContentPx;
+      let end = limit; // hard cut only if a single unbreakable block is taller than a page
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        if (candidates[i] <= limit && candidates[i] > start + minFillPx) {
+          end = candidates[i];
+          break;
+        }
+      }
+      edges.push(end);
+    }
+    edges.push(canvas.height);
+
+    // Avoid a nearly empty last page: carry a few preceding rows over together with the last block
+    if (edges.length >= 3) {
+      const lastStart = edges[edges.length - 2];
+      const minLastPx = Math.floor(pageContentPx * 0.35);
+      if (canvas.height - lastStart < minLastPx) {
+        const prevStart = edges[edges.length - 3];
+        const target = canvas.height - minLastPx;
+        let moved = -1;
+        for (const c of candidates) {
+          if (c > prevStart + minFillPx && c <= target) moved = c;
+        }
+        if (moved > 0 && canvas.height - moved <= pageContentPx) edges[edges.length - 2] = moved;
+      }
+    }
+
+    const totalPages = edges.length - 1;
+    for (let p = 0; p < totalPages; p++) {
+      const y0 = edges[p];
+      const h = edges[p + 1] - y0;
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = h;
+      const ctx = slice.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, slice.width, h);
+      ctx.drawImage(canvas, 0, y0, canvas.width, h, 0, 0, canvas.width, h);
+
+      if (p > 0) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.95), "JPEG", marginX, marginTop, imgW, h / pxPerMm);
+
+      pdf.setFontSize(8);
+      pdf.setTextColor(68, 68, 68);
+      pdf.text(`Page ${p + 1} of ${totalPages}`, pageW / 2, pageH - 6, { align: "center" });
+    }
+    return pdf.output("blob");
+  };
+
+  const downloadBlob = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = pdfFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!isExportReady() || isPdfBusy) return;
+    setIsPdfBusy(true);
+    try {
+      if (!(await ensureSaved())) return;
+      downloadBlob(await buildPdfBlob());
+    } catch (err) {
+      console.error("PDF error:", err);
+      alert("PDF nahi ban paya. Kripya dobara try karein.");
+    } finally {
+      setIsPdfBusy(false);
+    }
+  };
+
+  const handleSharePdf = async () => {
+    if (!isExportReady() || isPdfBusy) return;
+    setIsPdfBusy(true);
+    try {
+      if (!(await ensureSaved())) return;
+      const blob = await buildPdfBlob();
+      const file = new File([blob], pdfFileName(), { type: "application/pdf" });
+      const verifyUrl = `${VERIFY_BASE_URL}/verify-estimate?ref=${estimate?.ref_no || ""}`;
+      const text = `Renovation Estimate | Ref No: ${estimate?.ref_no}\nVerify: ${verifyUrl}`;
+      const nav: any = navigator;
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: "Renovation Estimate", text });
+      } else {
+        // Desktop / unsupported browser fallback: download the PDF and open WhatsApp with the verification link
+        downloadBlob(blob);
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.error("Share error:", err);
+        alert("Share nahi ho paya. Kripya 'Download PDF' use karein.");
+      }
+    } finally {
+      setIsPdfBusy(false);
     }
   };
 
@@ -307,7 +673,7 @@ export default function RenovationEstimatePreview() {
         });
       }
 
-      // ✅ FIX: Use dynamic price
+      // Use the dynamic price from the pricing configuration
       const dynamicAmount = gatewayFeeAmount || 21;
 
       const res = await fetch("/api/analyze/payment/create-order", {
@@ -340,6 +706,7 @@ export default function RenovationEstimatePreview() {
               p_user_payment: dynamicAmount
             };
 
+            setNeedsNewPayment(false);
             setIsPaid(true);
             setIsAlreadyPaid(true);
             await handleSaveAndFinalize(paymentDetails);
@@ -347,8 +714,8 @@ export default function RenovationEstimatePreview() {
             const rzpElement = document.querySelector('.razorpay-checkout-frame');
             if (rzpElement) { rzpElement.remove(); }
             
-            window.print();
-            setTimeout(() => { router.push('/dashboard'); }, 3000);
+            // After payment, stay on the finalized page (with ref no); no automatic print or redirect
+            window.scrollTo({ top: 0, behavior: "smooth" });
           } catch (error) {
             console.error("Payment sync error:", error);
             alert("Payment successful but system failed to update status.");
@@ -385,14 +752,29 @@ export default function RenovationEstimatePreview() {
 
   useEffect(() => {
     if (currentUser) {
-      if (userCategory === 'ADMIN') {
+      if (userCategory === 'ADMIN' || isPaid || isAlreadyPaid) {
         setRequiresPayment(false);
+        setValidationReason("");
       } else {
         setRequiresPayment(true);
-        setValidationReason("Note: To print this estimate, please complete the payment process.");
+        setValidationReason(
+          needsNewPayment
+            ? (newPaymentReason === "EXPIRED_60_DAYS"
+                ? `⚠️ Purana estimate 60 din se zyada purana hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`
+                : `⚠️ Customer name ya property address ${NAME_ADDRESS_CHANGE_LIMIT}% se zyada badal gaya hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`)
+            : "Note: To print this estimate, please complete the payment process."
+        );
       }
     }
-  }, [currentUser, userCategory]);
+  }, [currentUser, userCategory, isPaid, isAlreadyPaid, needsNewPayment, originalRefNo, newPaymentReason]);
+
+  // While a new payment is pending, prevent any other effect from marking the estimate as paid
+  useEffect(() => {
+    if (needsNewPayment && (isPaid || isAlreadyPaid)) {
+      setIsPaid(false);
+      setIsAlreadyPaid(false);
+    }
+  }, [needsNewPayment, isPaid, isAlreadyPaid]);
 
   useEffect(() => {
     if (estimate) {
@@ -443,24 +825,25 @@ export default function RenovationEstimatePreview() {
   };
 
   const handleSaveAndFinalize = async (paymentData?: any) => {
-    const isAuthorized = userCategory === 'ADMIN' || isPaid || paymentData;
+    const isAuthorized = userCategory === 'ADMIN' || isPaid || isAlreadyPaid || paymentData;
     if (!isAuthorized) {
       alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
       handlePayment();
-      return;
+      return false;
     }
 
-    if (isSaving) return;
+    if (isSaving) return false;
 
     const now = new Date();
     const userId = currentUser?.id;
-    if (!userId) { alert("User ID not found!"); return; }
+    if (!userId) { alert("User ID not found!"); return false; }
 
     try {
       setIsSaving(true);
 
-      let activeEstimateId = estimate?.id || null;
-      let activeRefNo = estimate?.ref_no && !estimate?.ref_no.startsWith("TEMP") && !estimate?.ref_no.includes("...") 
+      // New-payment case: do not overwrite the old record; create a new record with a new ref no
+      let activeEstimateId = needsNewPayment ? null : (estimate?.id || null);
+      let activeRefNo = needsNewPayment ? null : estimate?.ref_no && !estimate?.ref_no.startsWith("TEMP") && !estimate?.ref_no.includes("...") 
   ? estimate.ref_no 
   : (currentRefNo && !currentRefNo.includes("...") ? currentRefNo : null);
 
@@ -478,7 +861,7 @@ if (!activeEstimateId && activeRefNo && !activeRefNo.startsWith("TEMP")) {
 
 let shouldGenerateNewRef = !activeEstimateId || !activeRefNo || activeRefNo.startsWith("TEMP");
       
-      if (shouldGenerateNewRef) {
+      if (shouldGenerateNewRef && !needsNewPayment) {
         const { data: duplicate } = await supabase
           .from("estimates")
           .select("id, ref_no")
@@ -494,7 +877,7 @@ let shouldGenerateNewRef = !activeEstimateId || !activeRefNo || activeRefNo.star
             shouldGenerateNewRef = false;
           } else {
             setIsSaving(false);
-            return;
+            return false;
           }
         }
       }
@@ -571,13 +954,29 @@ if (shouldGenerateNewRef && !estimate?.id) {
         setEstimate((prev: any) => ({ ...prev, id: result.id, ref_no: result.ref_no }));
         setIsFinalized(true);
         setIsPaid(true);
-        localStorage.removeItem("RenovationEstimatePreview");
-        alert(`Saved successfully! Ref: ${result.ref_no}`);
-        setTimeout(() => window.print(), 500);
+        setCurrentRefNo(result.ref_no);
+        if (paymentData) setJustPaid(true);
+        setNeedsNewPayment(false);
+        setOriginalRefNo(null);
+        setNewPaymentReason("");
+        // The persisted values are now the baseline
+        initialEstimateRef.current = makeSnapshot(estimate);
+
+        // Keep the saved data and ref no available when returning to the input form for corrections
+        try {
+          localStorage.removeItem("RenovationEstimatePreview");
+          localStorage.setItem(
+            "renovationEstimatePreview",
+            JSON.stringify({ ...estimate, id: result.id, ref_no: result.ref_no, payment_status: 'paid', is_paid: true, force_new_ref: false, new_ref_reason: null })
+          );
+        } catch {}
+        return true;
       }
+      return false;
     } catch (error: any) {
       console.error("Save Error:", error);
       alert("Error: " + (error.message || "Failed to save data"));
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -631,7 +1030,8 @@ if (shouldGenerateNewRef && !estimate?.id) {
         property_type: estimateData.property_type || "HOUSE" 
       };
 
-      if (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-")) {
+      const forcedNew = !!workingEstimate.force_new_ref && !isRealRef(workingEstimate.ref_no);
+      if (!forcedNew && (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-"))) {
         try {
           const { data: existingRecord } = await supabase
             .from("estimates")
@@ -682,7 +1082,7 @@ if (shouldGenerateNewRef && !estimate?.id) {
         statusCheck === "SUCCESS" ||
         paymentStatusCheck === "PAID";
 
-      if (isPaidFlag) {
+      if (isPaidFlag && !forcedNew) {
         setIsPaid(true);
         setIsAlreadyPaid(true);
       }
@@ -721,28 +1121,126 @@ if (shouldGenerateNewRef && !estimate?.id) {
     checkPaymentStatus();
   }, [estimate?.id]);
 
+  // Output protection: printing is only possible through the in-app button after payment,
+  // and common capture shortcuts are blocked. Note: browsers cannot fully prevent OS-level screenshots
+  // or screen recording, so these are deterrents; the DRAFT watermark and the withheld signature/QR
+  // (until payment) are the actual protection.
   useEffect(() => {
-    const preventSystemPrint = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+    const paidView = isPaid || isAlreadyPaid || userCategory === 'ADMIN';
+    const body = document.body;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || "").toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+      const isPrint = mod && key === 'p';
+      const isCapture = key === 'printscreen' || (e.metaKey && e.shiftKey && key === 's');
+      const isDevOrSave =
+        isProd && (key === 'f12' || (mod && ['s', 'u'].includes(key)) || (mod && e.shiftKey && ['i', 'j', 'c'].includes(key)));
+      if (isPrint || isCapture || isDevOrSave) {
         e.preventDefault();
-        alert("System Print disabled! Kripya software mein diye gaye 'Save & Print' button ka hi upyog karein.");
-        return false;
+        e.stopPropagation();
+        if (key === 'printscreen') {
+          try { navigator.clipboard?.writeText(""); } catch {}
+        }
+        if (isPrint) alert("System print is disabled. Please use the Print button on this page.");
       }
     };
+    const blockEvent = (e: Event) => e.preventDefault();
 
-    const preventRightClick = (e: MouseEvent) => {
-      e.preventDefault();
+    // Printing from the browser menu or any other route is locked unless it came from the Print button
+    const onBeforePrint = () => {
+      if (!(allowPrintRef.current && paidView)) body.classList.add("print-locked");
     };
+    const onAfterPrint = () => {
+      body.classList.remove("print-locked");
+      allowPrintRef.current = false;
+    };
+    const mq = window.matchMedia ? window.matchMedia("print") : null;
+    const onMq = (e: MediaQueryListEvent) => (e.matches ? onBeforePrint() : onAfterPrint());
 
-    window.addEventListener('keydown', preventSystemPrint, true);
-    window.addEventListener('contextmenu', preventRightClick);
+    // Unpaid drafts are blurred whenever the window loses focus (typical for snipping / recording tools)
+    const lock = () => body.classList.add("screen-guard");
+    const unlock = () => {
+      if (document.hasFocus() && !document.hidden) body.classList.remove("screen-guard");
+    };
+    const onVisibility = () => (document.hidden ? lock() : unlock());
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('contextmenu', blockEvent);
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    mq?.addEventListener?.('change', onMq);
+    if (!paidView) {
+      window.addEventListener('blur', lock);
+      window.addEventListener('focus', unlock);
+      document.addEventListener('visibilitychange', onVisibility);
+      document.addEventListener('copy', blockEvent);
+      document.addEventListener('cut', blockEvent);
+      document.addEventListener('dragstart', blockEvent);
+    }
 
     return () => {
-      window.removeEventListener('keydown', preventSystemPrint, true);
-      window.removeEventListener('contextmenu', preventRightClick);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('contextmenu', blockEvent);
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+      mq?.removeEventListener?.('change', onMq);
+      window.removeEventListener('blur', lock);
+      window.removeEventListener('focus', unlock);
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('copy', blockEvent);
+      document.removeEventListener('cut', blockEvent);
+      document.removeEventListener('dragstart', blockEvent);
+      body.classList.remove("print-locked", "screen-guard");
+    };
+  }, [isPaid, isAlreadyPaid, userCategory]);
+
+  // Mobile preview: fit the A4 page (794px wide) into the screen width. Print / PDF are not affected.
+  useEffect(() => {
+    const A4_PX = 794;
+    const update = () => {
+      const vw = window.innerWidth;
+      if (vw >= 820) {
+        setPreviewScale(1);
+        setScaledHeight(null);
+        return;
+      }
+      const scale = Math.min(1, (vw - 16) / A4_PX);
+      setPreviewScale(scale);
+      const h = printRef.current?.offsetHeight || 0;
+      setScaledHeight(h ? h * scale : null);
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("orientationchange", update);
+    let ro: ResizeObserver | undefined;
+    if (printRef.current && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(update);
+      ro.observe(printRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("orientationchange", update);
+      ro?.disconnect();
+    };
+  }, [estimate, renovationMasterItem, isCheckingHistory]);
+
+  // Automatically clear the saved input data when the user leaves the form/preview flow (e.g. to the dashboard).
+  // The data is preserved when navigating back to the input form (Back to Input / browser back).
+  useEffect(() => {
+    isMountedRef.current = true;
+    const onPop = () => { goingToFormRef.current = true; };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      isMountedRef.current = false;
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToFormRef.current) clearRenovationStorage();
+      }, 0);
     };
   }, []);
-  
+
   const loadMasterItem = async (selectedRate: number) => {
     const { data, error } = await supabase.from("master_items").select("*");
     if (error || !data) return;
@@ -1247,14 +1745,201 @@ if (isCheckingHistory) {
   );
 } 
 
+// Mobile: notices and buttons live OUTSIDE the scaled A4 page so they stay full size and tappable
+const isMobilePreview = previewScale < 1;
+
+const noticesBlock = (
+  <>
+    {justPaid && estimate?.ref_no && (
+      <div className="mb-6 p-4 border-2 border-emerald-500 bg-emerald-50 rounded-lg text-left no-print">
+        <p className="font-bold uppercase text-xs tracking-wider text-emerald-800 mb-1">✅ Payment Successful</p>
+        <p className="text-sm font-medium text-emerald-900">
+          Ref No: <span className="font-mono font-bold">{estimate.ref_no}</span>
+        </p>
+        <p className="text-xs text-emerald-800 mt-1">Ab aap niche se Print, PDF Download ya Share kar sakte hain.</p>
+      </div>
+    )}
+
+    {['ENGINEER', 'ARCHITECT'].includes(userCategory) && (
+      <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg text-left no-print shadow-sm font-sans">
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            id="letterheadToggle"
+            checked={useCustomLetterhead}
+            onChange={(e) => setUseCustomLetterhead(e.target.checked)}
+            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+          />
+          <label htmlFor="letterheadToggle" className="text-xs font-bold text-slate-700 cursor-pointer select-none uppercase tracking-wider">
+            Activate Custom Letterhead Mode (For Rented Engineers/Architects)
+          </label>
+        </div>
+        {useCustomLetterhead && (
+          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 mt-3">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Custom Header Title</label>
+              <input
+                type="text"
+                placeholder="e.g., VERMA & ASSOCIATES"
+                value={customHeaderTitle}
+                onChange={(e) => setCustomHeaderTitle(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:border-black font-medium"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Custom Subtitle / Designations</label>
+              <input
+                type="text"
+                placeholder="e.g., Chartered Engineer & Govt. Approved Valuer"
+                value={customSubtitle}
+                onChange={(e) => setCustomSubtitle(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:border-black font-medium"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    )}
+
+    {validationReason && (
+      <div className={`mb-6 p-4 border text-left no-print ${requiresPayment ? "bg-amber-50 border-amber-500 text-amber-900" : "bg-emerald-50 border-emerald-500 text-emerald-900"}`}>
+        <p className="font-bold uppercase text-xs tracking-wider mb-1">📋 System Audit Status</p>
+        <p className="text-sm font-medium">{validationReason}</p>
+      </div>
+    )}
+  </>
+);
+
+const actionsBlock = (
+    <div className="mt-8 mb-12 no-print border-t border-slate-200 pt-6">
+      {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (
+        <div className="mb-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="bg-red-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse">
+              ⚡ LIMITED TIME DEAL
+            </span>
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-900 uppercase">
+                Professional Renovation Estimate & Verified Report
+              </h4>
+              <p className="text-xs text-slate-600 font-medium">
+                Includes Instant PDF Download, Digital Sealing & Verification QR Code.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
+            <div className="text-right">
+              {pricingLoading ? (
+                <span className="text-xs text-slate-500 font-bold">Loading price...</span>
+              ) : (
+                <>
+                  {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="text-xs text-gray-400 line-through font-semibold">
+                        ₹ {pricingDisplay.mrp}/-
+                      </span>
+                      <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        {pricingDisplay.discountPercent}% OFF
+                      </span>
+                    </div>
+                  )}
+                  <div className="text-lg font-black text-emerald-600 leading-tight">
+                    ₹ {pricingDisplay.price}{" "}
+                    <span className="text-xs font-bold text-slate-700">Only</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center justify-start gap-4">
+        {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
+          <>
+            <button
+              onClick={handleSaveAndPrint}
+              disabled={isSaving}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
+            >
+              {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
+            </button>
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isPdfBusy || isSaving || !isExportReady()}
+              className="bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-emerald-700 transition font-bold uppercase tracking-wide flex items-center gap-2 disabled:opacity-50"
+            >
+              {isPdfBusy ? "⏳ PLEASE WAIT..." : "⬇️ DOWNLOAD PDF"}
+            </button>
+            <button
+              onClick={handleSharePdf}
+              disabled={isPdfBusy || isSaving || !isExportReady()}
+              className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-green-700 transition font-bold uppercase tracking-wide flex items-center gap-2 disabled:opacity-50"
+            >
+              📤 SHARE PDF
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={handleRazorpayPayment}
+            disabled={pricingLoading}
+            className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {pricingLoading ? "⏳ LOADING PRICE..." : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
+          </button>
+        )}
+
+        <button
+          onClick={() => {
+            goingToFormRef.current = true;
+            router.push(RENOVATION_FORM_ROUTE);
+          }}
+          className="bg-slate-700 text-white px-6 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
+        >
+          ⬅️ BACK TO INPUT
+        </button>
+         </div>
+    </div>
+);
+
 return (
-  <div className="print-area print-page p-10 bg-white min-h-screen relative">
+  <div
+    className="print-shell"
+    style={isMobilePreview ? { display: "flex", flexDirection: "column", alignItems: "center", overflowX: "hidden", padding: "8px 0", background: "#f3f4f6", minHeight: "100vh" } : undefined}
+  >
+    {isMobilePreview && <div className="no-print w-full px-3">{noticesBlock}</div>}
+    <div
+      className="preview-scale-box"
+      style={isMobilePreview ? { width: 794 * previewScale, height: scaledHeight ?? undefined, flexShrink: 0 } : undefined}
+    >
+  <div
+    ref={printRef}
+    className={`print-area print-page p-10 bg-white min-h-screen relative ${(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') ? "is-draft" : ""}`}
+    style={isMobilePreview ? { width: 794, transform: `scale(${previewScale})`, transformOrigin: "top left" } : undefined}
+  >
     
 <style jsx global>{`
   @media print {
+    .preview-scale-box {
+      width: auto !important;
+      height: auto !important;
+      display: block !important;
+    }
+    .print-shell {
+      display: block !important;
+      overflow: visible !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      background: #ffffff !important;
+    }
+    .print-area {
+      transform: none !important;
+    }
     @page {
       size: A4 portrait;
-      margin: 10mm 12mm 10mm 12mm;
+      size: 210mm 297mm;
+      margin: 10mm 12mm 14mm 12mm;
       @bottom-center {
         content: "Page " counter(page) " of " counter(pages);
         font-size: 8pt;
@@ -1378,6 +2063,22 @@ return (
       break-inside: avoid !important;
     }
 
+    /* If the disclaimer/signature block does not fit on the page, move it to the next page as a whole,
+       together with the last rows of the estimate table, leaving a little spacing above it */
+    .keep-together {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      margin-top: 8mm !important;
+    }
+    table.tail-keep {
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+    table.tail-keep tbody tr:nth-last-child(-n+4) {
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+
     .disclaimer-container, .disclaimer-section, .terms-container {
       width: 100% !important;
       margin-top: 6px !important;
@@ -1421,60 +2122,14 @@ return (
   }
 `}</style>
 
-    {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (!estimate?.id || estimate?.id === "temp-id" || !estimate?.ref_no)) && (
+    {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') && (
       <div className="draft-watermark no-print">DRAFT</div>
     )}
 
-    {['ENGINEER', 'ARCHITECT'].includes(userCategory) && (
-      <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg text-left no-print shadow-sm font-sans">
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            id="letterheadToggle"
-            checked={useCustomLetterhead}
-            onChange={(e) => setUseCustomLetterhead(e.target.checked)}
-            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
-          />
-          <label htmlFor="letterheadToggle" className="text-xs font-bold text-slate-700 cursor-pointer select-none uppercase tracking-wider">
-            Activate Custom Letterhead Mode (For Rented Engineers/Architects)
-          </label>
-        </div>
-        {useCustomLetterhead && (
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-200 mt-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Custom Header Title</label>
-              <input
-                type="text"
-                placeholder="e.g., VERMA & ASSOCIATES"
-                value={customHeaderTitle}
-                onChange={(e) => setCustomHeaderTitle(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:border-black font-medium"
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Custom Subtitle / Designations</label>
-              <input
-                type="text"
-                placeholder="e.g., Chartered Engineer & Govt. Approved Valuer"
-                value={customSubtitle}
-                onChange={(e) => setCustomSubtitle(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded border border-slate-300 bg-white text-slate-800 focus:outline-none focus:border-black font-medium"
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    )}
-
-    {validationReason && (
-      <div className={`mb-6 p-4 border text-left no-print ${requiresPayment ? "bg-amber-50 border-amber-500 text-amber-900" : "bg-emerald-50 border-emerald-500 text-emerald-900"}`}>
-        <p className="font-bold uppercase text-xs tracking-wider mb-1">📋 System Audit Status</p>
-        <p className="text-sm font-medium">{validationReason}</p>
-      </div>
-    )}
+    {!isMobilePreview && noticesBlock}
 
     <div className="mb-6 border-b-2 border-black pb-4">
-      <div className="grid grid-cols-3 items-center">
+      <div className="grid items-center" style={{ gridTemplateColumns: "1fr auto 1.7fr", columnGap: "8px" }}>
         <div className="text-[12px] uppercase font-bold text-slate-700">
           {useCustomLetterhead ? (
             <p className="text-xl text-black font-bold uppercase">{customHeaderTitle || "ENTER HEADER TITLE"}</p>
@@ -1516,7 +2171,7 @@ return (
           )}
         </div>
 
-        <div className="text-[12px] text-right font-bold text-slate-700">
+        <div className="text-[12px] text-right font-bold text-slate-700 whitespace-nowrap">
           {useCustomLetterhead ? (
             <p className="text-sm text-black font-medium uppercase">{customSubtitle || "ENTER DESIGNATION"}</p>
           ) : (
@@ -1531,6 +2186,7 @@ return (
       </div>
 
       <div className="mt-4 text-[15px] text-center font-bold text-slate-600 uppercase leading-relaxed border-t pt-2">
+        {useCustomLetterhead ? (
         <textarea
           value={legalText}
           onChange={(e) => setLegalText(e.target.value)}
@@ -1538,6 +2194,10 @@ return (
           className={`w-full text-sm border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none text-center ${!useCustomLetterhead ? "bg-transparent cursor-default" : "bg-white"}`}
           rows={3}
         />
+        ) : (
+          // Static text for the default letterhead: always centered, in the UI, print and PDF
+          <div className="w-full text-sm text-center whitespace-pre-wrap">{legalText}</div>
+        )}
         <hr className="w-full border border-black border-collapse mb-4"/>
       </div>
       <div className="flex justify-between items-center text-sm mt-2 px-1 font-semibold">
@@ -1652,7 +2312,7 @@ return (
 
     {renovationMasterItem && (
       <div>
-        <table className="w-full border border-black border-collapse mt-6 text-base">
+        <table className="tail-keep w-full border border-black border-collapse mt-6 text-base">
           <thead>
             <tr className="bg-slate-100 text-slate-700">
               <th className="border border-black p-2 text-center w-10">SR</th>
@@ -1724,7 +2384,7 @@ return (
     </div>
   )}
 
-    <table className="w-full border border-black border-collapse mt-6">
+    <table className="keep-together w-full border border-black border-collapse mt-6">
       <tbody>
         <tr>
           <td className="border border-black p-4 w-[60%] align-top">
@@ -1748,7 +2408,7 @@ return (
                 <div className="flex flex-row items-center justify-between gap-4 p-2">
                   <div className="flex flex-col items-center">
 <QRCodeSVG 
-  value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software-5wi1i5qjz-divisha.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
+  value={`${VERIFY_BASE_URL}/verify-estimate?ref=${estimate?.ref_no}`} 
   size={60} 
   level="H" 
 />
@@ -1761,7 +2421,7 @@ return (
                   </div>
                 </div>
 
-                {/* ✅ NEW: Manual Signature Image (Jayant Tomar) */}
+                {/* Manual signature image of the authorised signatory */}
                 <div className="flex justify-center items-center mt-3 mb-1">
                   <img 
                     src="/signature-jayant-tomar.png" 
@@ -1782,81 +2442,11 @@ return (
       </tbody>
     </table>
 
-    {/* ✅ PaymentBanner Style (Inline - Extension me component use kiya hai) */}
-    <div className="mt-8 mb-12 no-print border-t border-slate-200 pt-6">
-      {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (
-        <div className="mb-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="bg-red-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse">
-              ⚡ LIMITED TIME DEAL
-            </span>
-            <div>
-              <h4 className="text-sm font-extrabold text-slate-900 uppercase">
-                Professional Renovation Estimate & Verified Report
-              </h4>
-              <p className="text-xs text-slate-600 font-medium">
-                Includes Instant PDF Download, Digital Sealing & Verification QR Code.
-              </p>
-            </div>
-          </div>
+    {/* Payment banner (inline) */}
+    {!isMobilePreview && actionsBlock}
 
-          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
-            <div className="text-right">
-              {pricingLoading ? (
-                <span className="text-xs text-slate-500 font-bold">Loading price...</span>
-              ) : (
-                <>
-                  {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="text-xs text-gray-400 line-through font-semibold">
-                        ₹ {pricingDisplay.mrp}/-
-                      </span>
-                      <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
-                        {pricingDisplay.discountPercent}% OFF
-                      </span>
-                    </div>
-                  )}
-                  <div className="text-lg font-black text-emerald-600 leading-tight">
-                    ₹ {pricingDisplay.price}{" "}
-                    <span className="text-xs font-bold text-slate-700">Only</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center justify-start gap-6">
-        {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
-          <button
-            onClick={handleSaveAndPrint}
-            disabled={isSaving}
-            className="bg-blue-600 text-white px-8 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
-          >
-            {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
-          </button>
-        ) : (
-          <button
-            onClick={handleRazorpayPayment}
-            disabled={pricingLoading}
-            className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {pricingLoading ? "⏳ LOADING PRICE..." : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
-          </button>
-        )}
-
-        <button
-          onClick={() => {
-            localStorage.removeItem("estimatePreview");
-            router.push("/estimate");
-          }}
-          className="bg-slate-700 text-white px-8 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
-        >
-          ⬅️ BACK TO INPUT
-        </button>
-      </div>
+  </div>
     </div>
-
+    {isMobilePreview && <div className="no-print w-full px-3 pb-6">{actionsBlock}</div>}
   </div>
 );}

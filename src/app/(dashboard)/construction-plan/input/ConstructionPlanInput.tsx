@@ -56,6 +56,11 @@ export default function ConstructionPlanInput() {
   const cadContainerRef = React.useRef<HTMLDivElement | null>(null);
   
   const [plotShape, setPlotShape] = useState<PlotShape | "IRREGULAR" | "L-SHAPE" | "">("" as any);
+  // v12: irregular plot - CAD me set hua side-angle / slant (planning plot ke shape ke hisaab se)
+  const [plotShapeParams, setPlotShapeParams] = useState<{ angles: Record<string, number>; slant: Record<string, string> }>({ angles: {}, slant: {} });
+  const handlePlotShapeParams = (p: { angles: Record<string, number>; slant: Record<string, string> }) => {
+    setPlotShapeParams((prev: any) => (JSON.stringify(prev) === JSON.stringify(p) ? prev : p));
+  };
 
   // CAD Interactive States
   const [cadZoom, setCadZoom] = useState(1.2);
@@ -322,8 +327,9 @@ export default function ConstructionPlanInput() {
         ...(prev[floor] || { area: 0 }),
         width,
         length,
-        area: area > 0 ? area : (prev[floor]?.area || 0)
-      }
+        area: area > 0 ? area : (prev[floor]?.area || 0),
+        userDims: true,
+      } as any
     }));
   };
 
@@ -752,6 +758,8 @@ export default function ConstructionPlanInput() {
         measurementUnit,
         roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
         plotShape: plotShape || "RECTANGLE",
+        plotAngles: plotShapeParams.angles,
+        plotSlant: plotShapeParams.slant,
         parkingSide,
         plotArea: safePlotArea,
         coverageType,
@@ -870,6 +878,8 @@ export default function ConstructionPlanInput() {
         roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
         parkingSide,
         plotShape: plotShape || "RECTANGULAR",
+        plotAngles: plotShapeParams.angles,
+        plotSlant: plotShapeParams.slant,
         plotArea, coverageType, plotDimensions, dimDetails, setbackInputs,
         boundaries: { north: boundaryNorth, south: boundarySouth, east: boundaryEast, west: boundaryWest },
         selectedFloors, floorData, floorBhkConfig, floorRooms, planningMode, floorSettings,
@@ -885,7 +895,7 @@ export default function ConstructionPlanInput() {
     caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
     selectedClientName, representative, measurementUnit, roadFacingOption,
     parkingSide,
-    plotShape,
+    plotShape, plotShapeParams,
     plotArea, coverageType, plotDimensions, dimDetails, setbackInputs, boundaryNorth,
     boundarySouth, boundaryEast, boundaryWest, selectedFloors, floorData, floorBhkConfig,
     floorRooms, planningMode, floorSettings,
@@ -1096,6 +1106,7 @@ export default function ConstructionPlanInput() {
         measurementUnit={measurementUnit}
         plotArea={plotArea}
         isMultiDimShape={isMultiDimShape}
+        onPlotShapeParamsChange={handlePlotShapeParams}
         boundaryNorth={boundaryNorth}
         setBoundaryNorth={setBoundaryNorth}
         boundarySouth={boundarySouth}

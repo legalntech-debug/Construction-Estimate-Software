@@ -1,13 +1,68 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import "./print.css";
 import { QRCodeSVG } from 'qrcode.react';
 import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";   // ✅ NEW
 import { getItemRate } from "@/lib/pricing";                              // ✅ NEW
+
+// The QR code and share link always point to the production verification page
+const VERIFY_BASE_URL = "https://construction-estimate-software.vercel.app";
+
+// Route of the remaining-work input form (change this single constant if the route differs)
+const REMAINING_FORM_ROUTE = "/remaining-work-estimate";
+
+// localStorage key that carries the input form data into this preview (and back again)
+const PREVIEW_STORAGE_KEY = "estimatePreview";
+const clearFlowStorage = () => {
+  try { localStorage.removeItem(PREVIEW_STORAGE_KEY); } catch {}
+};
+
+// A larger change in customer name / property address is treated as a new estimate (new ref no + new payment)
+const NAME_ADDRESS_CHANGE_LIMIT = 15; // Percent
+
+// True for a persisted reference number; false for temporary ones (REF-..., TEMP..., placeholders)
+const isRealRef = (r?: string | null) => !!r && !/^(REF-|TEMP)/i.test(r) && !r.includes("...");
+
+// Snapshot used to detect changes: name, address, plot area, rate, floor areas and totals
+const makeSnapshot = (e: any) => {
+  const fd = e?.floor_details && typeof e.floor_details === "object" ? e.floor_details : {};
+  const floors: Record<string, number> = {};
+  Object.keys(fd).sort().forEach((k) => { floors[k] = Number(fd[k]?.area || 0); });
+  return JSON.stringify({
+    n: String(e?.customer_name || "").trim().toUpperCase(),
+    a: String(e?.property_address || "").trim().toUpperCase(),
+    p: Number(e?.plot_area || 0),
+    r: Number(e?.rate_per_sqft || 0),
+    b: Number(e?.total_builtup_area || 0),
+    t: Math.round(Number(e?.total_value ?? e?.total_construction_cost ?? e?.construction_cost ?? 0)),
+    f: floors,
+  });
+};
+
+// Returns how much a text value has changed, as a percentage (character-level Levenshtein distance),
+// so that a same-length replacement (e.g. RAMESH -> SURESH) is still counted as a change.
+const calculatePercentageChange = (str1: string, str2: string) => {
+  const a = (str1 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const b = (str2 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!a && !b) return 0;
+  if (!a || !b) return 100;
+  let prev = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let x = 1; x <= a.length; x++) {
+    const cur = [x];
+    for (let y = 1; y <= b.length; y++) {
+      cur[y] = Math.min(prev[y] + 1, cur[y - 1] + 1, prev[y - 1] + (a[x - 1] === b[y - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return (prev[b.length] / Math.max(a.length, b.length)) * 100;
+};
+
+// File name used for the PDF and as the default name in the browser's "Save as PDF" dialog
+const sanitizeForFile = (v: any) =>
+  String(v || "").trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_.-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
 
 const slabConfig: any = {
   500: { door: 0.1, plumb: 0.25, elec: 0.25, paint: 0.1,floor: 0.3 },
@@ -93,6 +148,17 @@ export default function RemainingWorkEstimatePreviewPage() {
   const [finalFee, setFinalFee] = useState(150);
   const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/...");
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+  const [isPdfBusy, setIsPdfBusy] = useState(false);
+  const [justPaid, setJustPaid] = useState(false);
+  const [needsNewPayment, setNeedsNewPayment] = useState(false);
+  const [originalRefNo, setOriginalRefNo] = useState<string | null>(null);
+  const [newPaymentReason, setNewPaymentReason] = useState<string>("");
+  const initialEstimateRef = useRef<string | null>(null); // Snapshot of the estimate as persisted in the database (baseline for change detection)
+  const savedPaymentRef = useRef<{ order_id: any; payment_id: any; user_payment: any }>({ order_id: null, payment_id: null, user_payment: null }); // Payment identifiers already stored for this ref no
+  const goingToFormRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const allowPrintRef = useRef(false); // true only while the in-app Print button triggers window.print()
 
   // ✅ NEW: Dynamic Pricing States
   const [gatewayFeeAmount, setGatewayFeeAmount] = useState<number>(21);
@@ -107,24 +173,77 @@ export default function RemainingWorkEstimatePreviewPage() {
   const [pricingLoading, setPricingLoading] = useState(true);
   const [estimateStateName, setEstimateStateName] = useState<string>("MADHYA PRADESH");
 
-  const checkEstimatePaymentStatus = async (currentRefNo: string) => {
-    if (!currentRefNo) return;
-
+  const checkEstimatePaymentStatus = async (
+    refNo: string,
+    current?: { customer_name?: string; property_address?: string }
+  ) => {
+    if (!refNo) return;
     try {
-      const { data } = await supabase
+      const { data: estData } = await supabase
         .from('estimates')
-        .select('platform_payment_status, payment_status, status')
-        .eq('ref_no', currentRefNo)
+        .select('*')
+        .eq('ref_no', refNo)
         .maybeSingle();
 
-      if (data) {
-        if (data.platform_payment_status === 'paid' || data.payment_status === 'paid' || data.status === 'paid') {
-          setIsAlreadyPaid(true);
-          setIsPaid(true);
-          setRequiresPayment(false);
-        }
+      // 15% rule: compare the current name/address with the saved (paid) record
+      const pct = (dbVal: any, curVal: any) =>
+        String(dbVal || "").trim() ? calculatePercentageChange(String(dbVal), String(curVal || "")) : 0;
+      const changedTooMuch = !!(estData && current) && (
+        pct(estData.customer_name, current.customer_name) > NAME_ADDRESS_CHANGE_LIMIT ||
+        pct(estData.property_address, current.property_address) > NAME_ADDRESS_CHANGE_LIMIT
+      );
+
+      let alreadyPaid = !!estData && (estData.platform_payment_status === 'paid' || estData.payment_status === 'paid' || estData.status === 'paid');
+
+      if (!alreadyPaid) {
+        const { data: misData } = await supabase
+          .from('mis_records')
+          .select('platform_payment_status')
+          .eq('ref_no', refNo)
+          .maybeSingle();
+        alreadyPaid = !!misData && misData.platform_payment_status === 'paid';
       }
-    } catch (err) {}
+
+      if (!alreadyPaid) return;
+
+      if (changedTooMuch) {
+        // Treat as a new estimate: detach from the old ref/id and require a new payment
+        setNeedsNewPayment(true);
+        setNewPaymentReason("CHANGED");
+        setOriginalRefNo(refNo);
+        setIsAlreadyPaid(false);
+        setIsPaid(false);
+        setRequiresPayment(true);
+        setCurrentRefNo("LNT/26-27/...");
+        setEstimate((prev: any) => (prev ? { ...prev, id: null, ref_no: null } : prev));
+        return;
+      }
+
+      if (estData) {
+        // Baseline: values persisted in the database (used to detect print-only / minor-change cases)
+        initialEstimateRef.current = makeSnapshot({
+          customer_name: estData.customer_name,
+          property_address: estData.property_address,
+          plot_area: estData.plot_area,
+          rate_per_sqft: estData.rate_per_sqft,
+          total_builtup_area: estData.total_builtup_area,
+          total_value: estData.total_construction_cost ?? estData.total_value,
+          floor_details: estData.floor_details,
+        });
+        // Keep the stored payment identifiers so that a same-ref update never wipes them
+        savedPaymentRef.current = {
+          order_id: estData.order_id ?? estData.razorpay_order_id ?? null,
+          payment_id: estData.payment_id ?? estData.razorpay_payment_id ?? null,
+          user_payment: estData.user_payment ?? null,
+        };
+      }
+
+      setIsAlreadyPaid(true);
+      setIsPaid(true);
+      setRequiresPayment(false);
+    } catch (err) {
+      console.error("Error checking payment status:", err);
+    }
   };
 
   // ═══════════════════════════════════════════════════════════
@@ -195,49 +314,31 @@ export default function RemainingWorkEstimatePreviewPage() {
   }, [estimateStateName, estimate?.state_name, currentUser?.state, userCategory]);
 
   useEffect(() => {
-    const savedData = JSON.parse(localStorage.getItem("estimatePreview") || "{}");
-    if (savedData?.ref_no) {
-      checkEstimatePaymentStatus(savedData.ref_no);
-    }
-  }, []);
-
-  useEffect(() => {
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-      if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-        e.preventDefault();
-        alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
-      }
-    }
-  };
-
-  window.addEventListener('keydown', handleKeyDown);
-  return () => {
-    window.removeEventListener('keydown', handleKeyDown);
-  };
-}, [isPaid, isAlreadyPaid, userCategory, gatewayFeeAmount]);
-
-  useEffect(() => {
-    const checkExistingPayment = async () => {
-      const savedData = localStorage.getItem("estimatePreview");
-      if (!savedData) return;
+    const loadEstimateFromStorage = async () => {
       try {
-        const parsed = JSON.parse(savedData);
-        if (!parsed.ref_no) return;
+        const rawData = typeof window !== 'undefined' ? localStorage.getItem(PREVIEW_STORAGE_KEY) : null;
+        if (!rawData) return;
+        const parsedData = JSON.parse(rawData);
 
-        const { data } = await supabase
-          .from('mis_records')
-          .select('platform_payment_status')
-          .eq('ref_no', parsed.ref_no)
-          .maybeSingle();
-
-        if (data && data.platform_payment_status === 'paid') {
-          setIsAlreadyPaid(true);
-          setIsPaid(true);
+        if (parsedData?.force_new_ref && !isRealRef(parsedData.ref_no)) {
+          // The input page has already decided on a new ref no + new payment (e.g. estimate older than 60 days)
+          setNeedsNewPayment(true);
+          setNewPaymentReason(parsedData.new_ref_reason || "EXPIRED_60_DAYS");
+          setOriginalRefNo(parsedData.previous_ref_no || null);
+          setCurrentRefNo(parsedData.ref_no || "LNT/26-27/...");
+        } else if (parsedData?.ref_no) {
+          setCurrentRefNo(parsedData.ref_no);
+          await checkEstimatePaymentStatus(parsedData.ref_no, {
+            customer_name: parsedData.customer_name,
+            property_address: parsedData.property_address,
+          });
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error("Error loading estimate from storage:", err);
+      }
     };
-    checkExistingPayment();
+
+    loadEstimateFromStorage();
   }, []);
 
   useEffect(() => {
@@ -273,57 +374,283 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   const handleRazorpayPayment = () => handlePayment();
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-          e.preventDefault();
-          alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
-          handlePayment();
-        }
-      }
-    };
+  // Base name shared by the PDF file and the browser's print dialog: <ref no>_<customer name>_LnT-Consultancy
+  const exportBaseName = () =>
+    [sanitizeForFile(estimate?.ref_no || "estimate"), sanitizeForFile(estimate?.customer_name), "LnT-Consultancy"]
+      .filter(Boolean)
+      .join("_");
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isPaid, isAlreadyPaid, userCategory, gatewayFeeAmount]);
+  const pdfFileName = () => `${exportBaseName()}.pdf`;
+
+  // Open the print dialog only after React has rendered the final (paid, with ref no) page
+  const printAfterRender = () =>
+    new Promise<void>((resolve) => {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          // Printing is only permitted when it is started from the in-app Print button
+          allowPrintRef.current = true;
+          // The document title becomes the default file name in "Save as PDF"
+          const previousTitle = document.title;
+          document.title = exportBaseName();
+          const restoreTitle = () => { document.title = previousTitle; };
+          window.addEventListener("afterprint", restoreTitle, { once: true });
+          setTimeout(restoreTitle, 60000); // Fallback in case afterprint never fires
+          try {
+            window.print();
+          } finally {
+            setTimeout(() => { allowPrintRef.current = false; }, 1000);
+          }
+          resolve();
+        })
+      );
+    });
 
   const handleSaveAndPrint = async () => {
-    if (!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') {
-      alert(`Please complete the payment (₹${gatewayFeeAmount}) before printing or saving the estimate!`);
-      handlePayment();
-      return;
-    }
-
-    if (isSaving) return;
     setIsSaving(true);
     try {
-      if (!estimate?.id && estimate?.ref_no) {
-        const { data: existingData } = await supabase
-          .from('estimates')
-          .select('id')
-          .eq('ref_no', estimate.ref_no)
-          .maybeSingle();
-
-        if (!existingData) {
-          await supabase.from('estimates').insert([
-            {
-              ref_no: estimate.ref_no,
-              customer_name: estimate.customer_name,
-              property_address: estimate.property_address,
-              total_builtup_area: estimate.total_builtup_area,
-              construction_cost: estimate.construction_cost || estimate.total_value,
-            }
-          ]);
-        }
-      }
-      window.print();
+      const ok = await ensureSaved();
+      if (!ok) return;
+      await printAfterRender();
     } catch (error) {
-      console.error("Print error:", error);
+      console.error("Save failed", error);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Print-only / no change              -> database is not touched (same ref no, no update, no new charge)
+  // Minor change (name/address within 15%, or plot/floor area/rate/items) -> updates the SAME ref no
+  // Major change / new estimate         -> handleSaveAndFinalize creates a new ref no and requires payment
+  const isUnchangedFromSaved = () =>
+    !needsNewPayment &&
+    isRealRef(estimate?.ref_no) &&
+    !!initialEstimateRef.current &&
+    makeSnapshot(estimate) === initialEstimateRef.current;
+
+  const ensureSaved = async (): Promise<boolean> => {
+    if (isUnchangedFromSaved()) return true;
+    const ok = await handleSaveAndFinalize();
+    if (ok) await new Promise((r) => setTimeout(r, 500)); // Allow the new ref no to render before capturing/printing
+    return ok;
+  };
+
+  const isExportReady = () =>
+    (isPaid || isAlreadyPaid || userCategory === 'ADMIN') &&
+    !!estimate?.ref_no && !String(estimate.ref_no).startsWith("TEMP") && !String(estimate.ref_no).includes("...");
+
+  // Converts the estimate currently on screen into a paginated A4 PDF.
+  // - Layout is captured at a fixed A4 width so the result does not depend on the screen size.
+  // - Page breaks are only placed between table rows / top-level sections, so no row is ever cut in half.
+  // - A block that does not fit on the current page moves to the next page; the last page is never
+  //   left with only a tiny block (a few preceding rows are carried over with it).
+  // - Every page carries a "Page X of Y" footer.
+  const buildPdfBlob = async (): Promise<Blob> => {
+    const el = printRef.current;
+    if (!el) throw new Error("Estimate area not found");
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import("html2canvas-pro"),
+      import("jspdf"),
+    ]);
+
+    const SCALE = 3;
+    const CAPTURE_WIDTH_PX = 703; // 186 mm (A4 width minus 12 mm side margins) at 96 DPI, same as the print layout
+    const breakCandidatesCss: number[] = []; // safe break offsets (CSS px) measured in the cloned DOM
+
+    // Collect the @media print rules of the page so the PDF uses exactly the same compact layout as the printout
+    let printCss = "";
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try { rules = sheet.cssRules; } catch { continue; } // skip cross-origin stylesheets
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSMediaRule && /print/i.test(rule.media.mediaText)) {
+          for (const inner of Array.from(rule.cssRules)) {
+            if (inner instanceof CSSStyleRule) printCss += inner.cssText + "\n";
+          }
+        }
+      }
+    }
+
+    const canvas = await html2canvas(el, {
+      scale: SCALE,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      windowWidth: 1100,
+      ignoreElements: (node: Element) =>
+        node.classList?.contains("no-print") || node.classList?.contains("draft-watermark"),
+      onclone: (clonedDoc: Document, clonedEl: HTMLElement) => {
+        // Remove UI-only elements from the layout (print.css forces .no-print to display:block, hence !important)
+        clonedDoc.querySelectorAll(".no-print, .draft-watermark").forEach((n) => {
+          (n as HTMLElement).style.setProperty("display", "none", "important");
+        });
+
+        // html2canvas does not lay out <textarea> text reliably (alignment/wrapping), so render them as plain blocks
+        clonedDoc.querySelectorAll("textarea").forEach((node) => {
+          const ta = node as HTMLTextAreaElement;
+          const cs = clonedDoc.defaultView!.getComputedStyle(ta);
+          const block = clonedDoc.createElement("div");
+          block.textContent = ta.value;
+          ["font-family", "font-size", "font-weight", "line-height", "letter-spacing", "color", "text-align", "text-transform"].forEach((p) =>
+            block.style.setProperty(p, cs.getPropertyValue(p))
+          );
+          block.style.whiteSpace = "pre-wrap";
+          block.style.width = "100%";
+          ta.parentNode?.replaceChild(block, ta);
+        });
+
+        // Apply the print rules to the cloned document, then pin the root to the A4 content width
+        const styleEl = clonedDoc.createElement("style");
+        styleEl.textContent = printCss;
+        clonedDoc.head.appendChild(styleEl);
+
+        const root = clonedEl;
+        const force = (prop: string, value: string) => root.style.setProperty(prop, value, "important");
+        force("position", "relative");
+        force("top", "0");
+        force("left", "0");
+        force("width", `${CAPTURE_WIDTH_PX}px`);
+        force("max-width", `${CAPTURE_WIDTH_PX}px`);
+        force("min-height", "0");
+        force("margin", "0");
+        force("padding", "0");
+
+        // Measure the positions where a page break is allowed
+        const rootTop = root.getBoundingClientRect().top;
+        const addCandidate = (node: Element) => {
+          const r = node.getBoundingClientRect();
+          if (r.height > 0) breakCandidatesCss.push(r.bottom - rootTop);
+        };
+        // Between table body rows (never right after a table header row)
+        root.querySelectorAll("tr").forEach((tr) => {
+          if (!tr.closest("thead")) addCandidate(tr);
+        });
+        // Between top-level sections (never right after a heading)
+        Array.from(root.children).forEach((child) => {
+          if (!/^H[1-3]$/.test(child.tagName) && !child.querySelector("h1, h2, h3")) addCandidate(child);
+        });
+      },
+    });
+
+    const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const marginX = 12; // identical to the print margins (A4: 12 mm sides, 10 mm top, 14 mm bottom)
+    const marginTop = 10;
+    const marginBottom = 14; // space reserved for the page number footer
+    const imgW = pageW - marginX * 2;
+    const pxPerMm = canvas.width / imgW;
+    const pageContentPx = Math.floor((pageH - marginTop - marginBottom) * pxPerMm);
+    const minFillPx = Math.floor(pageContentPx * 0.3);
+
+    const candidates = Array.from(
+      new Set(
+        breakCandidatesCss
+          .map((v) => Math.round(v * SCALE))
+          .filter((v) => v > 0 && v < canvas.height)
+      )
+    ).sort((a, b) => a - b);
+
+    // Build page edges: break at the last safe position that still fits on the page
+    const edges: number[] = [0];
+    while (canvas.height - edges[edges.length - 1] > pageContentPx) {
+      const start = edges[edges.length - 1];
+      const limit = start + pageContentPx;
+      let end = limit; // hard cut only if a single unbreakable block is taller than a page
+      for (let i = candidates.length - 1; i >= 0; i--) {
+        if (candidates[i] <= limit && candidates[i] > start + minFillPx) {
+          end = candidates[i];
+          break;
+        }
+      }
+      edges.push(end);
+    }
+    edges.push(canvas.height);
+
+    // Avoid a nearly empty last page: carry a few preceding rows over together with the last block
+    if (edges.length >= 3) {
+      const lastStart = edges[edges.length - 2];
+      const minLastPx = Math.floor(pageContentPx * 0.35);
+      if (canvas.height - lastStart < minLastPx) {
+        const prevStart = edges[edges.length - 3];
+        const target = canvas.height - minLastPx;
+        let moved = -1;
+        for (const c of candidates) {
+          if (c > prevStart + minFillPx && c <= target) moved = c;
+        }
+        if (moved > 0 && canvas.height - moved <= pageContentPx) edges[edges.length - 2] = moved;
+      }
+    }
+
+    const totalPages = edges.length - 1;
+    for (let p = 0; p < totalPages; p++) {
+      const y0 = edges[p];
+      const h = edges[p + 1] - y0;
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width;
+      slice.height = h;
+      const ctx = slice.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, slice.width, h);
+      ctx.drawImage(canvas, 0, y0, canvas.width, h, 0, 0, canvas.width, h);
+
+      if (p > 0) pdf.addPage();
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.95), "JPEG", marginX, marginTop, imgW, h / pxPerMm);
+
+      pdf.setFontSize(8);
+      pdf.setTextColor(68, 68, 68);
+      pdf.text(`Page ${p + 1} of ${totalPages}`, pageW / 2, pageH - 6, { align: "center" });
+    }
+    return pdf.output("blob");
+  };
+
+  const downloadBlob = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = pdfFileName();
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!isExportReady() || isPdfBusy) return;
+    setIsPdfBusy(true);
+    try {
+      if (!(await ensureSaved())) return;
+      downloadBlob(await buildPdfBlob());
+    } catch (err) {
+      console.error("PDF error:", err);
+      alert("PDF nahi ban paya. Kripya dobara try karein.");
+    } finally {
+      setIsPdfBusy(false);
+    }
+  };
+
+  const handleSharePdf = async () => {
+    if (!isExportReady() || isPdfBusy) return;
+    setIsPdfBusy(true);
+    try {
+      if (!(await ensureSaved())) return;
+      const blob = await buildPdfBlob();
+      const file = new File([blob], pdfFileName(), { type: "application/pdf" });
+      const verifyUrl = `${VERIFY_BASE_URL}/verify-estimate?ref=${estimate?.ref_no || ""}`;
+      const text = `Remaining Work Estimate | Ref No: ${estimate?.ref_no}\nCustomer: ${estimate?.customer_name || ""}\nVerify: ${verifyUrl}`;
+      const nav: any = navigator;
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: "Remaining Work Estimate", text });
+      } else {
+        // Desktop / unsupported browser fallback: download the PDF and open WhatsApp with the verification link
+        downloadBlob(blob);
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.error("Share error:", err);
+        alert("Share nahi ho paya. Kripya 'Download PDF' use karein.");
+      }
+    } finally {
+      setIsPdfBusy(false);
     }
   };
 
@@ -338,7 +665,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         });
       }
 
-      // ✅ FIX: Use dynamic price
+      // Use the dynamic price from the pricing configuration
       const dynamicAmount = gatewayFeeAmount || 21;
 
       const res = await fetch("/api/analyze/payment/create-order", {
@@ -371,6 +698,7 @@ export default function RemainingWorkEstimatePreviewPage() {
               p_user_payment: dynamicAmount
             };
 
+            setNeedsNewPayment(false);
             setIsPaid(true);
             setIsAlreadyPaid(true);
             await handleSaveAndFinalize(paymentDetails);
@@ -378,9 +706,10 @@ export default function RemainingWorkEstimatePreviewPage() {
             const rzpElement = document.querySelector('.razorpay-checkout-frame');
             if (rzpElement) { rzpElement.remove(); }
             
-            window.print();
-            setTimeout(() => { router.push('/dashboard'); }, 3000);
+            // After payment, stay on the finalized page (with ref no); no automatic print or redirect
+            window.scrollTo({ top: 0, behavior: "smooth" });
           } catch (error) {
+            console.error("Payment sync error:", error);
             alert("Payment successful but system failed to update status.");
           }
         },
@@ -394,6 +723,7 @@ export default function RemainingWorkEstimatePreviewPage() {
       const rzp = new (window as any).Razorpay(options);
       rzp.open();
     } catch (err) {
+      console.error("Payment Error:", err);
       alert("Payment initialization failed. Please try again.");
     }
   };
@@ -421,14 +751,29 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   useEffect(() => {
     if (currentUser) {
-      if (userCategory === 'ADMIN') {
+      if (userCategory === 'ADMIN' || isPaid || isAlreadyPaid) {
         setRequiresPayment(false);
+        setValidationReason("");
       } else {
         setRequiresPayment(true);
-        setValidationReason("Note: To print this estimate, please complete the payment process.");
+        setValidationReason(
+          needsNewPayment
+            ? (newPaymentReason === "EXPIRED_60_DAYS"
+                ? `⚠️ Purana estimate 60 din se zyada purana hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`
+                : `⚠️ Customer name ya property address ${NAME_ADDRESS_CHANGE_LIMIT}% se zyada badal gaya hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`)
+            : "Note: To print this estimate, please complete the payment process."
+        );
       }
     }
-  }, [currentUser, userCategory]);
+  }, [currentUser, userCategory, isPaid, isAlreadyPaid, needsNewPayment, originalRefNo, newPaymentReason]);
+
+  // While a new payment is pending, prevent any other effect from marking the estimate as paid
+  useEffect(() => {
+    if (needsNewPayment && (isPaid || isAlreadyPaid)) {
+      setIsPaid(false);
+      setIsAlreadyPaid(false);
+    }
+  }, [needsNewPayment, isPaid, isAlreadyPaid]);
 
   useEffect(() => {
     if (estimate) {
@@ -474,34 +819,33 @@ export default function RemainingWorkEstimatePreviewPage() {
     return data ? Number(data[targetColumn] || 0) : 0;
   };
 
-  const handleSaveAndFinalize = async (paymentData?: any) => {
-    const isAuthorized = userCategory === 'ADMIN' || isPaid || paymentData;
+  const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
+    const isAuthorized = userCategory === 'ADMIN' || isPaid || isAlreadyPaid || paymentData;
     if (!isAuthorized) {
       alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
       handlePayment();
-      return;
+      return false;
     }
 
-    if (isSaving) return;
+    if (isSaving) return false;
 
     const now = new Date();
     const userId = currentUser?.id;
-    if (!userId) { alert("User ID not found!"); return; }
+    if (!userId) { alert("User ID not found!"); return false; }
 
     try {
       setIsSaving(true);
 
-      let activeEstimateId = estimate?.id || null;
-      let activeRefNo = estimate?.ref_no && !estimate?.ref_no.startsWith("TEMP") && !estimate?.ref_no.includes("...") 
-        ? estimate.ref_no 
-        : null;
+      // New-payment case: do not overwrite the old record; create a new record with a new ref no
+      let activeEstimateId = needsNewPayment ? null : (estimate?.id || null);
+      let activeRefNo = needsNewPayment ? null : (isRealRef(estimate?.ref_no) ? estimate.ref_no : null);
       let skipNewRefGeneration = false;
 
       if (activeRefNo) {
         skipNewRefGeneration = true;
       }
 
-      if (!activeEstimateId && activeRefNo && !activeRefNo.startsWith("TEMP")) {
+      if (!activeEstimateId && activeRefNo) {
         const { data: foundRec } = await supabase
           .from("estimates")
           .select("id")
@@ -513,7 +857,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         }
       }
 
-      if (!activeRefNo) {
+      if (!activeRefNo && !needsNewPayment) {
         const { data: duplicate } = await supabase
           .from("estimates")
           .select("id, ref_no")
@@ -529,7 +873,7 @@ export default function RemainingWorkEstimatePreviewPage() {
             skipNewRefGeneration = true;
           } else {
             setIsSaving(false);
-            return;
+            return false;
           }
         }
       }
@@ -587,9 +931,10 @@ export default function RemainingWorkEstimatePreviewPage() {
         p_ref_no: activeRefNo,
         p_status: 'pending',
         p_payment_status: paymentData?.p_payment_status || 'paid',
-        p_order_id: paymentData?.p_order_id || null,
-        p_payment_id: paymentData?.p_payment_id || null,
-        p_user_payment: Number(paymentData?.p_user_payment || gatewayFeeAmount || 21)
+        // On a same-ref update the stored payment identifiers are carried forward instead of being cleared
+        p_order_id: paymentData?.p_order_id || (needsNewPayment ? null : savedPaymentRef.current.order_id) || null,
+        p_payment_id: paymentData?.p_payment_id || (needsNewPayment ? null : savedPaymentRef.current.payment_id) || null,
+        p_user_payment: Number(paymentData?.p_user_payment || (needsNewPayment ? 0 : savedPaymentRef.current.user_payment) || gatewayFeeAmount || 21)
       };
 
       const { data, error } = await supabase.rpc('rpc_save_estimate', payload);
@@ -601,16 +946,39 @@ export default function RemainingWorkEstimatePreviewPage() {
         }
         
         const result = data[0];
+        const savedEstimate = { ...estimate, id: result.estimate_id, ref_no: result.ref_no };
         setEstimate((prev: any) => ({ ...prev, id: result.estimate_id, ref_no: result.ref_no }));
         setIsFinalized(true);
         setIsPaid(true);
-        localStorage.removeItem("renovationEstimatePreview");
-        localStorage.removeItem("estimatePreview");
-        alert(`Saved successfully! Ref: ${result.ref_no}`);
-        setTimeout(() => window.print(), 500);
+        setCurrentRefNo(result.ref_no);
+        if (paymentData) setJustPaid(true);
+        setNeedsNewPayment(false);
+        setOriginalRefNo(null);
+        setNewPaymentReason("");
+        if (paymentData) {
+          savedPaymentRef.current = {
+            order_id: paymentData.p_order_id || null,
+            payment_id: paymentData.p_payment_id || null,
+            user_payment: paymentData.p_user_payment ?? null,
+          };
+        }
+        // The persisted values are now the baseline
+        initialEstimateRef.current = makeSnapshot(savedEstimate);
+
+        // Keep the saved data and ref no available when returning to the input form for corrections
+        try {
+          localStorage.setItem(
+            PREVIEW_STORAGE_KEY,
+            JSON.stringify({ ...savedEstimate, payment_status: 'paid', is_paid: true, force_new_ref: false, new_ref_reason: null })
+          );
+        } catch {}
+        return true;
       }
+      return false;
     } catch (error: any) {
+      console.error("Save Error:", error);
       alert("Error: " + (error.message || "Failed to save data"));
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -658,13 +1026,14 @@ export default function RemainingWorkEstimatePreviewPage() {
 
   useEffect(() => {
     const loadAndVerifyEstimateData = async () => {
-      const data = localStorage.getItem("estimatePreview");
+      const data = localStorage.getItem(PREVIEW_STORAGE_KEY);
       if (!data) return;
 
       const estimateData = JSON.parse(data);
       let workingEstimate = { ...estimateData, id: estimateData.id || null };
+      const forcedNew = !!workingEstimate.force_new_ref && !isRealRef(workingEstimate.ref_no);
 
-      if (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-")) {
+      if (!forcedNew && (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-"))) {
         try {
           const { data: existingRecord } = await supabase
             .from("estimates")
@@ -706,7 +1075,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         statusCheck === "SUCCESS" ||
         paymentStatusCheck === "PAID";
 
-      if (isPaidFlag) {
+      if (isPaidFlag && !forcedNew) {
         setIsPaid(true);
         setIsAlreadyPaid(true);
       }
@@ -745,28 +1114,96 @@ export default function RemainingWorkEstimatePreviewPage() {
     checkPaymentStatus();
   }, [estimate?.id]);
 
+  // Output protection: printing is only possible through the in-app button after payment,
+  // and common capture shortcuts are blocked. Note: browsers cannot fully prevent OS-level screenshots
+  // or screen recording, so these are deterrents; the DRAFT watermark and the withheld signature/QR
+  // (until payment) are the actual protection.
   useEffect(() => {
-    const preventSystemPrint = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+    const paidView = isPaid || isAlreadyPaid || userCategory === 'ADMIN';
+    const body = document.body;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const key = (e.key || "").toLowerCase();
+      const mod = e.ctrlKey || e.metaKey;
+      const isPrint = mod && key === 'p';
+      const isCapture = key === 'printscreen' || (e.metaKey && e.shiftKey && key === 's');
+      const isDevOrSave =
+        isProd && (key === 'f12' || (mod && ['s', 'u'].includes(key)) || (mod && e.shiftKey && ['i', 'j', 'c'].includes(key)));
+      if (isPrint || isCapture || isDevOrSave) {
         e.preventDefault();
-        alert("System Print disabled! Kripya software mein diye gaye 'Save & Print' button ka hi upyog karein.");
-        return false;
+        e.stopPropagation();
+        if (key === 'printscreen') {
+          try { navigator.clipboard?.writeText(""); } catch {}
+        }
+        if (isPrint) alert("System print is disabled. Please use the Print button on this page.");
       }
     };
+    const blockEvent = (e: Event) => e.preventDefault();
 
-    const preventRightClick = (e: MouseEvent) => {
-      e.preventDefault();
+    // Printing from the browser menu or any other route is locked unless it came from the Print button
+    const onBeforePrint = () => {
+      if (!(allowPrintRef.current && paidView)) body.classList.add("print-locked");
     };
+    const onAfterPrint = () => {
+      body.classList.remove("print-locked");
+      allowPrintRef.current = false;
+    };
+    const mq = window.matchMedia ? window.matchMedia("print") : null;
+    const onMq = (e: MediaQueryListEvent) => (e.matches ? onBeforePrint() : onAfterPrint());
 
-    window.addEventListener('keydown', preventSystemPrint, true);
-    window.addEventListener('contextmenu', preventRightClick);
+    // Unpaid drafts are blurred whenever the window loses focus (typical for snipping / recording tools)
+    const lock = () => body.classList.add("screen-guard");
+    const unlock = () => {
+      if (document.hasFocus() && !document.hidden) body.classList.remove("screen-guard");
+    };
+    const onVisibility = () => (document.hidden ? lock() : unlock());
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('contextmenu', blockEvent);
+    window.addEventListener('beforeprint', onBeforePrint);
+    window.addEventListener('afterprint', onAfterPrint);
+    mq?.addEventListener?.('change', onMq);
+    if (!paidView) {
+      window.addEventListener('blur', lock);
+      window.addEventListener('focus', unlock);
+      document.addEventListener('visibilitychange', onVisibility);
+      document.addEventListener('copy', blockEvent);
+      document.addEventListener('cut', blockEvent);
+      document.addEventListener('dragstart', blockEvent);
+    }
 
     return () => {
-      window.removeEventListener('keydown', preventSystemPrint, true);
-      window.removeEventListener('contextmenu', preventRightClick);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('contextmenu', blockEvent);
+      window.removeEventListener('beforeprint', onBeforePrint);
+      window.removeEventListener('afterprint', onAfterPrint);
+      mq?.removeEventListener?.('change', onMq);
+      window.removeEventListener('blur', lock);
+      window.removeEventListener('focus', unlock);
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('copy', blockEvent);
+      document.removeEventListener('cut', blockEvent);
+      document.removeEventListener('dragstart', blockEvent);
+      body.classList.remove("print-locked", "screen-guard");
+    };
+  }, [isPaid, isAlreadyPaid, userCategory]);
+
+  // Automatically clear the saved input data when the user leaves the form/preview flow (e.g. to the dashboard).
+  // The data is preserved when navigating back to the input form (Back to Input / browser back).
+  useEffect(() => {
+    isMountedRef.current = true;
+    const onPop = () => { goingToFormRef.current = true; };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      isMountedRef.current = false;
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToFormRef.current) clearFlowStorage();
+      }, 0);
     };
   }, []);
-  
+
   const loadMasterItem = async (selectedRate: number) => {
     const { data, error } = await supabase.from("master_items").select("*");
     if (error || !data) return;
@@ -1436,33 +1873,214 @@ export default function RemainingWorkEstimatePreviewPage() {
   }
 
  return (
-    <div className="print-area print-page p-10 bg-white min-h-screen relative">
+    <div ref={printRef} className={`print-area print-page p-10 bg-white min-h-screen relative ${(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') ? "is-draft" : ""}`}>
       
-      <style jsx global>{`
-        @media print {
-          .no-print { display: none !important; }
-          .draft-watermark { display: none !important !important; }
-          
-          ${!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' ? 'body { display: none !important; }' : ''}
-        }
+<style jsx global>{`
+  @media print {
+    @page {
+      size: A4 portrait;
+      size: 210mm 297mm;
+      margin: 10mm 12mm 14mm 12mm;
+      @bottom-center {
+        content: "Page " counter(page) " of " counter(pages);
+        font-size: 8pt;
+        color: #444;
+      }
+    }
 
-        .draft-watermark {
-          position: fixed;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%) rotate(-35deg);
-          font-size: 130px;
-          font-weight: 900;
-          color: rgba(239, 68, 68, 0.15);
-          z-index: 9999;
-          pointer-events: none;
-          letter-spacing: 0.2em;
-          user-select: none;
-        }
-      `}</style>
+    body * {
+      visibility: hidden !important;
+    }
+
+    .print-area, .print-area * {
+      visibility: visible !important;
+    }
+
+    .print-area {
+      position: absolute !important;
+      left: 0 !important;
+      top: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      box-shadow: none !important;
+      border: none !important;
+    }
+
+    body, html, #__next, main {
+      background: #ffffff !important;
+      color: #000000 !important;
+      overflow: visible !important;
+      height: auto !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    .no-print, nav, aside, header, footer, button {
+      display: none !important;
+    }
+
+    thead {
+      display: table-row-group !important;
+    }
+
+    .report-header h1, .report-header h2, .company-title, .report-title {
+      font-size: 9px !important;
+      font-weight: bold !important;
+    }
+
+    .company-details, .header-text, .report-header, .header-container, .letterhead, .letterhead * {
+      font-size: 10px !important;
+      line-height: 1.15 !important;
+    }
+
+    .ref-date-container, .ref-no, .ref-number, .report-date, .date-container, .ref-section, .ref-details, .ref-details * {
+      font-size: 9.5px !important;
+      font-weight: bold !important;
+    }
+
+    .customer-details, .customer-details * {
+      font-size: 10px !important;
+      text-align: left !important;
+    }
+
+    table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      font-size: 10.5px !important; 
+      margin-bottom: 6px !important;
+    }
+
+    th {
+      font-weight: bold !important;
+      background-color: #f3f4f6 !important;
+      white-space: nowrap !important;
+      word-break: normal !important;
+      padding: 4px 2px !important;
+      font-size: 10px !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+
+    td {
+      padding: 3px 2px !important;
+      line-height: 1.2 !important;
+      vertical-align: top !important;
+    }
+
+    table:not(.estimate-table) {
+      table-layout: auto !important;
+    }
+
+    table.estimate-table {
+      table-layout: fixed !important;
+      width: 100% !important;
+    }
+
+    table.estimate-table th:nth-child(1), table.estimate-table td:nth-child(1) { width: 3.5% !important; text-align: center !important; }
+    table.estimate-table th:nth-child(2), table.estimate-table td:nth-child(2) { width: 38.5% !important; text-align: left !important; word-break: break-word !important; }
+    table.estimate-table th:nth-child(3), table.estimate-table td:nth-child(3) { width: 4% !important; text-align: center !important; white-space: nowrap !important; }
+    table.estimate-table th:nth-child(4), table.estimate-table td:nth-child(4) { width: 8.5% !important; text-align: right !important; white-space: nowrap !important; }
+    table.estimate-table th:nth-child(5), table.estimate-table td:nth-child(5) { width: 5.5% !important; text-align: center !important; white-space: nowrap !important; }
+    table.estimate-table th:nth-child(6), table.estimate-table td:nth-child(6) { width: 14% !important; text-align: right !important; white-space: nowrap !important; }
+    
+    table.estimate-table th:nth-child(7), 
+    table.estimate-table td:nth-child(7),
+    table.estimate-table tfoot td,
+    table.estimate-table tr.total-row td,
+    table.estimate-table tr:last-child td { 
+      width: 26% !important; 
+      text-align: right !important; 
+      white-space: nowrap !important; 
+      word-break: keep-all !important;
+      font-weight: bold !important; 
+      font-size: 10px !important;
+    }
+
+    tr {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* If the disclaimer/signature block does not fit on the page, move it to the next page as a whole,
+       together with the last rows of the estimate table, leaving a little spacing above it */
+    .keep-together {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      margin-top: 8mm !important;
+    }
+    table.tail-keep {
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+    table.tail-keep tbody tr:nth-last-child(-n+4) {
+      page-break-after: avoid !important;
+      break-after: avoid !important;
+    }
+
+    .disclaimer-container, .disclaimer-section, .terms-container {
+      width: 100% !important;
+      margin-top: 6px !important;
+    }
+
+    .disclaimer-title, .terms-heading {
+      font-size: 8px !important;
+      font-weight: bold !important;
+    }
+
+    .disclaimer-text, .terms-text, .disclaimer-container p {
+      font-size: 8px !important;
+      line-height: 1.2 !important;
+      text-align: justify !important;
+    }
+
+    .draft-watermark {
+      display: block !important;
+      position: fixed !important;
+      top: 50% !important;
+      left: 50% !important;
+      transform: translate(-50%, -50%) rotate(-45deg) !important;
+      color: rgba(220, 38, 38, 0.08) !important;
+      z-index: 9999 !important;
+    }
+  }
+
+  .draft-watermark {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(-45deg) !important;
+    font-size: 8rem !important;
+    font-weight: 900 !important;
+    color: rgba(220, 38, 38, 0.08) !important;
+    pointer-events: none !important;
+    white-space: nowrap !important;
+    z-index: 9999 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1rem !important;
+  }
+
+  /* Defensive rules for the output-protection classes toggled by the page script */
+  @media print {
+    body.print-locked * { visibility: hidden !important; }
+  }
+  body.screen-guard .print-area { filter: blur(14px); }
+`}</style>
 
       {(!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN') && (
-        <div className="draft-watermark">DRAFT</div>
+        <div className="draft-watermark no-print">DRAFT</div>
+      )}
+
+      {justPaid && estimate?.ref_no && (
+        <div className="mb-6 p-4 border-2 border-emerald-500 bg-emerald-50 rounded-lg text-left no-print">
+          <p className="font-bold uppercase text-xs tracking-wider text-emerald-800 mb-1">✅ Payment Successful</p>
+          <p className="text-sm font-medium text-emerald-900">
+            Ref No: <span className="font-mono font-bold">{estimate.ref_no}</span>
+          </p>
+          <p className="text-xs text-emerald-800 mt-1">Ab aap niche se Print, PDF Download ya Share kar sakte hain.</p>
+        </div>
       )}
 
       {['ENGINEER', 'ARCHITECT'].includes(userCategory) && (
@@ -1514,7 +2132,7 @@ export default function RemainingWorkEstimatePreviewPage() {
       )}
 
       <div className="mb-6 border-b-2 border-black pb-4">
-        <div className="grid grid-cols-3 items-center">
+        <div className="grid items-center" style={{ gridTemplateColumns: "1fr auto 1.7fr", columnGap: "8px" }}>
           <div className="text-[12px] uppercase font-bold text-slate-700">
             {useCustomLetterhead ? (
               <p className="text-xl text-black font-bold uppercase">{customHeaderTitle || "ENTER HEADER TITLE"}</p>
@@ -1556,7 +2174,7 @@ export default function RemainingWorkEstimatePreviewPage() {
             )}
           </div>
 
-          <div className="text-[12px] text-right font-bold text-slate-700">
+          <div className="text-[12px] text-right font-bold text-slate-700 whitespace-nowrap">
             {useCustomLetterhead ? (
               <p className="text-sm text-black font-medium uppercase">{customSubtitle || "ENTER DESIGNATION"}</p>
             ) : (
@@ -1570,19 +2188,30 @@ export default function RemainingWorkEstimatePreviewPage() {
           </div>
         </div>
         <div className="mt-4 text-[15px] text-center font-bold text-slate-600 uppercase leading-relaxed border-t pt-2">
-          <textarea
-            value={legalText}
-            onChange={(e) => setLegalText(e.target.value)}
-            disabled={!useCustomLetterhead}
-            className={`w-full text-sm border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none text-center ${!useCustomLetterhead ? "bg-transparent cursor-default" : "bg-white"}`}
-            rows={3}
-          />
+          {useCustomLetterhead ? (
+            <textarea
+              value={legalText}
+              onChange={(e) => setLegalText(e.target.value)}
+              className="w-full text-sm border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none text-center bg-white"
+              rows={3}
+            />
+          ) : (
+            // Static text for the default letterhead: always centered, in the UI, print and PDF
+            <div className="w-full text-sm text-center whitespace-pre-wrap">{legalText}</div>
+          )}
           <hr className="w-full border border-black border-collapse mb-4"/>
         </div>
         <div className="flex justify-between items-center text-sm mt-2 px-1 font-semibold">
           <span className="font-semibold">
             <strong>REF NO:</strong>{" "}
-            <span className="font-mono font-bold text-slate-800">{estimate?.ref_no || "N/A"}</span>
+            <span className="font-mono font-bold text-slate-800">
+              {(() => {
+                if ((isPaid || isAlreadyPaid || userCategory === 'ADMIN') && isRealRef(estimate?.ref_no)) {
+                  return estimate.ref_no;
+                }
+                return "DRAFT";
+              })()}
+            </span>
           </span>
           <span>DATE: {new Date().toLocaleDateString('en-IN')}</span>
         </div>
@@ -1658,16 +2287,16 @@ export default function RemainingWorkEstimatePreviewPage() {
       </table>
 
       {masterItem && (
-        <table className="w-full border border-black border-collapse mt-6">
+        <table className="tail-keep w-full border border-black border-collapse mt-6 text-base">
           <thead>
             <tr>
-              <th className="border p-2">SR</th>
-              <th className="border p-2">DESCRIPTION</th>
-              <th className="border p-2">NOS</th>
-              <th className="border p-2">QTY</th>
-              <th className="border p-2">UNIT</th>
-              <th className="border p-2">RATE</th>
-              <th className="border p-2">AMOUNT</th>
+              <th className="border border-black p-2">SR</th>
+              <th className="border border-black p-2">DESCRIPTION</th>
+              <th className="border border-black p-2">NOS</th>
+              <th className="border border-black p-2">QTY</th>
+              <th className="border border-black p-2">UNIT</th>
+              <th className="border border-black p-2">RATE</th>
+              <th className="border border-black p-2">AMOUNT</th>
             </tr>
           </thead>
           <tbody>
@@ -1693,23 +2322,23 @@ export default function RemainingWorkEstimatePreviewPage() {
                 const showPercent = [masterItem.paint_putty_desc, masterItem.plumbing_desc, masterItem.electrical_desc, masterItem.flooring_desc].includes(row.description);
                 return (
                   <tr key={index}>
-                    <td className="border p-1 text-center">{index + 1}</td>
-                    <td className="border p-1 capitalize">{row.description?.toLowerCase()}</td>
-                    <td className="border p-1 text-center">{row.nos}</td>
-                    <td className="border p-1 text-center">{row.qty}</td>
-                    <td className="border p-1 text-center">{row.unit}</td>
-                    <td className="border p-1 text-center">
+                    <td className="border border-black p-1 text-center">{index + 1}</td>
+                    <td className="border border-black p-1 capitalize">{row.description?.toLowerCase()}</td>
+                    <td className="border border-black p-1 text-center">{row.nos}</td>
+                    <td className="border border-black p-1 text-center">{row.qty}</td>
+                    <td className="border border-black p-1 text-center">{row.unit}</td>
+                    <td className="border border-black p-1 text-center">
                       {row.unit === "LS" ? (showPercent ? `${calculatedPercent.toFixed(2)}%` : "-") : row.rate}
                     </td>
-                    <td className="border p-1 text-center">
+                    <td className="border border-black p-1 text-center">
                       {rowAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   </tr>
                 );
               })}
             <tr>
-              <td colSpan={6} className="border p-2 font-bold text-right">TOTAL AMOUNT</td>
-              <td className="border p-2 font-bold text-center">
+              <td colSpan={6} className="border border-black p-2 font-bold text-right">TOTAL AMOUNT</td>
+              <td className="border border-black p-2 font-bold text-center">
                 {estimateRows
                   .reduce((sum, row) => sum + (row.unit === "LS" ? (remainingBudget * (parseFloat(row.rate.toString().replace('%', '')) / 100)) : (Number(row.qty) * Number(row.rate))), 0)
                   .toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1719,7 +2348,7 @@ export default function RemainingWorkEstimatePreviewPage() {
         </table>
       )}
 
-      <table className="w-full border border-black border-collapse mt-6">
+      <table className="keep-together w-full border border-black border-collapse mt-6">
         <tbody>
           <tr>
             <td className="border border-black p-4 w-[60%] align-top">
@@ -1743,7 +2372,7 @@ export default function RemainingWorkEstimatePreviewPage() {
                   <div className="flex flex-row items-center justify-between gap-4 p-2">
                     <div className="flex flex-col items-center">
                       <QRCodeSVG 
-                        value={`${typeof window !== 'undefined' ? window.location.origin : 'https://construction-estimate-software.vercel.app'}/verify-estimate?ref=${estimate?.ref_no}`} 
+                        value={`${VERIFY_BASE_URL}/verify-estimate?ref=${estimate?.ref_no}`} 
                         size={60} 
                         level="H" 
                       />
@@ -1762,7 +2391,7 @@ export default function RemainingWorkEstimatePreviewPage() {
                     <img 
                       src="/signature-jayant-tomar.png" 
                       alt="Authorised Signatory" 
-                      className="h-32 w-auto object-contain mix-blend-multiply" 
+                      className="h-24 w-auto object-contain mix-blend-multiply" 
                     />
                   </div>
 
@@ -1823,15 +2452,31 @@ export default function RemainingWorkEstimatePreviewPage() {
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-start gap-6">
+        <div className="flex flex-wrap items-center justify-start gap-4">
           {(isPaid || isAlreadyPaid || userCategory === 'ADMIN') ? (
-            <button
-              onClick={handleSaveAndPrint}
-              disabled={isSaving}
-              className="bg-blue-600 text-white px-8 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
-            >
-              {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
-            </button>
+            <>
+              <button
+                onClick={handleSaveAndPrint}
+                disabled={isSaving}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-blue-700 transition font-bold uppercase tracking-wide flex items-center gap-2"
+              >
+                {isSaving ? "SAVING..." : "🖨️ PRINT ESTIMATE"}
+              </button>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isPdfBusy || isSaving || !isExportReady()}
+                className="bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-emerald-700 transition font-bold uppercase tracking-wide flex items-center gap-2 disabled:opacity-50"
+              >
+                {isPdfBusy ? "⏳ PLEASE WAIT..." : "⬇️ DOWNLOAD PDF"}
+              </button>
+              <button
+                onClick={handleSharePdf}
+                disabled={isPdfBusy || isSaving || !isExportReady()}
+                className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-md hover:bg-green-700 transition font-bold uppercase tracking-wide flex items-center gap-2 disabled:opacity-50"
+              >
+                📤 SHARE PDF
+              </button>
+            </>
           ) : (
             <button
               onClick={handleRazorpayPayment}
@@ -1844,10 +2489,11 @@ export default function RemainingWorkEstimatePreviewPage() {
 
           <button
             onClick={() => {
-              localStorage.removeItem("estimatePreview");
-              router.push("/estimate");
+              // Keep the entered data so the input form opens pre-filled; it is cleared only when the user leaves the flow
+              goingToFormRef.current = true;
+              router.push(REMAINING_FORM_ROUTE);
             }}
-            className="bg-slate-700 text-white px-8 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
+            className="bg-slate-700 text-white px-6 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
           >
             ⬅️ BACK TO INPUT
           </button>

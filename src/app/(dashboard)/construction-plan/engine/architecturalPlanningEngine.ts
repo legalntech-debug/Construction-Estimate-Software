@@ -10,6 +10,7 @@ import {
   type SectionModel,
 } from './sectionEngine';
 import { generateWallsFromRooms, generateStructuralColumns } from './cad/cadGeometry';
+import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit } from './plotShapeFit';
 import { PlotDimensions, PlotShape, FloorRoom, PlanningMode, ParkingMode, VastuAssessment, VastuDirection } from './planningTypes';
 import { toFiniteNumber, cleanFloorName } from './planningInput';
 import { getRoadOrientation } from './roadOrientation';
@@ -19,9 +20,13 @@ import {
   generateArchitecturalFloorPlan,
   roomProgramForFloor,
   extractStairPositionFromResult,
+  extractGroundWetStack,
+  setGroundWetStack,
+  resetGroundParts,
+  type GroundWetStack,
   getInheritedGroundStairSpec,
 } from './roomPlanner';
-import { adaptStairToFloorHeight, getStairDrawingHints } from './stairPlanner';
+import { adaptStairToFloorHeight, getStairDrawingHints, solveStairDrawPlan } from './stairPlanner';
 import { planTowerLayout, buildTowerRooms } from './towerPlanner';
 import { scorePlan } from './planningScore';
 
@@ -53,6 +58,10 @@ export interface DynamicFloorRequest {
   groundStairRelativeOffset?: { dx: number; dy: number };
   /** Ground par final hui stair ka spec — upar ki floors aur tower isi ko reuse karte hain (same riser/tread count) */
   groundStairSpec?: any;
+  /** v13: ground ka duct/attached-toilet stack (upper floors same x,y par) */
+  groundWetStack?: GroundWetStack | null;
+  /** v13: floor ka W/L user ne khud diya (tower box ke liye) */
+  userDims?: boolean;
 }
 
 export interface GeneratedFloorPlan {
@@ -163,7 +172,7 @@ function generateTowerPlan(
   floorToFloorHeight = 10,
   groundStairPosition?: { x: number; y: number; w?: number; h?: number; spec?: any; corner?: string; entryFace?: string; exitFace?: string; flightDirection?: string; staircaseType?: string },
   groundStairSpec?: any,
-  towerOpts?: { towerArea?: number; roomWidth?: number; roomLength?: number },
+  towerOpts?: { towerArea?: number; roomWidth?: number; roomLength?: number; boxW?: number; boxL?: number; entryFace?: any },
 ) {
   const W = Math.max(1, canvasW), H = Math.max(1, canvasL);
 
@@ -185,8 +194,11 @@ function generateTowerPlan(
     towerArea: towerOpts?.towerArea,
     roomWidth: towerOpts?.roomWidth,
     roomLength: towerOpts?.roomLength,
+    boxW: towerOpts?.boxW,
+    boxL: towerOpts?.boxL,
+    entryFace: (towerOpts?.entryFace || groundStairPosition?.entryFace) as any,
   });
-  const rooms: FloorRoom[] = buildTowerRooms(layout);
+  const rooms: FloorRoom[] = buildTowerRooms(layout, W, H, (towerOpts?.entryFace || groundStairPosition?.entryFace) as any, groundStairPosition?.exitFace);
   const { stair: st } = layout;
 
   // ✅ Tower stair = ground wali stair ka SAME spec (type, flight width, tread, riser COUNT).
@@ -305,6 +317,9 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
         towerArea: num(ps.towerArea, 0),
         roomWidth: num(ps.towerRoomWidth, 0),
         roomLength: num(ps.towerRoomLength, 0),
+        // v13: user ne tower floor ka W x L khud diya ho to wahi box (default 10x10 hardcode nahi)
+        boxW: (request as any).userDims ? requestedW : 0,
+        boxL: (request as any).userDims ? requestedL : 0,
       },
     );
     rooms = tower.rooms;
@@ -326,7 +341,8 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       });
     }
 
-    const smart = generateArchitecturalFloorPlan({
+    setGroundWetStack(isGround ? null : (request.groundWetStack || null));
+    const smart = (() => { try { return generateArchitecturalFloorPlan({
       floorName,
       width: clearW,
       length: clearL,
@@ -342,7 +358,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       groundStairPosition: isGround ? undefined : request.groundStairPosition,
       groundStairRelativeOffset: isGround ? undefined : request.groundStairRelativeOffset,
       groundStairSpec: isGround ? undefined : (request.groundStairSpec ?? request.groundStairPosition?.spec),
-    });
+    }); } finally { setGroundWetStack(null); } })();
     rooms = smart.rooms;
     warnings.push(...smart.warnings);
     errors.push(...smart.errors);
@@ -399,7 +415,12 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     }
   }
 
-  const opened = generateFloorOpenings(rooms as any, orientation.mainRoad, layoutW, layoutL) as any[];
+  let opened = generateFloorOpenings(rooms as any, orientation.mainRoad, layoutW, layoutL) as any[];
+  // v14: tower me darwaze sirf towerPlanner ke (stair + TOWER ROOM) - openingPlanner ke extra/ghalat darwaze hatao
+  if (isTower) {
+    const own = new Map<string, any[]>((rooms as any[]).map((r: any) => [String(r.id), r.doors || []]));
+    opened = opened.map((r: any) => ({ ...r, doors: own.has(String(r.id)) ? [...own.get(String(r.id))!] : (r.doors || []) }));
+  }
 
   if (typeof console !== 'undefined') {
     console.log('[ENGINE] 🔍 after openingPlanner doors:', opened.map((r: any) => ({
@@ -500,7 +521,8 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   return {
     floorName,
     width: Number(outerW.toFixed(2)), length: Number(outerL.toFixed(2)),
-    clearWidth: Number(clearW.toFixed(2)), clearLength: Number(clearL.toFixed(2)),
+    // v14: tower ke rooms upar ki floor ke clear canvas (layoutW x layoutL) me hain -> renderer ko wahi clear size do (pehle 9.33 milta tha aur stair 9.33 me dobara solve/clamp hoke boundary wall se door dikhti thi)
+    clearWidth: Number((isTower ? layoutW : clearW).toFixed(2)), clearLength: Number((isTower ? layoutL : clearL).toFixed(2)),
     area: Number(floorArea.toFixed(2)), outerArea: Number(floorArea.toFixed(2)),
     buildableArea: Number((clearW * clearL).toFixed(2)),
     originX: Number((maxFootprint.originX + Math.max(0, (maxFootprint.width - outerW) / 2)).toFixed(2)),
@@ -516,9 +538,82 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
 }
 
 // ============================================================================
+// v12: irregular plot -> plan ko plot polygon se jodo
+//   plan core-rect me bana hota hai (core-frame). Yahan rooms ko floor ke INNER frame me shift karke
+//   core ke bahar ki jagah (wedge) kinare ke kamron me jodte hain, aur outline (outer/inner polygon) attach karte hain.
+// ============================================================================
+// v13: irregular plot -> stair core ke kinare par ho aur bahar slanted wall ho to stair aur wall ke beech khali patti na rahe.
+//   stair ka footprint (landing/middle) us wedge ki min chaudai jitna badhate hain (drawPlan dobara solve), taaki stair wall se chipki dikhe.
+function snapStairToWedge(plan: any, fit: PlotShapeFit): void {
+  const L: any = (plan.rooms as any[]).find((r: any) => r.embeddedStair && !r.isSubRoom);
+  if (!L) return;
+  const e = L.embeddedStair;
+  const core = fit.core;
+  const sx = (L.x || 0) + (e.relX ?? 0), sy = (L.y || 0) + (e.relY ?? 0);
+  const side = Math.abs(sx - core.x) < 0.3 ? 'L' : (Math.abs(sx + e.w - (core.x + core.w)) < 0.3 ? 'R' : '');
+  if (!side) return;
+  let g = Infinity;
+  for (let k = 0; k <= 8; k++) {
+    const y = sy + 0.05 + ((e.h - 0.1) * k) / 8;
+    const it = scanInterval(fit.inner, y);
+    if (!it) { g = 0; break; }
+    g = Math.min(g, side === 'L' ? core.x - it[0] : it[1] - (core.x + core.w));
+  }
+  if (!(g >= 0.4)) return;
+  g = Math.floor(Math.min(g, 3.5) * 4) / 4;
+  const spec: any = e.staircaseSpec;
+  if (!spec || !(Number(spec.riserCount) > 0)) return;
+  const rotated = e.entryFace === 'LEFT' || e.entryFace === 'RIGHT';
+  const newW = e.w + g;
+  const crossBox = rotated ? e.h : newW;
+  const runBox = rotated ? newW : e.h;
+  const solved = solveStairDrawPlan(spec, crossBox, runBox);
+  if (!solved || solved.plan.shortTreads !== 0) return;
+  e.w = Number(newW.toFixed(3));
+  if (side === 'L') { e.relX = Number((e.relX - g).toFixed(3)); if (typeof e.absX === 'number') e.absX = Number((e.absX - g).toFixed(3)); }
+  e.staircaseSpec = { ...spec, ...solved.spec, drawPlan: solved.plan };
+  if (e.renderHints) e.renderHints = { ...e.renderHints, drawPlan: solved.plan };
+  e.snappedToWedge = { side, gapFt: g };
+}
+
+function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, originY: number): void {
+  const dx = fit.core.x, dy = fit.core.y;
+  const mv = (o: any) => { if (o && typeof o.x === 'number') { o.x = Number((o.x + dx).toFixed(3)); o.y = Number((o.y + dy).toFixed(3)); } };
+  for (const r of plan.rooms as any[]) mv(r);
+  for (const w of (plan.walls || []) as any[]) {
+    if (w?.start && w?.end) { mv(w.start); mv(w.end); }
+    else if (typeof w?.x1 === 'number') { w.x1 += dx; w.x2 += dx; w.y1 += dy; w.y2 += dy; }
+  }
+  for (const c of (plan.columns || []) as any[]) mv(c);
+  const wall = fit.wall;
+  const ext = extendRoomsToPolygon(plan.rooms as any[], fit.inner, fit.core);
+  // jis wall par wedge juda hai wo ab andar ki line hai -> us par khidki/bahari opening nahi
+  const sideWall: Record<string, string> = { L: 'LEFT', R: 'RIGHT', T: 'TOP', B: 'BOTTOM' };
+  for (const r of plan.rooms as any[]) {
+    for (const e of (r.extensions || [])) {
+      const w = sideWall[e.side];
+      r.windows = (r.windows || []).filter((q: any) => q.wall !== w);
+    }
+  }
+  try { snapStairToWedge(plan, fit); } catch (e) { /* stair snap optional */ }
+  const polyArea = (p: any[]) => Math.abs(p.reduce((s: number, a: any, i: number) => { const b = p[(i + 1) % p.length]; return s + a.x * b.y - b.x * a.y; }, 0)) / 2;
+  plan.area = Number(polyArea(fit.outer).toFixed(2)); plan.outerArea = plan.area;
+  plan.buildableArea = Number(polyArea(fit.inner).toFixed(2));
+  plan.width = Number(fit.width.toFixed(2)); plan.length = Number(fit.length.toFixed(2));
+  plan.clearWidth = Number((fit.width - 2 * wall).toFixed(2)); plan.clearLength = Number((fit.length - 2 * wall).toFixed(2));
+  plan.originX = originX; plan.originY = originY;
+  plan.outline = {
+    outer: fit.outer, inner: fit.inner, core: fit.core, wall,
+    extWalls: ext.extWalls, shape: 'POLYGON',
+  };
+  plan.warnings = Array.from(new Set([...(plan.warnings || []), `Irregular plot: planning plot ke shape (polygon) ke hisaab se; core ${fit.core.w.toFixed(1)} x ${fit.core.h.toFixed(1)} ft + side wedges kamron me joda gaya.`]));
+}
+
+// ============================================================================
 // generateCompleteConstructionPlan
 // ============================================================================
 export function generateCompleteConstructionPlan(payload: any): GeneratedConstructionPlan {
+  resetGroundParts();
   const raw = payload?.plotDimensions || payload?.dimensions || {};
   const A = Math.max(1, num(raw.A ?? raw.width ?? raw.a, 30));
   const C = Math.max(1, num(raw.C ?? raw.length ?? raw.c, 50));
@@ -529,6 +624,19 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const buildableGeometry = calculateBuildableGeometry(dimensions, shape, setbacks, payload?.plotVertices);
   const fallback = calculateBuildableFootprint(dimensions, setbacks);
   const maxFootprint = { width: Math.max(.1, fallback.width || A), length: Math.max(.1, fallback.length || C), originX: num(fallback.originX), originY: num(fallback.originY) };
+  // v12: irregular / trapezoid / custom plot -> polygon fit (rectangle plots ke liye null => purana raasta)
+  let shapeFit: PlotShapeFit | null = null;
+  try {
+    shapeFit = buildPlotShapeFit({
+      dims: { A, B: num(raw.B, A), C, D: num(raw.D, C) },
+      shape: String(shape),
+      vertices: Array.isArray(payload?.plotVertices) ? payload.plotVertices : null,
+      slantB: payload?.plotSlant?.B,
+      angles: payload?.plotAngles || null,
+      setbacks: { front: setbacks.frontSetback, rear: setbacks.rearSetback, left: setbacks.leftSetback, right: setbacks.rightSetback },
+      wall: 4 / 12,
+    });
+  } catch (e) { shapeFit = null; }
   const selectedFloors: string[] = (payload?.selectedFloors || payload?.selected_floors || Object.keys(payload?.floorData || {})).map(cleanFloorName).filter((v: string, i: number, arr: string[]) => v && arr.indexOf(v) === i);
   if (!selectedFloors.length) selectedFloors.push('GROUND FLOOR');
   const floorDataInput = payload?.floorData || payload?.floor_details || {};
@@ -555,6 +663,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     });
   }
 
+  let groundWet: GroundWetStack | null = null;
   const floors: Record<string, GeneratedFloorPlan> = {};
   const generatedFloorData: Record<string, any> = {};
   const generatedFloorRooms: Record<string, FloorRoom[]> = {};
@@ -562,9 +671,17 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const floorOrder = [...selectedFloors].sort((a, b) => (b.includes('GROUND') ? 1 : 0) - (a.includes('GROUND') ? 1 : 0));
   for (const floorName of floorOrder) {
     const input = floorDataInput[floorName] || floorDataInput[floorName.toUpperCase()] || {};
-    const width = Math.max(1, num(input.width, maxFootprint.width));
-    const length = Math.max(1, num(input.length, maxFootprint.length));
+    let width = Math.max(1, num(input.width, maxFootprint.width));
+    let length = Math.max(1, num(input.length, maxFootprint.length));
     const isGround = floorName.includes('GROUND');
+    const isTowerF = floorName.toUpperCase().includes('TOWER') || floorName.toUpperCase().includes('MUMTY');
+    const useFit = !!shapeFit && !isTowerF;
+    let planFootprint = maxFootprint;
+    if (useFit && shapeFit) {
+      width = shapeFit.core.w + 2 * shapeFit.wall;
+      length = shapeFit.core.h + 2 * shapeFit.wall;
+      planFootprint = { width, length, originX: maxFootprint.originX, originY: maxFootprint.originY };
+    }
 
     const plan = generateDynamicFloorPlan({
       floorName, width, length,
@@ -574,11 +691,13 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       planningSettings: settings[floorName] || {},
       roadSide: payload?.roadFacingOption || payload?.road_side || '1 SIDE ROAD (SOUTH)',
       hasParking: isGround,
-      planningArea: Math.max(1, num(input.area, width * length)),
+      planningArea: useFit ? Math.max(1, (width - 2 * (4 / 12)) * (length - 2 * (4 / 12))) : Math.max(1, num(input.area, width * length)),
       groundFloorProgram: isGround ? undefined : groundFloorProgram,
       groundStairPosition: isGround ? undefined : (groundStairPos ? { ...groundStairPos } : undefined),
       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
-    }, maxFootprint);
+      groundWetStack: isGround ? undefined : groundWet,
+      userDims: !!input.userDims,
+    }, planFootprint);
 
     floors[floorName] = plan;
 
@@ -589,8 +708,14 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
           groundStairPos = { x: si.x, y: si.y, w: si.w, h: si.h, spec: si.spec, corner: si.corner, entryFace: si.entryFace, exitFace: si.exitFace, flightDirection: si.flightDirection, staircaseType: si.staircaseType };
           groundStairOffset = si.relativeOffset;
         }
+        groundWet = extractGroundWetStack(plan.rooms as any[]);
         groundFloorProgram = plan.rooms.map((r: any) => String(r.name || '').toLowerCase().replace(/\s+/g, '_'));
       } catch (e) { console.error('[PLANNING ENGINE] ground stair extract failed', e); }
+    }
+
+    if (useFit && shapeFit) {
+      try { applyShapeFitToPlan(plan as any, shapeFit, maxFootprint.originX, maxFootprint.originY); }
+      catch (e) { console.error('[PLANNING ENGINE] shape fit failed', e); }
     }
 
     if (typeof console !== 'undefined') {
@@ -619,6 +744,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       width: plan.width, length: plan.length, clearWidth: plan.clearWidth, clearLength: plan.clearLength,
       area: plan.area, outerArea: plan.outerArea, buildableArea: plan.buildableArea,
       originX: plan.originX, originY: plan.originY, rooms: plan.rooms, walls: plan.walls, columns: plan.columns,
+      outline: (plan as any).outline || undefined,
       openings: plan.openings, staircase: plan.staircase, staircaseConfig: plan.staircase,
       outerWallThickness: getExternalWallThicknessFt(), innerWallThickness: 4 / 12,
       connectivity: plan.connectivity, orientation: plan.orientation,
@@ -656,8 +782,8 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     selectedFloors,
     generatedFloorData,
     generatedFloorRooms,
-    maxFootprint.width,
-    maxFootprint.length,
+    shapeFit ? shapeFit.width : maxFootprint.width,
+    shapeFit ? shapeFit.length : maxFootprint.length,
   );
 
   const cutsInput: any[] =

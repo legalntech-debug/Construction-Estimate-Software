@@ -1,19 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { QRCodeSVG } from "qrcode.react";
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from "@/lib/supabase";
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
+import { getItemRate } from "@/lib/pricing";
 
-// Initialize Supabase Client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Pricing item key for certificates in pricing_config (adjust if named differently)
+const CERTIFICATE_PRICING_ITEM = "certificate";
+const FALLBACK_FEE = 21;
 
 export default function CertificatePreviewPage() {
   const router = useRouter();
-  const { user } = useAuth();
+  const auth: any = useAuth();
+  const user: any = auth?.currentUser ?? auth?.user;
   
   const [estimate, setEstimate] = useState<any>(null);
   const [bankName, setBankName] = useState("SMFG India Home Finance Company Ltd");
@@ -24,6 +26,10 @@ export default function CertificatePreviewPage() {
   const [signatureDetails, setSignatureDetails] = useState("");
   const [currentRefNo, setCurrentRefNo] = useState("");
   const [isDraft, setIsDraft] = useState(true);
+  const [fee, setFee] = useState<number>(FALLBACK_FEE);
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [isBusy, setIsBusy] = useState(false);
+  const paymentIdRef = useRef<string | null>(null);
   const currentCaseType = estimate?.estimate_type || estimate?.case_type || "CONSTRUCTION CERTIFICATE";
   const userCategory = user?.category || "ENGINEER";
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
@@ -40,6 +46,34 @@ export default function CertificatePreviewPage() {
     document.body.appendChild(script);
   }, []);
 
+  // Resolve the certificate fee from the pricing table (state + user category)
+  useEffect(() => {
+    let alive = true;
+    const targetState = user?.state || estimate?.state_name || "MADHYA PRADESH";
+    const pricingCategory = String(user?.user_type || user?.category || "INDIVIDUAL USER").toUpperCase();
+
+    (async () => {
+      setPricingLoading(true);
+      try {
+        const row = await fetchPricingRow(CERTIFICATE_PRICING_ITEM, targetState, pricingCategory);
+        const display = getDisplayPricing(row);
+        if (!alive) return;
+        setFee(
+          display.isFromDB && display.price > 0
+            ? display.price
+            : getItemRate(targetState, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE
+        );
+      } catch (err) {
+        console.error("[CERTIFICATE PRICING ERROR]", err);
+        if (alive) setFee(getItemRate(targetState, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE);
+      } finally {
+        if (alive) setPricingLoading(false);
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [user?.state, user?.user_type, user?.category, estimate?.state_name]);
+
   useEffect(() => {
     const savedData = localStorage.getItem("certificatePreview");
     if (savedData) {
@@ -47,7 +81,9 @@ export default function CertificatePreviewPage() {
         const parsed = JSON.parse(savedData);
         setEstimate(parsed);
         
-        if (parsed.bank_name) setBankName(parsed.bank_name);
+        // The input form sends the selected institution as `financial_institution`
+        const selectedBank = parsed.financial_institution || parsed.bank_name;
+        if (selectedBank) setBankName(selectedBank);
         if (parsed.inspection_date) setInspectionDate(parsed.inspection_date);
         if (parsed.completion_date) setCompletionDate(parsed.completion_date);
 
@@ -57,10 +93,11 @@ export default function CertificatePreviewPage() {
           item.customer_name === parsed.customer_name &&
           item.property_address === parsed.property_address &&
           item.total_builtup_area === parsed.total_builtup_area &&
-          item.bank_name === (parsed.bank_name || bankName)
+          item.bank_name === (parsed.financial_institution || parsed.bank_name || bankName)
         );
 
-        if (matchedRecord && matchedRecord.isPaid) {
+        if (matchedRecord && (matchedRecord.isPaid || matchedRecord.platform_payment_status === "paid")) {
+          paymentIdRef.current = matchedRecord.razorpay_payment_id || null;
           setIsPaid(true);
           setIsDraft(false);
           setCurrentRefNo(matchedRecord.ref_no);
@@ -90,64 +127,96 @@ export default function CertificatePreviewPage() {
     return `LnT/${financialYear}/${usernameTag}/CERTIFICATE/${randomSeq}`;
   };
 
-  const handleRazorpayPayment = () => {
+  const handleRazorpayPayment = async () => {
+    if (isBusy) return;
     const finalRef = generateRefNumber();
     setCurrentRefNo(finalRef);
 
-    const amountInPaise = 21 * 100; // ₹21
-    const options = {
-      key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mockkeyID", 
-      amount: amountInPaise,
-      currency: "INR",
-      name: `${user?.name || "Er. J. TOMAR"} Valuer Portal`,
-      description: "Certificate Verification & Generation Fee",
-      // Removed localhost image reference to avoid CORS loopback error in checkout popup
-      handler: function (response: any) {
-        setIsPaid(true);
-        setIsDraft(false);
-        saveRecordToMIS(finalRef, response.razorpay_payment_id);
-        alert("Payment Successful! Certificate Generated & Saved to MIS and Estimates.");
-      },
-      prefill: {
-        name: estimate?.customer_name || "Client",
-        email: user?.email || "legalntech@gmail.com",
-        contact: user?.phone || "7987561396",
-      },
-      notes: {
-        ref_no: finalRef,
-        case_type: "Construction Certificate",
-      },
-      theme: {
-        color: "#2563eb",
-      },
-    };
+    try {
+      setIsBusy(true);
+      if (typeof window === "undefined" || !(window as any).Razorpay) {
+        throw new Error("Payment gateway is still loading. Please try again.");
+      }
 
-    if (typeof window !== "undefined" && (window as any).Razorpay) {
+      // Create a server-side order for the fee resolved from the pricing table
+      const orderRes = await fetch("/api/analyze/payment/create-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: fee }),
+      });
+      const order = await orderRes.json();
+      if (!orderRes.ok) throw new Error(order.error || "Failed to create order");
+
+      const options = {
+        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || "rzp_test_mockkeyID",
+        amount: Math.round(fee * 100), // paise
+        currency: "INR",
+        order_id: order.id,
+        name: `${user?.name || "Er. J. TOMAR"} Valuer Portal`,
+        description: "Certificate Verification & Generation Fee",
+        handler: async function (response: any) {
+          paymentIdRef.current = response.razorpay_payment_id;
+          setIsPaid(true);
+          setIsDraft(false);
+
+          // Record the gateway payment in estimates and mis_records (user_payment)
+          const saved = await saveRecordToMIS(finalRef, {
+            paymentId: response.razorpay_payment_id,
+            amount: fee,
+          });
+          setIsBusy(false);
+          alert(
+            saved
+              ? "Payment Successful! Certificate Generated & Saved to MIS and Estimates."
+              : "Payment received, but the record could not be fully saved. Please contact support with your payment ID: " + response.razorpay_payment_id
+          );
+        },
+        modal: { ondismiss: () => setIsBusy(false) },
+        prefill: {
+          name: estimate?.customer_name || "Client",
+          email: user?.email || "legalntech@gmail.com",
+          contact: user?.phone || "7987561396",
+        },
+        notes: {
+          ref_no: finalRef,
+          case_type: "Construction Certificate",
+        },
+        theme: {
+          color: "#2563eb",
+        },
+      };
+
       const rzp = new (window as any).Razorpay(options);
       rzp.open();
-    } else {
-      setIsPaid(true);
-      setIsDraft(false);
-      saveRecordToMIS(finalRef, "TEST_PAYMENT_ID");
+    } catch (err: any) {
+      console.error("[CERTIFICATE PAYMENT INIT ERROR]", err);
+      alert("Payment initialization failed. " + (err?.message || "Please try again."));
+      setIsBusy(false);
     }
   };
 
-  const saveRecordToMIS = async (refNo: string, paymentId: string) => {
+  /**
+   * Upserts the certificate into `estimates` and writes `user_payment` to both
+   * `estimates` and `mis_records`. When `payment` is omitted (re-print of an
+   * already paid record) the stored payment columns are left untouched.
+   */
+  const saveRecordToMIS = async (
+    refNo: string,
+    payment?: { paymentId: string; amount: number }
+  ): Promise<boolean> => {
     const floorDetails = estimate?.floor_details || {};
     const currentCaseType = estimate?.estimate_type || estimate?.case_type || "CONSTRUCTION CERTIFICATE";
     const currentUserId = user?.id || null;
 
-    // Sirf estimates table ka payload (Trigger khud mis_records mein sync kar dega)
-    const estimateRecordPayload = {
+    const estimateRecordPayload: Record<string, any> = {
       ref_no: refNo,
       customer_name: estimate?.customer_name,
       property_address: estimate?.property_address,
       bank_name: bankName,
       total_builtup_area: estimate?.total_builtup_area,
-      client_name: estimate?.customer_name,
-      representative: user?.name || "Er. Jasvant Chouhan",
+      client_name: estimate?.client_name || estimate?.customer_name,
+      representative: estimate?.representative || user?.name || "Er. Jasvant Chouhan",
       floor_details: floorDetails,
-      razorpay_payment_id: paymentId,
       platform_payment_status: "paid",
       payment_status: "paid",
       status: "finalized",
@@ -155,44 +224,157 @@ export default function CertificatePreviewPage() {
       user_id: currentUserId,
       property_type: estimate?.property_type || "HOUSE",
       plot_area: estimate?.plot_area || null,
-      fee_standard: estimate?.fee || null,
+      fee_standard: estimate?.fee || estimate?.fee_amount || null,
       rate_per_sqft: estimate?.rate_per_sqft || 0
     };
 
+    if (payment) {
+      estimateRecordPayload.razorpay_payment_id = payment.paymentId;
+      estimateRecordPayload.user_payment = payment.amount;
+    }
+
     // Save locally for immediate UI reactivity
     const existingEstimates = JSON.parse(localStorage.getItem("estimates_records") || "[]");
+    const previous = existingEstimates.find((item: any) => item.ref_no === refNo);
     const filteredEstimates = existingEstimates.filter((item: any) => item.ref_no !== refNo);
-    localStorage.setItem("estimates_records", JSON.stringify([estimateRecordPayload, ...filteredEstimates]));
+    localStorage.setItem(
+      "estimates_records",
+      JSON.stringify([{ ...(previous || {}), ...estimateRecordPayload, isPaid: true }, ...filteredEstimates])
+    );
 
     try {
-      // Sirf 'estimates' table mein upsert karo. Trigger khud mis_records update kar dega!
       const { error: estError } = await supabase
         .from("estimates")
         .upsert([estimateRecordPayload], { onConflict: "ref_no" });
-      
+
       if (estError) {
         console.error("Supabase estimates upsert error:", estError.message);
-      } else {
-        console.log("Successfully saved estimate, trigger will auto-sync MIS.");
+        return false;
       }
 
+      // Explicitly mirror the payment into mis_records so the gateway entry is never lost,
+      // regardless of what the sync trigger copies.
+      if (payment) {
+        const { data: misRows, error: misError } = await supabase
+          .from("mis_records")
+          .update({
+            user_payment: payment.amount,
+            payment_status: "paid",
+            platform_payment_status: "paid",
+          })
+          .eq("ref_no", refNo)
+          .select("id");
+
+        if (misError) {
+          console.error("Supabase mis_records update error:", misError.message);
+          return false;
+        }
+        if (!misRows || misRows.length === 0) {
+          console.error("mis_records row not found for ref_no:", refNo);
+          return false;
+        }
+      }
+      return true;
     } catch (error) {
       console.error("Error syncing record to database tables:", error);
+      return false;
     }
   };
 
-  const handleSaveAndPrint = () => {
+  const handleSaveAndPrint = async () => {
     if (isDraft || !isPaid) {
       handleRazorpayPayment();
       return;
     }
 
     setIsSaving(true);
-    saveRecordToMIS(currentRefNo, "EXISTING_PAID_REF");
-    setTimeout(() => {
-      setIsSaving(false);
-      window.print();
-    }, 1000);
+    // Re-save without touching the stored payment columns
+    await saveRecordToMIS(currentRefNo);
+    setIsSaving(false);
+    window.print();
+  };
+
+  // ---------------------------------------------------------------
+  // PDF export (download + share). Requires: npm i html2canvas jspdf
+  // ---------------------------------------------------------------
+  const pdfFileName = `Certificate_${(currentRefNo || "draft").replace(/[^\w-]+/g, "_")}.pdf`;
+
+  const buildPdfBlob = async (): Promise<Blob> => {
+    const el = document.getElementById("certificate-preview-container");
+    if (!el) throw new Error("Certificate container not found");
+
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import("html2canvas"),
+      import("jspdf"),
+    ]);
+
+    const canvas = await html2canvas(el, {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+      // Skip on-screen only controls (class "print:hidden")
+      ignoreElements: (node: Element) => node.classList?.contains("print:hidden"),
+    });
+
+    const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const imgH = (canvas.height * pageW) / canvas.width;
+    const img = canvas.toDataURL("image/jpeg", 0.95);
+
+    // Slice the tall image across multiple A4 pages
+    let offsetY = 0;
+    let remaining = imgH;
+    pdf.addImage(img, "JPEG", 0, offsetY, pageW, imgH);
+    remaining -= pageH;
+    while (remaining > 0) {
+      offsetY -= pageH;
+      pdf.addPage();
+      pdf.addImage(img, "JPEG", 0, offsetY, pageW, imgH);
+      remaining -= pageH;
+    }
+    return pdf.output("blob");
+  };
+
+  const triggerDownload = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = pdfFileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (isBusy) return;
+    try {
+      setIsBusy(true);
+      triggerDownload(await buildPdfBlob());
+    } catch (err: any) {
+      alert("PDF download failed: " + (err?.message || ""));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleSharePdf = async () => {
+    if (isBusy) return;
+    try {
+      setIsBusy(true);
+      const blob = await buildPdfBlob();
+      const file = new File([blob], pdfFileName, { type: "application/pdf" });
+      const nav: any = navigator;
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        await nav.share({ files: [file], title: "Construction Certificate" });
+      } else {
+        // Browsers without file sharing support: fall back to download
+        triggerDownload(blob);
+      }
+    } catch (err: any) {
+      if (err?.name !== "AbortError") alert("Share failed: " + (err?.message || ""));
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   if (!estimate) {
@@ -244,7 +426,7 @@ export default function CertificatePreviewPage() {
         }
       `}</style>
 
-      <div className="certificate-sheet max-w-4xl mx-auto bg-white p-8 relative overflow-hidden">
+      <div id="certificate-preview-container" className="certificate-sheet max-w-4xl mx-auto bg-white p-8 relative overflow-hidden">
         
         {isDraft && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
@@ -256,7 +438,7 @@ export default function CertificatePreviewPage() {
 
         {isDraft && (
           <div className="bg-amber-500 text-white text-center py-2 font-bold uppercase tracking-widest text-xs mb-4 rounded print:hidden shadow relative z-10">
-            ⚠️ DRAFT PREVIEW MODE - COMPLETE PAYMENT (₹21) TO REMOVE WATERMARK & UNLOCK OFFICIAL CERTIFICATE
+            ⚠️ DRAFT PREVIEW MODE - COMPLETE PAYMENT (₹{fee}) TO REMOVE WATERMARK & UNLOCK OFFICIAL CERTIFICATE
           </div>
         )}
 
@@ -469,7 +651,7 @@ export default function CertificatePreviewPage() {
                 </div>
               ) : (
                 <div className="h-16 flex items-center justify-center text-center">
-                  <p className="text-xs text-red-500 font-bold italic">🔒 Digital Signature & Barcode Locked (Complete ₹21 Payment below to Unlock)</p>
+                  <p className="text-xs text-red-500 font-bold italic">🔒 Digital Signature & Barcode Locked (Complete ₹{fee} Payment below to Unlock)</p>
                 </div>
               )}
             </div>
@@ -484,19 +666,36 @@ export default function CertificatePreviewPage() {
 
       <div className="flex flex-wrap items-center justify-start gap-4 mt-10 mb-12 print:hidden border-t border-slate-200 pt-6 font-sans max-w-4xl mx-auto">
         {isPaid ? (
-          <button
-            onClick={handleSaveAndPrint}
-            disabled={isSaving}
-            className="bg-blue-600 text-white px-8 py-3 rounded shadow-md hover:bg-blue-700 transition font-bold"
-          >
-            {isSaving ? "SAVING..." : "PRINT CERTIFICATE"}
-          </button>
+          <>
+            <button
+              onClick={handleSaveAndPrint}
+              disabled={isSaving || isBusy}
+              className="bg-blue-600 text-white px-8 py-3 rounded shadow-md hover:bg-blue-700 transition font-bold"
+            >
+              {isSaving ? "SAVING..." : "PRINT CERTIFICATE"}
+            </button>
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isBusy}
+              className="bg-emerald-600 text-white px-8 py-3 rounded shadow-md hover:bg-emerald-700 transition font-bold disabled:opacity-60"
+            >
+              {isBusy ? "PLEASE WAIT..." : "DOWNLOAD PDF"}
+            </button>
+            <button
+              onClick={handleSharePdf}
+              disabled={isBusy}
+              className="bg-indigo-600 text-white px-8 py-3 rounded shadow-md hover:bg-indigo-700 transition font-bold disabled:opacity-60"
+            >
+              SHARE
+            </button>
+          </>
         ) : (
           <button
             onClick={handleRazorpayPayment}
-            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold animate-pulse"
+            disabled={pricingLoading || isBusy}
+            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold animate-pulse disabled:opacity-60"
           >
-            PAY TO REMOVE DRAFT & UNLOCK (₹21)
+            {pricingLoading ? "LOADING PRICE..." : `PAY TO REMOVE DRAFT & UNLOCK (₹${fee})`}
           </button>
         )}
 

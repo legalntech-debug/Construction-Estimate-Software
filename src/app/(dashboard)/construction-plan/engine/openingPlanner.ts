@@ -470,6 +470,10 @@ export function generateFloorOpenings(
     };
     if (isAttachedToilet(a) && !isParentOf(a, b)) return false;
     if (isAttachedToilet(b) && !isParentOf(b, a)) return false;
+    // v14: DRESSING (sub-room) ka darwaza sirf apne bedroom se - living/passage se nahi
+    const isDress = (x: RoomLayout) => /dressing/i.test(String(x.name || ""));
+    if (isDress(a) && !isParentOf(a, b)) return false;
+    if (isDress(b) && !isParentOf(b, a)) return false;
     if (ta === "parking" && tb === "parking") return false;
     if (ta === "parking" && tb !== "hall") return false;
     if (tb === "parking" && ta !== "hall") return false;
@@ -828,6 +832,13 @@ export function generateFloorOpenings(
         renderSymbolOnB = true;
       }
       openingKind = "ATTACHED_TOILET_DOOR";
+    }
+
+    // v14: bedroom ka darwaza hamesha BEDROOM me render (andar ki taraf khule) - living/lounge ki taraf nahi
+    if (!isPassageConnect && !isBathroom && !isKitchenHall && !isAttachedToilet(roomA) && !isAttachedToilet(roomB)) {
+      const bedT = (x: string) => x === "bedroom" || x === "master-bedroom";
+      if (bedT(ta) && !bedT(tb)) { renderSymbolOnA = true; renderSymbolOnB = false; }
+      else if (bedT(tb) && !bedT(ta)) { renderSymbolOnA = false; renderSymbolOnB = true; }
     }
 
     // ✅ Simple placement

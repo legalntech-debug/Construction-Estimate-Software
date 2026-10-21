@@ -2,7 +2,6 @@ import React from "react";
 import { formatDim } from "./CadDimUtils";
 import CadFloorPlansView from "./CadFloorPlansView";
 import CadElevationSectionView, { computeSectionLayout } from "./CadElevationSectionView";
-import CadStructuralTable from "./CadStructuralTable";
 import {
   SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS,
   buildSectionContext, resolveCutPositionFt,
@@ -230,6 +229,18 @@ export default function CadFloorElevationRenderer({
     const p1 = adjustedBuiltUpPoints[1];
     const p3 = adjustedBuiltUpPoints[3];
 
+    // v12: irregular plot -> floor ka bounding box plot ke bbox ke top-left se (polygon outline andar draw hota hai)
+    if (targetWidth && targetLength && (floorInfo as any)?.outline) {
+      const bx = Math.min(...adjustedBuiltUpPoints.map((q: any) => q.x));
+      const by = Math.min(...adjustedBuiltUpPoints.map((q: any) => q.y));
+      return [
+        { x: bx, y: by },
+        { x: bx + targetWidth, y: by },
+        { x: bx + targetWidth, y: by + targetLength },
+        { x: bx, y: by + targetLength },
+      ];
+    }
+
     if (targetWidth && targetLength) {
       return [
         { x: p0.x, y: p0.y },
@@ -378,16 +389,7 @@ export default function CadFloorElevationRenderer({
         />
       </g>
 
-      <CadStructuralTable
-        tableTotalWidth={tableTotalWidth}
-        tableDynamicHeight={tableDynamicHeight}
-        tableItems={tableItems}
-        scale={scale}
-        elevationStartX={elevationStartX}
-        elevationRowStartY={elevationRowStartY}
-        MANUAL_TABLE_X_OFFSET={dynamicTableXOffset}
-        MANUAL_TABLE_Y_OFFSET={MANUAL_TABLE_Y_OFFSET}
-      />
+      {/* v11: STRUCTURAL SPECIFICATIONS & SCHEDULE OF FINISHES table hata di gayi (zarurat nahi) */}
     </g>
   );
 }

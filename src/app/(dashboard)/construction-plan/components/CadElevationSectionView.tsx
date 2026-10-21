@@ -51,6 +51,8 @@ interface Props {
 }
 
 export default function CadElevationSectionView({ layout, scale, measurementUnit, hasBasement, basementFt, mos }: Props) {
+  // v10: level call-outs sirf sabse right wali drawing par (baaki drawings saaf dikhen)
+  const lastIdx = layout.items.length - 1;
   return (
     <g>
       {layout.items.map((it, i) => {
@@ -65,6 +67,7 @@ export default function CadElevationSectionView({ layout, scale, measurementUnit
               measurementUnit={measurementUnit}
               hasBasement={hasBasement}
               basementFt={basementFt}
+              showLevels={i === lastIdx}
             />
           );
         }
@@ -82,6 +85,7 @@ export default function CadElevationSectionView({ layout, scale, measurementUnit
               mosV1Ft={vertical ? mos.front : mos.right}
               hasBasement={hasBasement}
               basementFt={basementFt}
+              showLevels={i === lastIdx}
             />
           );
         }

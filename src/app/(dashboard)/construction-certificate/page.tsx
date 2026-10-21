@@ -50,9 +50,8 @@ export default function ConstructionCertificatePage() {
   const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
   const [floorData, setFloorData] = useState<Record<string, { length: number; width: number; area: number }>>({});
   
-  // Fee, Rate, and Amount States
-  const [rate, setRate] = useState<number>(0);
-  const [amount, setAmount] = useState<number>(0);
+  // Fee States (rate / amount are no longer collected on this form;
+  // the certificate fee is resolved from the pricing table on the preview page)
   const [feeMode, setFeeMode] = useState("AUTO");
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
@@ -71,16 +70,11 @@ export default function ConstructionCertificatePage() {
         setSelectedClientName(parsed.client_name || parsed.selected_client_name || "");
         setRepresentative(parsed.representative || "");
         setSelectedInstitution(parsed.financial_institution || FINANCIAL_INSTITUTIONS[0]);
-        setRate(Number(parsed.rate_per_sqft) || 0);
         setFeeMode(parsed.fee_mode || "AUTO");
         if (parsed.fee_amount) setManualFee(parsed.fee_amount);
         if (parsed.floor_details) {
           setFloorData(parsed.floor_details);
           setSelectedFloors(Object.keys(parsed.floor_details));
-          const totalArea = Object.values(parsed.floor_details).reduce(
-            (sum: number, f: any) => sum + Number(f.area || 0), 0
-          );
-          setAmount(Number(totalArea) * Number(parsed.rate_per_sqft || 0));
         }
       } catch (e) {
         console.error("Failed to parse saved certificate data:", e);
@@ -171,8 +165,6 @@ export default function ConstructionCertificatePage() {
     
     const updatedFloorData = { ...floorData, [floor]: { length: l, width: w, area: newArea } };
     setFloorData(updatedFloorData);
-    const newTotal = Object.values(updatedFloorData).reduce((sum, f) => sum + (f.area || 0), 0);
-    setAmount(parseFloat((newTotal * rate).toFixed(2)));
   };
 
   const totalBuiltUpArea = Object.values(floorData).reduce((sum, f) => sum + (f.area || 0), 0);
@@ -296,9 +288,10 @@ export default function ConstructionCertificatePage() {
       selected_floors: selectedFloors,
       floor_details: floorData,
       total_builtup_area: totalBuiltUpArea,
-      rate_per_sqft: rate,
-      construction_cost: amount,
-      total_value: amount,
+      // Legacy keys kept as 0 for backward compatibility with the preview page
+      rate_per_sqft: 0,
+      construction_cost: 0,
+      total_value: 0,
       fee_amount: finalFee,
       fee_mode: feeMode,
       certificate_type: "CONSTRUCTION CERTIFICATE",
@@ -320,8 +313,6 @@ export default function ConstructionCertificatePage() {
     localStorage.removeItem("certificateData");
     localStorage.removeItem("certificatePreview");
     setFloorData({});
-    setRate(0);
-    setAmount(0);
     setCustomerName("");
     setPropertyAddress("");
     setPlotArea("");
@@ -496,22 +487,10 @@ export default function ConstructionCertificatePage() {
         </div>
       </div>
 
-      {/* Optional Rate & Amount Row */}
-      <div className="grid grid-cols-5 mb-3 mt-4 items-center bg-gray-50 p-2 border border-black">
-        <div className="col-span-1">
-          <label className="font-bold block text-[11pt]">TOTAL AREA</label>
-          <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-white font-bold" />
-        </div>
-        <div className="text-center font-bold text-lg">X</div>
-        <div className="col-span-1">
-          <label className="font-bold block text-[11pt]">RATE / SQ.FT (OPTIONAL)</label>
-          <input type="number" step="0.01" placeholder="RATE" value={rate || ""} onChange={(e) => { const r = parseFloat(e.target.value) || 0; setRate(r); setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); }} className="w-full text-center border border-black p-1 uppercase bg-white" />
-        </div>
-        <div className="text-center font-bold text-lg">=</div>
-        <div className="col-span-1">
-          <label className="font-bold block text-[11pt]">TOTAL AMOUNT (OPTIONAL)</label>
-          <input type="text" readOnly value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} className="w-full border border-black p-1 uppercase text-center bg-white font-bold" />
-        </div>
+      {/* Total built-up area summary (rate / amount removed) */}
+      <div className="mb-3 mt-4 bg-gray-50 p-2 border border-black max-w-xs">
+        <label className="font-bold block text-[11pt]">TOTAL AREA</label>
+        <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-1 uppercase text-center bg-white font-bold" />
       </div>
 
       {/* Action Buttons */}

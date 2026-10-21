@@ -11,13 +11,15 @@ interface Props {
   measurementUnit?: "FEET" | "METERS";
   hasBasement?: boolean;
   basementFt?: number;
+  /** v10: level call-outs (PARAPET TOP / ROOF SLAB / FIRST FLOOR...) poori sheet me sirf ek baar */
+  showLevels?: boolean;
 }
 
 /**
  * Facade elevation.  Every door / window / gate / balcony comes from the plan walls on that side
  * (so editing the plan or planning settings redraws the elevation). Pure line-work: no background fills.
  */
-export default function CadElevationRenderer({ model, levels, scale, x0, measurementUnit }: Props) {
+export default function CadElevationRenderer({ model, levels, scale, x0, measurementUnit, showLevels = true }: Props) {
   const X = (a: number) => x0 + a * scale;
   const Y = (z: number) => -z * scale;
   const rect = (a0: number, a1: number, z0: number, z1: number) => ({
@@ -142,7 +144,7 @@ export default function CadElevationRenderer({ model, levels, scale, x0, measure
       {levels.floors.map((lf, i) => (
         <g key={`ehd-${i}`}>{renderHeightDim(X(0), Y(lf.ffl), Y(lf.slabTop), fmt(lf.slabTop - lf.ffl), "left", INK, scale)}</g>
       ))}
-      <LevelMarkers tags={levelTagsFrom(levels, !!model.tower)} plinthFt={plinth} xEdge={X(len) + 0.6 * scale + 12} scale={scale} unit={measurementUnit} />
+      {showLevels && <LevelMarkers tags={levelTagsFrom(levels, !!model.tower)} plinthFt={plinth} xEdge={X(len) + 0.6 * scale + 12} scale={scale} unit={measurementUnit} />}
 
       <text x={X(len / 2)} y={titleY} fill={INK} fontSize="10" fontWeight="bold" textAnchor="middle">{model.title}</text>
     </g>

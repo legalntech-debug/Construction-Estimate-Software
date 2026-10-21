@@ -444,6 +444,7 @@ export default function CadFloorPlansView({
     clearInnerHFt: number,
     originX: number,
     originY: number,
+    core?: { x: number; y: number; w: number; h: number } | null,
   ) => {
     const wallThick = (4 / 12) * scale;
     const halfWall = wallThick / 2;
@@ -484,7 +485,14 @@ export default function CadFloorPlansView({
           (side === "TOP" && Math.abs(room.y) <= EDGE_EPS) ||
           (side === "BOTTOM" && Math.abs(room.y + room.h - clearInnerHFt) <= EDGE_EPS) ||
           (side === "LEFT" && Math.abs(room.x) <= EDGE_EPS) ||
-          (side === "RIGHT" && Math.abs(room.x + room.w - clearInnerWFt) <= EDGE_EPS);
+          (side === "RIGHT" && Math.abs(room.x + room.w - clearInnerWFt) <= EDGE_EPS) ||
+          // v12 irregular plot: core ki kinara ab andar ki line hai (wedge kamre me juda) -> yahan alag wall nahi
+          (!!core && (
+            (side === "LEFT" && Math.abs(room.x - core.x) <= EDGE_EPS) ||
+            (side === "RIGHT" && Math.abs(room.x + room.w - (core.x + core.w)) <= EDGE_EPS) ||
+            (side === "TOP" && Math.abs(room.y - core.y) <= EDGE_EPS) ||
+            (side === "BOTTOM" && Math.abs(room.y + room.h - (core.y + core.h)) <= EDGE_EPS)
+          ));
         if (isExterior) continue;
 
         const r0 = horizontal ? room.x : room.y;
@@ -521,6 +529,10 @@ export default function CadFloorPlansView({
       const pos = atStart ? s.start : s.end;
       const lim = s.horizontal ? clearInnerWFt : clearInnerHFt;
       if (pos <= EDGE_EPS || pos >= lim - EDGE_EPS) return "BOUNDARY";
+      if (core) {
+        const c0 = s.horizontal ? core.x : core.y, c1 = s.horizontal ? core.x + core.w : core.y + core.h;
+        if (Math.abs(pos - c0) <= EDGE_EPS || Math.abs(pos - c1) <= EDGE_EPS) return "BOUNDARY";
+      }
       for (const o of segs) {
         if (o === s) continue;
         if (o.horizontal !== s.horizontal) {
@@ -776,7 +788,17 @@ export default function CadFloorPlansView({
         const bottomY = Math.max(...translatedPoints.map((p) => p.y));
         const labelY = bottomY + (12 * scale);
 
-        const outerWallPath = `
+        // v12: irregular plot -> engine ka outline (outer/inner polygon) milne par wall + clip polygon se
+        const outline: any = (floorInfo as any)?.outline;
+        const hasOutline = !!(outline && Array.isArray(outline.outer) && outline.outer.length >= 3 && Array.isArray(outline.inner) && outline.inner.length >= 3);
+        const polyPath = (pts: { x: number; y: number }[], ox: number, oy: number) =>
+          `M ${pts.map((q) => `${ox + q.x * scale} ${oy + q.y * scale}`).join(" L ")} Z`;
+        const outerPolyPx = hasOutline ? outline.outer.map((q: any) => ({ x: p0.x + q.x * scale, y: p0.y + q.y * scale })) : [];
+        const innerPolyPts = hasOutline ? outline.inner.map((q: any) => `${i0.x + q.x * scale},${i0.y + q.y * scale}`).join(" ") : "";
+
+        const outerWallPath = hasOutline
+          ? `${polyPath(outline.outer, p0.x, p0.y)} ${polyPath(outline.inner, i0.x, i0.y)}`
+          : `
           M ${p0.x} ${p0.y} L ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y} Z 
           M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z
         `;
@@ -880,15 +902,17 @@ export default function CadFloorPlansView({
           <g key={index}>
             <defs>
               <clipPath id={clipId}>
-                <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} />
+                {hasOutline ? <polygon points={innerPolyPts} /> : <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} />}
               </clipPath>
             </defs>
 
             <path d={outerWallPath} fill="url(#wallHatch)" fillRule="evenodd" stroke={LINE_PRIMARY} strokeWidth="0.8" strokeLinejoin="round" />
-            <path d={`M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z`} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
+            <path d={hasOutline ? polyPath(outline.inner, i0.x, i0.y) : `M ${i0.x} ${i0.y} L ${i1.x} ${i1.y} L ${i2.x} ${i2.y} L ${i3.x} ${i3.y} Z`} fill="none" stroke={LINE_PRIMARY} strokeWidth="0.5" />
 
             <g id="internal-room-planning" clipPath={`url(#${clipId})`}>
-              <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.5" />
+              {hasOutline
+                ? <polygon points={innerPolyPts} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.5" />
+                : <rect x={i0.x} y={i0.y} width={clearInnerW} height={clearInnerH} fill={BG_FILL} stroke={LINE_PRIMARY} strokeWidth="0.5" />}
 
               {roomList.map((rm: any, rIdx: number) => {
                 const rx = i0.x + (rm.x || 0) * scale;
@@ -955,6 +979,10 @@ export default function CadFloorPlansView({
                     </defs>
 
                     <rect x={rx} y={ry} width={rw} height={rh} fill={rectFill} stroke={rectStroke} strokeWidth={rectStrokeWidth} />
+                    {hasOutline && Array.isArray((rm as any).extensions) && (rm as any).extensions.map((ex: any, exI: number) => (
+                      <polygon key={`ext-${index}-${rIdx}-${exI}`} fill={rectFill} stroke="none"
+                        points={ex.points.map((q: any) => `${i0.x + q.x * scale},${i0.y + q.y * scale}`).join(" ")} />
+                    ))}
 
                     {isLivingRoom && embeddedStair && (embeddedStair.w || 0) > 0 && (embeddedStair.h || 0) > 0 && (
                       <g id="embedded-stair-in-living">
@@ -1050,7 +1078,7 @@ export default function CadFloorPlansView({
                         }
                       }
 
-                      const fullName = String(rm.name || "ROOM").toUpperCase();
+                      const fullName = String((rm as any).displayName || rm.name || "ROOM").toUpperCase();
                       const shortName = getSmartLabel(fullName, 0);
                       const dimText = rw >= 4 && rh >= 4
                         ? `${formatDim(rw, scale, measurementUnit)} x ${formatDim(rh, scale, measurementUnit)}`
@@ -1089,11 +1117,21 @@ export default function CadFloorPlansView({
             </g>
 
             {(() => {
-              const wallAudit = renderPartitionWalls(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y);
+              const wallAudit = renderPartitionWalls(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y, hasOutline ? outline.core : null);
               return (
                 <>
                   {renderExternalWallCuts(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y, p0.x, p0.y, plotWidthPx, Math.abs(p3.y - p0.y), outerWallThicknessFt)}
                   {wallAudit.node}
+                  {hasOutline && Array.isArray(outline.extWalls) && (
+                    <g id="irregular-wedge-partition-walls">
+                      {outline.extWalls.map((sg: number[], k: number) => (
+                        <g key={`xw-${k}`}>
+                          <line x1={i0.x + sg[0] * scale} y1={i0.y + sg[1] * scale} x2={i0.x + sg[2] * scale} y2={i0.y + sg[3] * scale} stroke={LINE_PRIMARY} strokeWidth={(4 / 12) * scale + 0.64} />
+                          <line x1={i0.x + sg[0] * scale} y1={i0.y + sg[1] * scale} x2={i0.x + sg[2] * scale} y2={i0.y + sg[3] * scale} stroke={BG_FILL} strokeWidth={(4 / 12) * scale} />
+                        </g>
+                      ))}
+                    </g>
+                  )}
                   <g id={`cad-opening-symbols-${index}`}>
                     {roomList.map((rm: any, rIdx: number) => {
                       const rx = i0.x + (rm.x || 0) * scale;
@@ -1195,10 +1233,20 @@ export default function CadFloorPlansView({
               );
             })()}
 
-            {renderSideDim(p0, p1, centerPt, scale, measurementUnit)}
-            {renderSideDim(p3, p2, centerPt, scale, measurementUnit)}
-            {renderSideDim(p1, p2, centerPt, scale, measurementUnit)}
-            {renderSideDim(p0, p3, centerPt, scale, measurementUnit)}
+            {hasOutline ? (
+              outerPolyPx.map((a: any, k: number) => {
+                const b = outerPolyPx[(k + 1) % outerPolyPx.length];
+                if (Math.hypot(b.x - a.x, b.y - a.y) < 3 * scale) return null;
+                return <React.Fragment key={`odim-${index}-${k}`}>{renderSideDim(a, b, centerPt, scale, measurementUnit)}</React.Fragment>;
+              })
+            ) : (
+              <>
+                {renderSideDim(p0, p1, centerPt, scale, measurementUnit)}
+                {renderSideDim(p3, p2, centerPt, scale, measurementUnit)}
+                {renderSideDim(p1, p2, centerPt, scale, measurementUnit)}
+                {renderSideDim(p0, p3, centerPt, scale, measurementUnit)}
+              </>
+            )}
 
             {/* section-cut symbols (A-A, B-B ...): same positions that drive the Section views */}
             {sectionMarkers.map((m) => (

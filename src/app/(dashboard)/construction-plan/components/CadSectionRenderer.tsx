@@ -13,6 +13,8 @@ interface Props {
   mosV1Ft?: number;      // ... at the v = lengthV end
   hasBasement?: boolean;
   basementFt?: number;
+  /** v10: level call-outs poori sheet me sirf ek baar */
+  showLevels?: boolean;
 }
 
 const BOUNDARY_WALL_H = 6;            // ft above G.L.
@@ -33,7 +35,7 @@ function subtract(lo: number, hi: number, cut: [number, number][]): [number, num
  *  SOLID BLACK = cut RCC slabs / beams / stair / cut walls   THIN LINES = everything seen BEYOND the cut plane
  */
 export default function CadSectionRenderer({
-  model, levels, scale, x0, measurementUnit, mosV0Ft = 0, mosV1Ft = 0, hasBasement, basementFt = 8,
+  model, levels, scale, x0, measurementUnit, mosV0Ft = 0, mosV1Ft = 0, hasBasement, basementFt = 8, showLevels = true,
 }: Props) {
   const len = model.lengthV;
   const vertical = model.cut.axis === "VERTICAL";
@@ -296,7 +298,7 @@ export default function CadSectionRenderer({
         <g key={`hd-${i}`}>{renderHeightDim(xl, Y(lf.ffl), Y(lf.slabTop), fmt(lf.slabTop - lf.ffl), "left", INK, scale)}</g>
       ))}
 
-      <LevelMarkers tags={levelTagsFrom(levels, !!model.tower)} plinthFt={plinth} xEdge={rightEdge} scale={scale} unit={measurementUnit} />
+      {showLevels && <LevelMarkers tags={levelTagsFrom(levels, !!model.tower)} plinthFt={plinth} xEdge={rightEdge} scale={scale} unit={measurementUnit} />}
 
       <text x={(xl + xr) / 2} y={titleY} fill={INK} fontSize="10" fontWeight="bold" textAnchor="middle">{model.title}</text>
       <text x={(xl + xr) / 2} y={titleY + 11} fill={GREY} fontSize="6" fontWeight="bold" textAnchor="middle">

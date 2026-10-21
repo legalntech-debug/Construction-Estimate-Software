@@ -60,6 +60,8 @@ interface CadModalViewProps {
   measurementUnit: "FEET" | "METERS";
   plotArea: number;
   isMultiDimShape: boolean;
+  /** v12: irregular plot ke side-angle / slant (CAD me user ne jo set kiya) -> engine ko plan shape ke liye */
+  onPlotShapeParamsChange?: (p: { angles: Record<string, number>; slant: Record<string, string> }) => void;
   boundaryNorth: string;
   setBoundaryNorth: (val: string) => void;
   boundarySouth: string;
@@ -177,11 +179,16 @@ export default function CadModalView({
   floorSettings,
   floorBhkConfig,
   planningMode,
+  onPlotShapeParamsChange,
 }: CadModalViewProps) {
   
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
   const [mosAngles, setMosAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
   const [sideSlant, setSideSlant] = useState<Record<string, "MID" | "LEFT" | "RIGHT">>({ A: "MID", B: "MID", C: "MID", D: "MID", E: "MID", F: "MID" });
+  useEffect(() => {
+    if (onPlotShapeParamsChange) onPlotShapeParamsChange({ angles: sideAngles, slant: sideSlant });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sideAngles, sideSlant]);
   
   const [localNorthRoad, setLocalNorthRoad] = useState<number>(roadWidthNorth ?? 15);
   const [localSouthRoad, setLocalSouthRoad] = useState<number>(roadWidthSouth ?? 15);
@@ -484,7 +491,7 @@ export default function CadModalView({
     let fW = Number(fData.width) || dimA;
     let fL = Number(fData.length) || dimC;
     
-    if (floorKey.toUpperCase().includes("GROUND") && fW > fL && fL <= dimA) {
+    if (!(fData as any).outline && floorKey.toUpperCase().includes("GROUND") && fW > fL && fL <= dimA) {
       const temp = fW;
       fW = fL;
       fL = temp;

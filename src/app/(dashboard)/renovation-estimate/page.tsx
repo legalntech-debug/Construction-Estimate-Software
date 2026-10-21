@@ -1,14 +1,58 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+// Persisted renovation form data is cleared automatically when the user leaves the form flow
+const RENOVATION_STORAGE_KEYS = ["RenovationEstimatePreview", "renovationEstimatePreview", "renovationEstimateData"];
+const clearRenovationStorage = () => {
+  try { RENOVATION_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k)); } catch {}
+};
+
+// Rules that apply while editing an estimate under the same reference number
+const RENOVATION_EDIT_LIMIT = 3;          // Maximum edits per reference number (name/address, plot area, floor area, rate)
+const ESTIMATE_VALIDITY_DAYS = 60;        // After this many days a new reference number and a new payment are required
+const NAME_ADDRESS_CHANGE_LIMIT = 15;     // Percent: a larger name/address change is treated as a new estimate
+
+// True for a persisted reference number; false for temporary ones (REF-..., TEMP..., placeholders)
+const isRealRef = (r?: string | null) => !!r && !/^(REF-|TEMP)/i.test(r) && !r.includes("...");
+
+// Returns how much a text value changed (in percent) using a character-level (Levenshtein) comparison
+const calculatePercentageChange = (str1: string, str2: string) => {
+  const a = (str1 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const b = (str2 || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!a && !b) return 0;
+  if (!a || !b) return 100;
+  let prev = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let x = 1; x <= a.length; x++) {
+    const cur = [x];
+    for (let y = 1; y <= b.length; y++) {
+      cur[y] = Math.min(prev[y] + 1, cur[y - 1] + 1, prev[y - 1] + (a[x - 1] === b[y - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return (prev[b.length] / Math.max(a.length, b.length)) * 100;
+};
+
+const floorAreaMap = (fd: any) => {
+  const o: Record<string, number> = {};
+  Object.keys(fd || {}).sort().forEach((k) => { o[k] = Number(fd[k]?.area || 0); });
+  return o;
+};
+
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
-  "BASEMENT", "FIRST FLOOR", "SECOND FLOOR", "TOWER", "THIRD FLOOR", 
-  "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", 
+  "BASEMENT", "FIRST FLOOR", "SECOND FLOOR", "TOWER", "THIRD FLOOR",
+  "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR",
   "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR"
 ];
+
+// Format number in Indian style: 1500000 -> "15,00,000"
+const formatIndian = (num: number | string): string => {
+  const n = typeof num === "string" ? parseFloat(num.replace(/[^0-9.]/g, "")) : num;
+  if (!n || isNaN(n)) return "";
+  return n.toLocaleString("en-IN");
+};
 
 export default function RenovationEstimatePage() {
   const router = useRouter();
@@ -21,15 +65,22 @@ export default function RenovationEstimatePage() {
   const [customerName, setCustomerName] = useState("");
   const [propertyAddress, setPropertyAddress] = useState("");
   const [plotArea, setPlotArea] = useState("");
-  
+
+  // Eye toggle — boxes are COMPLETELY hidden until eye is clicked
+  const [showClientFields, setShowClientFields] = useState(false);
+
   const [selectedFloors, setSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
   const [isFloorModalOpen, setIsFloorModalOpen] = useState(false);
   const [tempSelectedFloors, setTempSelectedFloors] = useState<string[]>(DEFAULT_FLOORS);
-  
+
   const [floorData, setFloorData] = useState<Record<string, { length: number; width: number; area: number }>>({});
-  
+
   const [rate, setRate] = useState<number>(0);
   const [amount, setAmount] = useState<number>(0);
+  // String states for smooth typing
+  const [rateInput, setRateInput] = useState<string>("");
+  const [amountInput, setAmountInput] = useState<string>("");
+
   const [feeMode, setFeeMode] = useState("AUTO");
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
@@ -39,9 +90,25 @@ export default function RenovationEstimatePage() {
   const [caseType, setCaseType] = useState("RENOVATION");
   const [currentRefNo, setCurrentRefNo] = useState("");
 
+  // Flag to suppress auto-recalc effect right after amount blur
+  const skipAutoRecalc = useRef(false);
+  const goingToPreviewRef = useRef(false);
+  const isMountedRef = useRef(false);
+
+  // Clear the persisted input data when the user leaves the flow (e.g. dashboard); keep it when moving to the preview
   useEffect(() => {
-    const savedData = localStorage.getItem("renovationEstimateData") || 
-                    localStorage.getItem("renovationEstimatePreview") || 
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToPreviewRef.current) clearRenovationStorage();
+      }, 0);
+    };
+  }, []);
+
+  useEffect(() => {
+    const savedData = localStorage.getItem("renovationEstimateData") ||
+                    localStorage.getItem("renovationEstimatePreview") ||
                     localStorage.getItem("estimatePreview");
     if (savedData) {
       try {
@@ -52,9 +119,19 @@ export default function RenovationEstimatePage() {
         setRepresentative(parsedData.representative || "");
         setPropertyAddress(parsedData.property_address || "");
         setPlotArea(parsedData.plot_area?.toString() || "");
-        
+
+        if (parsedData.client_name || parsedData.representative) {
+          setShowClientFields(true);
+        }
+
         const loadedRate = parsedData.rate_per_sqft || 0;
         setRate(loadedRate);
+        setRateInput(loadedRate ? String(loadedRate) : "");
+
+        const loadedAmount = parsedData.total_value || 0;
+        setAmount(loadedAmount);
+        setAmountInput(loadedAmount ? formatIndian(loadedAmount) : "");
+
         setFeeMode(parsedData.fee_mode || "AUTO");
         if (parsedData.fee_amount) setManualFee(parsedData.fee_amount);
 
@@ -73,9 +150,6 @@ export default function RenovationEstimatePage() {
         }
 
         setTotalBuiltUpArea(calculatedArea);
-        const finalAmount = loadedRate * calculatedArea;
-        setAmount(finalAmount);
-
       } catch (e) {
         console.error("Error parsing reopen data", e);
       }
@@ -98,7 +172,7 @@ export default function RenovationEstimatePage() {
         const uniqueReps = Array.from(
           new Set(clientsTable.map((c: any) => c.representative_name).filter(Boolean))
         ) as string[];
-        
+
         setAllRepresentatives(uniqueReps);
         setFilteredReps(uniqueReps);
       }
@@ -131,7 +205,7 @@ export default function RenovationEstimatePage() {
     const validLength = Math.max(0, l);
     const validWidth = Math.max(0, w);
     const newArea = parseFloat((validLength * validWidth).toFixed(2));
-    
+
     const plotAreaNum = parseFloat(plotArea) || 0;
     if (propertyType === "HOUSE" && plotAreaNum > 0 && newArea > plotAreaNum) {
       alert(`Validation Error: Floor "${floor}" area (${newArea} SQ.FT) cannot exceed the Plot Area (${plotAreaNum} SQ.FT).`);
@@ -142,7 +216,13 @@ export default function RenovationEstimatePage() {
     setFloorData(updatedFloorData);
   };
 
+  // Auto-recalc amount when area / rate changes
   useEffect(() => {
+    if (skipAutoRecalc.current) {
+      skipAutoRecalc.current = false;
+      return;
+    }
+
     if (propertyType === "HOUSE") {
       let newTotal = 0;
       Object.entries(floorData).forEach(([f, data]) => {
@@ -151,15 +231,53 @@ export default function RenovationEstimatePage() {
         }
       });
       setTotalBuiltUpArea(newTotal);
-      setAmount(parseFloat((newTotal * rate).toFixed(2)));
+      const newAmount = parseFloat((newTotal * rate).toFixed(2));
+      setAmount(newAmount);
+      setAmountInput(newAmount ? formatIndian(newAmount) : "");
     } else {
       const areaNum = parseFloat(plotArea) || 0;
       setTotalBuiltUpArea(areaNum);
-      setAmount(parseFloat((areaNum * rate).toFixed(2)));
+      const newAmount = parseFloat((areaNum * rate).toFixed(2));
+      setAmount(newAmount);
+      setAmountInput(newAmount ? formatIndian(newAmount) : "");
     }
   }, [floorData, propertyType, plotArea, selectedFloors, rate]);
 
-  const navigateToPreview = () => {
+  // Rate input: only digits/dot, on blur do reverse calc
+  const handleRateChange = (val: string) => {
+    const cleaned = val.replace(/[^0-9.]/g, "");
+    setRateInput(cleaned);
+  };
+
+  const handleRateBlur = () => {
+    const r = parseFloat(rateInput) || 0;
+    setRate(r);
+    if (totalBuiltUpArea > 0) {
+      const newAmount = parseFloat((r * totalBuiltUpArea).toFixed(2));
+      setAmount(newAmount);
+      setAmountInput(newAmount ? formatIndian(newAmount) : "");
+    }
+  };
+
+  // Amount input: only digits/dot, keep raw during typing
+  const handleAmountChange = (val: string) => {
+    const cleaned = val.replace(/[^0-9.]/g, "");
+    setAmountInput(cleaned);
+  };
+
+  const handleAmountBlur = () => {
+    const amt = parseFloat(amountInput.replace(/[^0-9.]/g, '')) || 0;
+    skipAutoRecalc.current = true;
+    setAmount(amt);
+    setAmountInput(amt ? formatIndian(amt) : "");
+    if (totalBuiltUpArea > 0) {
+      const calculatedRate = parseFloat((amt / totalBuiltUpArea).toFixed(2));
+      setRate(calculatedRate);
+      setRateInput(calculatedRate ? String(calculatedRate) : "");
+    }
+  };
+
+  const navigateToPreview = (opts?: { refNo?: string; forceNew?: boolean; previousRef?: string; reason?: string }) => {
     const cleanedFloorDetails: any = {};
     selectedFloors.forEach(f => {
       if (floorData[f]) {
@@ -170,7 +288,10 @@ export default function RenovationEstimatePage() {
     const finalFee = feeMode === "AUTO" ? registeredFee : manualFee;
 
     const estimateData = {
-      ref_no: currentRefNo || ("REF-" + Date.now()),
+      ref_no: opts?.refNo || currentRefNo || ("REF-" + Date.now()),
+      force_new_ref: !!opts?.forceNew,
+      previous_ref_no: opts?.previousRef || null,
+      new_ref_reason: opts?.reason || null,
       customer_name: customerName,
       client_name: selectedClientName,
       representative: representative,
@@ -182,22 +303,25 @@ export default function RenovationEstimatePage() {
       total_construction_cost: amount,
       total_value: amount,
       estimate_type: caseType,
-      property_type: propertyType,    
-      floor_details: cleanedFloorDetails,      
+      property_type: propertyType,
+      floor_details: cleanedFloorDetails,
       selected_floors: selectedFloors,
       fee_amount: finalFee,
       fee_mode: feeMode
      };
-    
+
     localStorage.setItem("renovationEstimatePreview", JSON.stringify(estimateData));
     localStorage.setItem("RenovationEstimatePreview", JSON.stringify(estimateData));
+    goingToPreviewRef.current = true;
     router.push("/renovation-estimate-preview");
   };
 
   const handleGenerate = async () => {
-    if (!selectedClientName.trim() || !representative.trim()) {
-      alert("Validation Error: Please select both Client Name and Representative.");
-      return;
+    if (showClientFields) {
+      if (!selectedClientName.trim() || !representative.trim()) {
+        alert("Validation Error: Please select both Client Name and Representative, or hide them with the eye icon.");
+        return;
+      }
     }
 
     if (!customerName.trim() || !propertyAddress.trim() || rate <= 0) {
@@ -225,19 +349,119 @@ export default function RenovationEstimatePage() {
         }
       }
     }
-    
-    navigateToPreview();
-  };  
+
+    // ================= SAME-REFERENCE RULES =================
+    let stored: any = {};
+    try {
+      stored = JSON.parse(
+        localStorage.getItem("renovationEstimateData") ||
+        localStorage.getItem("renovationEstimatePreview") ||
+        localStorage.getItem("estimatePreview") || "{}"
+      );
+    } catch {}
+    const storedRef: string = stored.ref_no || currentRefNo || "";
+    let refNo = storedRef || ("REF-" + Date.now());
+    let newRef = !storedRef;
+    let forceFlag = false;
+    let reason = "";
+
+    // A new payment was already required for this (still unpaid) estimate: keep the flag,
+    // otherwise navigating back and forward would let the user skip the new payment
+    if (storedRef && stored.force_new_ref && !isRealRef(storedRef)) {
+      forceFlag = true;
+      reason = stored.new_ref_reason || "EXPIRED_60_DAYS";
+    }
+
+    if (storedRef && !forceFlag) {
+      // 1) Saved estimate older than the validity period -> new reference number + new payment
+      if (isRealRef(storedRef)) {
+        try {
+          const { data: rec } = await supabase.from("estimates").select("*").eq("ref_no", storedRef).maybeSingle();
+          const createdAt = rec?.created_at ? new Date(rec.created_at).getTime() : 0;
+          if (createdAt && Date.now() - createdAt > ESTIMATE_VALIDITY_DAYS * 24 * 60 * 60 * 1000) {
+            if (!confirm(`Ye estimate ${ESTIMATE_VALIDITY_DAYS} din se purana hai.\nNaya REF NO banega aur naye estimate ka payment lagega. Continue?`)) return;
+            newRef = true; forceFlag = true; reason = "EXPIRED_60_DAYS";
+          }
+        } catch (e) { console.error("Validity check failed", e); }
+      }
+
+      // 2) Name and/or address changed by more than the allowed percentage -> new reference number + new payment
+      if (!newRef) {
+        const nameChg = calculatePercentageChange(customerName, stored.customer_name || "");
+        const addrChg = calculatePercentageChange(propertyAddress, stored.property_address || "");
+        if (stored.customer_name && stored.property_address &&
+            (nameChg > NAME_ADDRESS_CHANGE_LIMIT || addrChg > NAME_ADDRESS_CHANGE_LIMIT)) {
+          if (isRealRef(storedRef) &&
+              !confirm(`Customer name / property address ${NAME_ADDRESS_CHANGE_LIMIT}% se zyada badal gaya hai.\nNaya REF NO banega aur naye estimate ka payment lagega. Continue?`)) return;
+          newRef = true;
+          reason = "NAME_ADDRESS_CHANGED";
+        }
+      }
+
+      if (newRef) refNo = "REF-" + Date.now();
+
+      // 3) Enforce the edit limit on the same reference number (name/address, plot area, floor area, rate)
+      if (!newRef && isRealRef(storedRef)) {
+        const tracked = (d: any) => JSON.stringify({
+          n: String(d.customer_name || "").trim().toUpperCase(),
+          a: String(d.property_address || "").trim().toUpperCase(),
+          p: Number(d.plot_area || 0),
+          r: Number(d.rate_per_sqft ?? d.rate ?? 0),
+          f: floorAreaMap(d.floor_details),
+        });
+        const cleaned: any = {};
+        selectedFloors.forEach((fl) => { if (floorData[fl]) cleaned[fl] = floorData[fl]; });
+        const before = tracked(stored);
+        const after = tracked({
+          customer_name: customerName, property_address: propertyAddress,
+          plot_area: plotArea, rate_per_sqft: rate, floor_details: cleaned,
+        });
+        if (before !== after) {
+          try {
+            const { count, error: cErr } = await supabase
+              .from("estimate_history")
+              .select("*", { count: "exact", head: true })
+              .eq("ref_no", storedRef);
+            if (!cErr && count !== null && count >= RENOVATION_EDIT_LIMIT) {
+              alert(`LIMIT REACHED: Aap is estimate (Ref: ${storedRef}) ko ${RENOVATION_EDIT_LIMIT} baar se zyada edit nahi kar sakte.\nNaya estimate banane ke liye "Clear" dabayein.`);
+              return;
+            }
+            const { data: { user } } = await supabase.auth.getUser();
+            await supabase.from("estimate_history").insert([{
+              ref_no: storedRef,
+              action_type: "RENOVATION_EDIT",
+              user_id: user?.id || null,
+              changes: JSON.stringify({
+                customer_name: customerName, property_address: propertyAddress,
+                plot_area: plotArea, rate_per_sqft: rate, floor_details: cleaned,
+              }),
+              created_at: new Date().toISOString(),
+            }]);
+          } catch (e) { console.error("Edit history error", e); }
+        }
+      }
+    }
+
+    setCurrentRefNo(refNo);
+    navigateToPreview({
+      refNo,
+      forceNew: forceFlag,
+      previousRef: forceFlag || reason ? storedRef : undefined,
+      reason,
+    });
+  };
 
   const handleClear = () => {
     localStorage.removeItem("RenovationEstimatePreview");
     localStorage.removeItem("renovationEstimatePreview");
     localStorage.removeItem("estimatePreview");
     localStorage.removeItem("renovationEstimateData");
-    
+
     setFloorData({});
     setRate(0);
+    setRateInput("");
     setAmount(0);
+    setAmountInput("");
     setCustomerName("");
     setPropertyAddress("");
     setPlotArea("");
@@ -247,18 +471,19 @@ export default function RenovationEstimatePage() {
     setTotalBuiltUpArea(0);
     setFeeMode("AUTO");
     setManualFee(0);
-    
+    setShowClientFields(false);
+
     window.location.reload();
   };
 
-  const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
+  const isClientFilled = !showClientFields || (selectedClientName.trim() !== "" && representative.trim() !== "");
   const isCustomerFilled = isClientFilled && customerName.trim() !== "";
   const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
   const isPlotFilled = isAddressFilled && String(plotArea || "").trim() !== "";
 
   return (
     <div className="w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-sm sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-auto">
-      
+
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-3 mb-4 gap-2">
         <div className="hidden sm:block w-24"></div>
@@ -268,20 +493,20 @@ export default function RenovationEstimatePage() {
         <div>
           <label className="bg-black text-white px-3 py-1.5 font-bold text-xs sm:text-base uppercase cursor-pointer hover:bg-gray-800 flex items-center gap-1 shadow">
             📁 UPLOAD DOC / AI SCAN
-            <input 
-              type="file" 
-              className="hidden" 
+            <input
+              type="file"
+              className="hidden"
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) {
                   alert(`Document "${file.name}" uploaded successfully! (AI Auto-Extraction will be connected here soon.)`);
                 }
-              }} 
+              }}
             />
           </label>
         </div>
       </div>
-      
+
       {/* Top Fields Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
         <div className="col-span-1">
@@ -301,13 +526,69 @@ export default function RenovationEstimatePage() {
             <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
+
+        {/* CLIENT NAME: label always visible, box only when eye is ON */}
         <div className="col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">CLIENT NAME</label>
-          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
+          <label className="font-bold text-xs sm:text-lg flex items-center justify-between gap-1">
+            <span>CLIENT NAME</span>
+            <button
+              type="button"
+              title={showClientFields ? "Hide Client / Rep" : "Show Client / Rep"}
+              onClick={() => {
+                const next = !showClientFields;
+                setShowClientFields(next);
+                if (!next) {
+                  setSelectedClientName("");
+                  setRepresentative("");
+                }
+              }}
+              className="text-base sm:text-xl leading-none px-1 hover:opacity-70"
+              style={{ filter: showClientFields ? "none" : "grayscale(100%) opacity(0.45)" }}
+            >
+              👁️
+            </button>
+          </label>
+          {showClientFields && (
+            <input
+              list="clients-list"
+              value={selectedClientName}
+              onChange={(e) => handleClientChange(e.target.value)}
+              className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg"
+              placeholder="SEARCH CLIENT..."
+            />
+          )}
         </div>
+
+        {/* REPRESENTATIVE: label always visible, box only when eye is ON */}
         <div className="col-span-1">
-          <label className="font-bold block text-xs sm:text-lg">REPRESENTATIVE</label>
-          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
+          <label className="font-bold text-xs sm:text-lg flex items-center justify-between gap-1">
+            <span>REPRESENTATIVE</span>
+            <button
+              type="button"
+              title={showClientFields ? "Hide Client / Rep" : "Show Client / Rep"}
+              onClick={() => {
+                const next = !showClientFields;
+                setShowClientFields(next);
+                if (!next) {
+                  setSelectedClientName("");
+                  setRepresentative("");
+                }
+              }}
+              className="text-base sm:text-xl leading-none px-1 hover:opacity-70"
+              style={{ filter: showClientFields ? "none" : "grayscale(100%) opacity(0.45)" }}
+            >
+              👁️
+            </button>
+          </label>
+          {showClientFields && (
+            <input
+              list="reps-list"
+              value={representative}
+              onChange={(e) => setRepresentative(e.target.value)}
+              className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg"
+              placeholder="SEARCH REP..."
+            />
+          )}
         </div>
       </div>
 
@@ -315,44 +596,44 @@ export default function RenovationEstimatePage() {
       <div className="mb-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
           <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">CUSTOMER NAME</label>
-          <textarea 
-            value={customerName} 
+          <textarea
+            value={customerName}
             disabled={!isClientFilled}
             onChange={(e) => {
               setCustomerName(e.target.value);
               e.target.style.height = "auto";
               e.target.style.height = `${e.target.scrollHeight}px`;
-            }} 
+            }}
             ref={(el) => {
               if (el) {
                 el.style.height = "auto";
                 el.style.height = `${el.scrollHeight}px`;
               }
             }}
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
-            rows={1} 
-            placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`}
+            rows={1}
+            placeholder="e.g. Mr. Raju Dubela s/o Mr. Premchand Dubela"
           />
         </div>
         <div className="grid grid-cols-1 md:grid-cols-12 items-center gap-2 md:gap-4">
           <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">PROPERTY ADDRESS</label>
-          <textarea 
-            value={propertyAddress} 
+          <textarea
+            value={propertyAddress}
             disabled={!isCustomerFilled}
             onChange={(e) => {
               setPropertyAddress(e.target.value);
               e.target.style.height = "auto";
               e.target.style.height = `${e.target.scrollHeight}px`;
-            }} 
+            }}
             ref={(el) => {
               if (el) {
                 el.style.height = "auto";
                 el.style.height = `${el.scrollHeight}px`;
               }
             }}
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
-            rows={2} 
-            placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`}
+            rows={2}
+            placeholder="e.g. Plot No. 110 Bajrang Nagar, On Land Survey No. 22, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, MP"
           />
         </div>
       </div>
@@ -417,34 +698,27 @@ export default function RenovationEstimatePage() {
         <div className="text-center font-bold text-lg hidden sm:block">X</div>
         <div className="col-span-1">
           <label className="font-bold block text-xs sm:text-lg">RATE / SQ.FT</label>
-          <input 
-            type="number" 
-            step="0.01" 
-            value={rate || ""} 
-            onChange={(e) => { 
-              const r = parseFloat(e.target.value) || 0; 
-              setRate(r); 
-              setAmount(parseFloat((r * totalBuiltUpArea).toFixed(2))); 
-            }} 
-            className="w-full text-center border border-black p-2 text-xs sm:text-lg" 
+          <input
+            type="number"
+            step="0.01"
+            value={rateInput}
+            onChange={(e) => handleRateChange(e.target.value)}
+            onBlur={handleRateBlur}
+            className="w-full text-center border border-black p-2 text-xs sm:text-lg"
           />
         </div>
         <div className="text-center font-bold text-lg hidden sm:block">=</div>
         <div className="col-span-2 sm:col-span-1">
           <label className="font-bold block text-xs sm:text-lg">TOTAL AMOUNT</label>
-          <input 
-            type="text" 
-            value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
-            onChange={(e) => {
-              const rawVal = e.target.value.replace(/[^0-9.]/g, '');
-              const amt = parseFloat(rawVal) || 0;
-              setAmount(amt);
-              if (totalBuiltUpArea > 0) {
-                const calculatedRate = parseFloat((amt / totalBuiltUpArea).toFixed(2));
-                setRate(calculatedRate);
-              }
-            }} 
-            className="w-full border border-black p-2 text-center bg-gray-100 font-bold text-xs sm:text-lg" 
+          {/* Amount with /- suffix — always shown when there's a value */}
+          <input
+            type="text"
+            inputMode="numeric"
+            value={amountInput ? amountInput + "/-" : ""}
+            onChange={(e) => handleAmountChange(e.target.value)}
+            onBlur={handleAmountBlur}
+            className="w-full border border-black p-2 text-center bg-gray-100 font-bold text-xs sm:text-lg"
+            placeholder="0/-"
           />
         </div>
       </div>
@@ -477,12 +751,12 @@ export default function RenovationEstimatePage() {
             </div>
             <div className="flex justify-end gap-3 mt-4">
               <button className="border border-black px-4 py-2" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
-              <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => { 
+              <button className="bg-black text-white px-4 py-2 font-bold" onClick={() => {
                 const floorSequence = ["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"];
                 const sortedFloors = [...tempSelectedFloors].sort((a, b) => floorSequence.indexOf(a) - floorSequence.indexOf(b));
-                
-                setSelectedFloors(sortedFloors); 
-                
+
+                setSelectedFloors(sortedFloors);
+
                 setFloorData(prev => {
                   const updatedData = { ...prev };
                   Object.keys(updatedData).forEach(f => {
@@ -493,7 +767,7 @@ export default function RenovationEstimatePage() {
                   return updatedData;
                 });
 
-                setIsFloorModalOpen(false); 
+                setIsFloorModalOpen(false);
               }}>ADD SELECTED</button>
             </div>
           </div>

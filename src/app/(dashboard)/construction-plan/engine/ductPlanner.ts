@@ -37,6 +37,8 @@ export function optimizeWetCore(rooms: FloorRoom[]): FloorRoom[] {
   // 1. Agar user ne DUCT select nahi kiya to kuch mat karo
   const userSelectedDuct = rooms.some(r => kind(r) === 'duct');
   if (!userSelectedDuct) return rooms;
+  // v12: planner ne pehle se common toilet ke peeche DUCT bana diya hai -> usse mat chhedo
+  if (rooms.some(r => (r as any).placementRule === 'DUCT_BEHIND_COMMON_TOILET')) return rooms;
 
   // 2. Wet core rooms identify karo
   const wetRooms = rooms.filter(r => kind(r) === 'bathroom');

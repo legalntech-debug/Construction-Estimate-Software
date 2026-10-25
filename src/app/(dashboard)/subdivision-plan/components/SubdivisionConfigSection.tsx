@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { PlotDimensions, PlotShape } from "../../construction-plan/engine/planningTypes";
+// ✅ Rasta theek kiya gaya hai
+import { PlotDimensions, PlotShape } from "../subdivisionTypes";
 
 interface SubdivisionConfigSectionProps {
   measurementUnit: "FEET" | "METERS";

@@ -3,7 +3,9 @@
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { PlotDimensions, PlotShape } from "../construction-plan/engine/planningTypes";
+
+// ✅ Fixed Imports (Raste theek kar diye gaye hain)
+import { PlotDimensions, PlotShape } from "./subdivisionTypes";
 import SubdivisionClientDetails from "./components/SubdivisionClientDetails";
 import SubdivisionConfigSection from "./components/SubdivisionConfigSection";
 import SimpleSubdivisionInput, { SimpleSubdivisionConfig } from "./components/SimpleSubdivisionInput";
@@ -75,7 +77,6 @@ export default function SubdivisionPlanInput() {
   const [boundaryEast, setBoundaryEast] = useState("");
   const [boundaryWest, setBoundaryWest] = useState("");
 
-  // ✅ Simple subdivision config — with mode
   const [subdivisionConfig, setSubdivisionConfig] = useState<SimpleSubdivisionConfig>(
     DEFAULT_SUBDIVISION_CONFIG
   );
@@ -188,7 +189,6 @@ export default function SubdivisionPlanInput() {
           east: boundaryEast || "",
           west: boundaryWest || "",
         },
-        // ✅ Full subdivision config — mode + count + splitBy + direction + customPieces + corner + road
         subdivisionConfig: {
           mode: subdivisionConfig.mode || "SIMPLE",
           count: subdivisionConfig.count,
@@ -199,11 +199,10 @@ export default function SubdivisionPlanInput() {
             : undefined,
           corner: subdivisionConfig.corner,
           road: subdivisionConfig.road,
-          // TEMPLATE / MANUAL modes carry their own layout definition
           template: subdivisionConfig.mode === "TEMPLATE" ? subdivisionConfig.template : undefined,
           manual: subdivisionConfig.mode === "MANUAL" ? subdivisionConfig.manual : undefined,
         },
-        pieces: [], // The actual pieces are generated on the preview page
+        pieces: [], 
         createdAt: new Date().toISOString(),
       };
 
@@ -223,7 +222,7 @@ export default function SubdivisionPlanInput() {
     handleResetDimensions();
     setBoundaryNorth(""); setBoundarySouth("");
     setBoundaryEast(""); setBoundaryWest("");
-    setSubdivisionConfig(DEFAULT_SUBDIVISION_CONFIG);  // ✅ reset with default
+    setSubdivisionConfig(DEFAULT_SUBDIVISION_CONFIG);
     alert("Form cleared!");
   };
 
@@ -235,7 +234,6 @@ export default function SubdivisionPlanInput() {
         SUBDIVISION PLAN INPUT FORM
       </div>
 
-      {/* 1. CLIENT DETAILS */}
       <SubdivisionClientDetails
         caseType={caseType} setCaseType={setCaseType}
         feeMode={feeMode} setFeeMode={setFeeMode} setManualFee={setManualFee}
@@ -246,7 +244,6 @@ export default function SubdivisionPlanInput() {
         propertyAddress={propertyAddress} setPropertyAddress={setPropertyAddress}
       />
 
-      {/* 2. PLOT GEOMETRY */}
       <SubdivisionConfigSection
         measurementUnit={measurementUnit} setMeasurementUnit={setMeasurementUnit}
         roadFacingOption={roadFacingOption} setRoadFacingOption={setRoadFacingOption}
@@ -267,7 +264,6 @@ export default function SubdivisionPlanInput() {
         calculatedNetArea={plotArea}
       />
 
-      {/* 3. SUBDIVISION INPUT (6 modes: simple, corner, with road, custom grid, template, manual) */}
       {hasPlotGeometry ? (
         <SimpleSubdivisionInput
           value={subdivisionConfig}
@@ -282,7 +278,6 @@ export default function SubdivisionPlanInput() {
         </div>
       )}
 
-      {/* 4. ACTIONS */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 border-t-2 border-black pt-3">
         <button
           type="button"

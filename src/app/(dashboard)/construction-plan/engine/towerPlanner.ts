@@ -41,6 +41,8 @@ export interface TowerLayout {
   /** v13: box ke baaki hisse (side / end strips) - room ke saath milkar poora box banate hain */
   extraRooms?: Rect[];
   placement: TowerPlacement | null;
+  /** v19: SINGLE = stair + extra ek hi kamra (beech me wall nahi) / SEPARATE = stair core (mumty) alag + adjoining room alag */
+  mode?: 'SINGLE' | 'SEPARATE';
   stairArea: number;
   roomArea: number;
   totalArea: number;
@@ -56,7 +58,7 @@ export function towerStairArea(stair: Pick<Rect, 'w' | 'h'>): number {
   return r2(Math.max(0, stair.w) * Math.max(0, stair.h));
 }
 
-export function planTowerLayout(inp: TowerLayoutInput): TowerLayout {
+function planTowerLayoutCore(inp: TowerLayoutInput): TowerLayout {
   const W = Math.max(1, inp.canvasW);
   const L = Math.max(1, inp.canvasL);
   const sw = Math.min(Math.max(0.1, inp.stair.w), W);
@@ -200,6 +202,34 @@ export function planTowerLayout(inp: TowerLayoutInput): TowerLayout {
   return done(null, null);
 }
 
+
+/** v19 TOWER ROOM RULE
+ *   total (stair + room) 70..100 sq.ft  -> pura ek kamra (stair uske andar, beech me wall nahi)
+ *   total > 100 aur (total - stair) >= 80 sq.ft -> mumty (stair core) alag + adjoining room alag (jo area diya wo plan)
+ *   baaki (chhota extra) -> ek kamra (stair ke saath merge), chhoti patti alag room ki tarah nahi dikhti */
+export function planTowerLayout(inp: TowerLayoutInput): TowerLayout {
+  const lay = planTowerLayoutCore(inp);
+  const stairA = lay.stairArea;
+  const explicit = (inp.roomWidth ?? 0) > 0 && (inp.roomLength ?? 0) > 0;
+  const boxA = (inp.boxW ?? 0) > 0 && (inp.boxL ?? 0) > 0 ? (inp.boxW as number) * (inp.boxL as number) : 0;
+  const total = explicit ? stairA + (inp.roomWidth as number) * (inp.roomLength as number) : (boxA || (inp.towerArea ?? 0) || lay.totalArea);
+  const extra = Math.max(0, total - stairA);
+  const wantSeparate = total > 100 && extra >= 80;
+  if (wantSeparate) {
+    // room ka area >= ~80 hona chahiye: box wala ek-rectangle chhota nikla to area-path se (extra area) dobara try
+    if ((lay.roomArea || 0) < extra * 0.9 && !explicit) {
+      const alt = planTowerLayoutCore({ ...inp, boxW: 0, boxL: 0, towerArea: total });
+      if (alt.room && alt.roomArea > (lay.roomArea || 0)) { alt.mode = 'SEPARATE'; alt.notes.unshift(`Tower: total ${r2(total)} sq.ft, stair ke baad ${r2(extra)} sq.ft >= 80 -> mumty (stair) alag + adjoining room alag.`); return alt; }
+    }
+    lay.mode = 'SEPARATE';
+    lay.notes.unshift(`Tower: total ${r2(total)} sq.ft, stair ke baad ${r2(extra)} sq.ft >= 80 -> mumty (stair) alag + adjoining room alag.`);
+  } else {
+    lay.mode = 'SINGLE';
+    if (lay.room || (lay.extraRooms && lay.extraRooms.length)) lay.notes.unshift(`Tower: total ${r2(total)} sq.ft -> stair ke saath ek hi kamra (beech me wall nahi).`);
+  }
+  return lay;
+}
+
 type Face = 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT';
 const TOWER_DOOR_W = 3;
 
@@ -259,7 +289,7 @@ export function buildTowerRooms(layout: TowerLayout, canvasW?: number, canvasL?:
     areaPerRoom: layout.stairArea,
   } as FloorRoom];
   const td = planTowerDoors(layout, canvasW ?? 1e9, canvasL ?? 1e9, entryFace, exitFace);
-  if (td.stair) (rooms[0] as any).doors = [td.stair];
+  if (td.stair && layout.mode !== 'SINGLE') (rooms[0] as any).doors = [td.stair];
 
   for (const [i, ex] of (layout.extraRooms || []).entries()) {
     rooms.push({
@@ -280,5 +310,6 @@ export function buildTowerRooms(layout: TowerLayout, canvasW?: number, canvasL?:
       doors: td.room ? [td.room] : [],
     } as FloorRoom);
   }
+  if (layout.mode === 'SINGLE' && rooms.length > 1) for (const r of rooms) (r as any).mergeGroup = 'TOWER_ONE_ROOM';
   return rooms;
 }

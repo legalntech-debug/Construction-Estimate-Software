@@ -1,7 +1,32 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { isRealRef, isNameAddressChangeMajor } from "@/lib/estimateRules";
+
+// localStorage keys that carry the estimate between the input form and the preview page
+const ESTIMATE_STORAGE_KEYS = ["estimateData", "estimatePreview"];
+// sessionStorage flag set by the preview page when the user comes BACK to this form (Back to Input / browser back)
+const RETURN_TO_FORM_FLAG = "estimateReturnToForm";
+const NEW_CONSTRUCTION_TYPE = "NEW CONSTRUCTION";
+// Remembers (per browser) whether the optional Client / Representative fields are shown; hidden by default
+const CLIENT_FIELDS_PREF_KEY = "estimateShowClientFields";
+
+// Small inline eye icon (open / crossed-out) used by the show/hide toggle
+const EyeIcon = ({ off }: { off: boolean }) => (
+  <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+    {off && <line x1="3" y1="3" x2="21" y2="21" />}
+  </svg>
+);
+
+const clearSavedEstimate = () => {
+  try {
+    ESTIMATE_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+    sessionStorage.removeItem(RETURN_TO_FORM_FLAG);
+  } catch {}
+};
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
@@ -32,6 +57,27 @@ export default function EstimatePage() {
   const [manualFee, setManualFee] = useState<number>(0);
   const [registeredFee, setRegisteredFee] = useState<number>(0);
   const [currentRefNo, setCurrentRefNo] = useState("");
+
+  // Leave-the-form guard: saved data is wiped when the user leaves, except when moving on to the preview page
+  const goingToPreviewRef = useRef(false);
+  const isMountedRef = useRef(false);
+
+  // Optional Client Name / Representative fields: hidden by default, preference is remembered
+  const [showClientFields, setShowClientFields] = useState(false);
+  // Client details are mandatory only while the fields are visible or partially filled
+  const clientRequired = showClientFields || selectedClientName.trim() !== "" || representative.trim() !== "";
+
+  const toggleClientFields = () => {
+    const next = !showClientFields;
+    setShowClientFields(next);
+    try { localStorage.setItem(CLIENT_FIELDS_PREF_KEY, next ? "1" : "0"); } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(CLIENT_FIELDS_PREF_KEY) === "1") setShowClientFields(true);
+    } catch {}
+  }, []);
 
   // Wallet & Access Control States
   const [walletBalance, setWalletBalance] = useState<number>(100);
@@ -93,17 +139,47 @@ export default function EstimatePage() {
     checkWalletAndSession();
   }, []);
 
+  // Clear the saved estimate when the user leaves the input form (dashboard, another service, ...).
+  // It is kept only when the form hands over to the preview page; the preview page then decides what to keep.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Deferred so that a React strict-mode remount (isMountedRef becomes true again) does not wipe the data
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToPreviewRef.current) clearSavedEstimate();
+      }, 0);
+    };
+  }, []);
+
   useEffect(() => {
     const savedData = localStorage.getItem("estimateData") || localStorage.getItem("estimatePreview");
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
+
+        // Never load another service's data (renovation / remaining work share the same storage key)
+        if (parsed.estimate_type && parsed.estimate_type !== NEW_CONSTRUCTION_TYPE) return;
+
+        // A finished (paid) estimate is only reloaded when the user explicitly came back from the preview page.
+        // A fresh visit (new service, new session, reopened tab) must start with an empty form.
+        const isFinishedEstimate = parsed.is_paid === true || parsed.payment_status === "paid";
+        const cameBackFromPreview = sessionStorage.getItem(RETURN_TO_FORM_FLAG) === "1";
+        // (data explicitly placed under "estimateData", e.g. by a reopen flow, is never discarded here)
+        const isReopenData = !!localStorage.getItem("estimateData");
+        if (isFinishedEstimate && !cameBackFromPreview && !isReopenData) {
+          ESTIMATE_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+          return;
+        }
+
         if (parsed.ref_no) setCurrentRefNo(parsed.ref_no);
         setCustomerName(parsed.customer_name || "");
         setPropertyAddress(parsed.property_address || "");
         setPlotArea(parsed.plot_area?.toString() || "");
         setSelectedClientName(parsed.client_name || parsed.selected_client_name || "");
         setRepresentative(parsed.representative || "");
+        // A restored estimate that already has client details must show them
+        if (parsed.client_name || parsed.selected_client_name || parsed.representative) setShowClientFields(true);
         setRate(Number(parsed.rate_per_sqft) || 0);
         setFeeMode(parsed.fee_mode || "AUTO");
         if (parsed.fee_amount) setManualFee(parsed.fee_amount);
@@ -252,32 +328,9 @@ export default function EstimatePage() {
     })[0];
   };
 
-  const getSimilarity = (str1: string, str2: string): number => {
-    const longer = str1.length > str2.length ? str1 : str2;
-    const shorter = str1.length > str2.length ? str2 : str1;
-    if (longer.length === 0) return 1.0;
-    
-    const costs = new Array();
-    for (let i = 0; i <= longer.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= shorter.length; j++) {
-        if (i === 0) costs[j] = j;
-        else if (j > 0) {
-          let newValue = costs[j - 1];
-          if (longer.charAt(i - 1) !== shorter.charAt(j - 1))
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-          costs[j - 1] = lastValue;
-          lastValue = newValue;
-        }
-      }
-      if (i > 0) costs[shorter.length] = lastValue;
-    }
-    const distance = costs[shorter.length];
-    return (longer.length - distance) / longer.length;
-  };
-
   const handleGenerate = async () => {
-    if (!selectedClientName.trim() || !representative.trim()) {
+    if (clientRequired && (!selectedClientName.trim() || !representative.trim())) {
+      setShowClientFields(true);
       alert("Validation Error: Please select both Client Name and Representative.");
       return;
     }
@@ -334,16 +387,19 @@ export default function EstimatePage() {
       String(storedData.representative || "").trim() === String(representative || "").trim() &&
       JSON.stringify(storedData.floor_details || {}) === JSON.stringify(filteredFloorDetails || {});
 
-    const oldName = storedData.customer_name || "";
-    const oldAddress = storedData.property_address || "";
-    const nameSimilarity = getSimilarity(customerName, oldName);
-    const addressSimilarity = getSimilarity(propertyAddress, oldAddress);
-    
-    const needsNewRef = !storedData.ref_no || nameSimilarity < 0.8 || addressSimilarity < 0.8;
+    // Same business rule as the preview page (shared constant): name OR address changed beyond the limit => NEW estimate.
+    // A new estimate must not inherit the old id / ref no, otherwise the preview would treat it as already paid.
+    const hadRealRef = isRealRef(storedData.ref_no);
+    const majorChange = hadRealRef && isNameAddressChangeMajor(
+      { customer_name: storedData.customer_name, property_address: storedData.property_address },
+      { customer_name: customerName, property_address: propertyAddress }
+    );
+    const needsNewRef = !hadRealRef || majorChange;
     const finalRefNo = needsNewRef ? "REF-" + Date.now() : storedData.ref_no;
     setCurrentRefNo(finalRefNo);
 
-    if (!isSame) {
+    // Only edits of an existing ref no are counted / logged; a brand-new estimate starts with a clean history
+    if (!isSame && hadRealRef && !majorChange) {
       if (storedData.ref_no) {
         const { count } = await supabase
           .from('estimate_history')
@@ -351,7 +407,7 @@ export default function EstimatePage() {
           .eq('ref_no', storedData.ref_no);
           
         if (count !== null && count >= 3) {
-          alert("LIMIT REACHED: Aap is estimate ko 3 baar se zyada edit nahi kar sakte.");
+          alert("LIMIT REACHED: You cannot edit this estimate more than 3 times.");
           return;
         }
       }
@@ -376,7 +432,7 @@ export default function EstimatePage() {
       await supabase.from("estimate_history").insert([historyData]);
     }
 
-    if (!isAdminOrExempt && finalRefNo) {
+    if (!isAdminOrExempt && finalRefNo && !needsNewRef) {
       const { error: updateError } = await supabase
         .from('mis_records')
         .update({ fee: finalFee, user_id: user.id })
@@ -404,7 +460,12 @@ export default function EstimatePage() {
 
     const estimateData = {
       ref_no: finalRefNo,
-      id: storedData.id || null,
+      // Detach from the old record when this is a new estimate (major name/address change)
+      id: needsNewRef ? null : (storedData.id || null),
+      // Tells the preview page that the decision is already made: new ref no + new payment required
+      force_new_ref: majorChange,
+      new_ref_reason: majorChange ? "NAME_ADDRESS_CHANGED" : null,
+      previous_ref_no: majorChange ? storedData.ref_no : null,
       customer_name: customerName,
       client_name: selectedClientName,
       representative,
@@ -430,12 +491,13 @@ export default function EstimatePage() {
     };
     
     localStorage.setItem("estimatePreview", JSON.stringify(estimateData));
+    // The preview page needs the saved data; do not wipe it while navigating there
+    goingToPreviewRef.current = true;
     router.push("/estimate-preview");
   };
   
   const handleClear = () => {
-    localStorage.removeItem("estimateData");
-    localStorage.removeItem("estimatePreview");
+    clearSavedEstimate();
     setFloorData({});
     setRate(0);
     setAmount(0);
@@ -447,7 +509,7 @@ export default function EstimatePage() {
     setSelectedFloors(DEFAULT_FLOORS);
   };
 
-  const isClientFilled = selectedClientName.trim() !== "" && representative.trim() !== "";
+  const isClientFilled = !clientRequired || (selectedClientName.trim() !== "" && representative.trim() !== "");
   const isCustomerFilled = isClientFilled && customerName.trim() !== "";
   const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
   const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
@@ -468,7 +530,7 @@ export default function EstimatePage() {
           <div className="bg-red-100 border-2 border-red-600 text-red-700 p-6 rounded-xl max-w-lg shadow-2xl">
             <h2 className="text-2xl font-black uppercase mb-2">⚠️ Wallet Balance Low (Restricted)</h2>
             <p className="text-sm font-semibold mb-4">
-              Aapka wallet balance (₹{walletBalance}) ₹21 se kam hai aur aapka plan Basic Plan hai. Isliye Construction Estimate portal ko lock kar diya gaya hai. Kripya apna wallet recharge karein.
+              Your wallet balance (₹{walletBalance}) is below ₹21 and you are on the Basic Plan, so the Construction Estimate portal has been locked. Please recharge your wallet.
             </p>
             <button 
               onClick={() => router.push('/wallet-ledger')}
@@ -502,6 +564,14 @@ export default function EstimatePage() {
         </div>
       </div>
       
+      <style>{`
+        @keyframes estReveal { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+        @keyframes estBlink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.1); } }
+        .est-reveal { animation: estReveal 0.25s ease-out both; }
+        .est-eye-btn:hover svg { animation: estBlink 0.45s ease-in-out; }
+        @media (prefers-reduced-motion: reduce) { .est-reveal, .est-eye-btn:hover svg { animation: none; } }
+      `}</style>
+
       {/* Top Fields Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-7 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
         <div className="col-span-1 sm:col-span-2">
@@ -520,16 +590,48 @@ export default function EstimatePage() {
             <input type="number" disabled={isWalletRestricted} placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
-        <div className="col-span-1 sm:col-span-2">
+        {showClientFields ? (<>
+        <div className="est-reveal col-span-1 sm:col-span-2">
           <label className="font-bold block text-xs sm:text-lg">CLIENT NAME</label>
           <input list="clients-list" disabled={isWalletRestricted} value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
           <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
         </div>
-        <div className="col-span-1 sm:col-span-2">
-          <label className="font-bold block text-xs sm:text-lg">REPRESENTATIVE</label>
+        <div className="est-reveal col-span-1 sm:col-span-2">
+          <div className="flex items-center justify-between">
+            <label className="font-bold block text-xs sm:text-lg">REPRESENTATIVE</label>
+            <button
+              type="button"
+              onClick={toggleClientFields}
+              disabled={isWalletRestricted}
+              title="Hide Client Name & Representative"
+              aria-label="Hide Client Name and Representative"
+              className="est-eye-btn p-1 border border-black bg-white hover:bg-black hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <EyeIcon off />
+            </button>
+          </div>
           <input list="reps-list" disabled={isWalletRestricted} value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
           <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
         </div>
+        </>) : (
+        <div className="col-span-2 sm:col-span-4 flex items-end">
+          <button
+            type="button"
+            onClick={toggleClientFields}
+            disabled={isWalletRestricted}
+            title="Show Client Name & Representative"
+            aria-label="Show Client Name and Representative"
+            className="est-eye-btn w-full h-[38px] sm:h-[50px] flex items-center justify-center gap-2 px-2 border-2 border-dashed border-black bg-white text-xs sm:text-base font-bold uppercase tracking-wide hover:bg-black hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <EyeIcon off={false} />
+            <span className="truncate">
+              {selectedClientName.trim()
+                ? `CLIENT: ${selectedClientName}${representative.trim() ? " · " + representative : ""}`
+                : "SHOW CLIENT & REPRESENTATIVE"}
+            </span>
+          </button>
+        </div>
+        )}
       </div>
 
       {/* Customer Name & Property Address */}

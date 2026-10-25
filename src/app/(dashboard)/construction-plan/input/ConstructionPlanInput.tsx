@@ -870,11 +870,23 @@ export default function ConstructionPlanInput() {
     };
   }, [plotDimensions, floorData, floorRooms, floorSettings, planningMode, selectedFloors, roadFacingOption, parkingSide, boundaryNorth, boundarySouth, boundaryEast, boundaryWest]);
 
+  // Text and fee fields never influence the generated geometry (floor data / rooms).
+  // They are read through a ref so typing in them does not re-run the heavy planning
+  // engine on every keystroke.
+  const planMetaRef = useRef({
+    caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
+    selectedClientName, representative,
+  });
+  planMetaRef.current = {
+    caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
+    selectedClientName, representative,
+  };
+
   const liveGeneratedPlan = useMemo(() => {
     try {
       return generateCompleteConstructionPlan({
-        caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
-        selectedClientName, representative, measurementUnit,
+        ...planMetaRef.current,
+        measurementUnit,
         roadFacingOption: roadFacingOption || "1 SIDE ROAD (SOUTH)",
         parkingSide,
         plotShape: plotShape || "RECTANGULAR",
@@ -891,9 +903,10 @@ export default function ConstructionPlanInput() {
       console.warn("Live construction-plan generation preview fallback:", error);
       return null;
     }
+    // customerName, propertyAddress, selectedClientName, representative, caseType and
+    // fee fields are intentionally excluded (see planMetaRef above).
   }, [
-    caseType, feeMode, manualFee, registeredFee, customerName, propertyAddress,
-    selectedClientName, representative, measurementUnit, roadFacingOption,
+    measurementUnit, roadFacingOption,
     parkingSide,
     plotShape, plotShapeParams,
     plotArea, coverageType, plotDimensions, dimDetails, setbackInputs, boundaryNorth,
@@ -919,6 +932,42 @@ export default function ConstructionPlanInput() {
     });
     return result;
   }, [liveGeneratedPlan, selectedFloors, enrichedFloorData]);
+
+  // Merge engine-generated rooms with the user's selections once per change, not on every render.
+  const mergedFloorRooms = useMemo(() => {
+          const merged: Record<string, Record<string, FloorRoom>> = {};
+
+          Object.entries(generatedCadFloorRooms || {}).forEach(([floor, rooms]) => {
+            if (Array.isArray(rooms)) {
+              merged[floor] = Object.fromEntries(
+                rooms.map((r: any, idx) => [r.id || r.type || idx, { ...r }])
+              );
+            } else if (rooms && typeof rooms === "object") {
+              const cloned: Record<string, any> = {};
+              Object.entries(rooms as any).forEach(([k, v]: any) => {
+                cloned[k] = { ...(v as any) };
+              });
+              merged[floor] = cloned;
+            }
+          });
+
+          Object.entries(floorRooms || {}).forEach(([floor, roomsMap]) => {
+            const existing = merged[floor] || {};
+            const mergedFloor: Record<string, FloorRoom> = { ...existing };
+
+            Object.entries(roomsMap || {}).forEach(([roomKey, room]) => {
+              if (room && (room as any).selected) {
+                mergedFloor[roomKey] = { ...(existing[roomKey] || {}), ...room };
+              } else if (mergedFloor[roomKey]) {
+                delete mergedFloor[roomKey];
+              }
+            });
+
+            merged[floor] = mergedFloor;
+          });
+
+          return merged;
+  }, [generatedCadFloorRooms, floorRooms]);
 
   const isMultiDimShape = typeof plotShape === "string" && plotShape.includes("L-SHAPE");
 
@@ -1138,40 +1187,7 @@ export default function ConstructionPlanInput() {
         setLeftMos={(val) => setSetbackInputs(prev => ({ ...prev, left: val }))}
         setRightMos={(val) => setSetbackInputs(prev => ({ ...prev, right: val }))}
 
-        floorRooms={(() => {
-          const merged: Record<string, Record<string, FloorRoom>> = {};
-
-          Object.entries(generatedCadFloorRooms || {}).forEach(([floor, rooms]) => {
-            if (Array.isArray(rooms)) {
-              merged[floor] = Object.fromEntries(
-                rooms.map((r: any, idx) => [r.id || r.type || idx, { ...r }])
-              );
-            } else if (rooms && typeof rooms === "object") {
-              const cloned: Record<string, any> = {};
-              Object.entries(rooms as any).forEach(([k, v]: any) => {
-                cloned[k] = { ...(v as any) };
-              });
-              merged[floor] = cloned;
-            }
-          });
-
-          Object.entries(floorRooms || {}).forEach(([floor, roomsMap]) => {
-            const existing = merged[floor] || {};
-            const mergedFloor: Record<string, FloorRoom> = { ...existing };
-
-            Object.entries(roomsMap || {}).forEach(([roomKey, room]) => {
-              if (room && (room as any).selected) {
-                mergedFloor[roomKey] = { ...(existing[roomKey] || {}), ...room };
-              } else if (mergedFloor[roomKey]) {
-                delete mergedFloor[roomKey];
-              }
-            });
-
-            merged[floor] = mergedFloor;
-          });
-
-          return merged;
-        })()}
+        floorRooms={mergedFloorRooms}
 
         floorSettings={floorSettings}
         floorBhkConfig={floorBhkConfig}

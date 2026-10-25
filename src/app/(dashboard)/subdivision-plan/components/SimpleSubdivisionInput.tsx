@@ -1,6 +1,9 @@
 "use client";
 
 import React from "react";
+import TemplateLayoutEditor from "./TemplateLayoutEditor";
+import ManualLayoutEditor from "./ManualLayoutEditor";
+import { ManualConfig, TemplateConfig, defaultTemplateConfig } from "../subdivisionLayouts";
 
 export interface CustomPieceDef {
   label: string;
@@ -12,7 +15,9 @@ export type SubdivisionMode =
   | "SIMPLE"
   | "CORNER"
   | "WITH_ROAD"
-  | "CUSTOM_GRID";
+  | "CUSTOM_GRID"
+  | "TEMPLATE"   // pick a layout pattern, then enter the size of every piece
+  | "MANUAL";    // build every piece by hand (rectangle / L-shape / trapezoid / polygon)
 
 export interface CornerSplitConfig {
   side1Pieces: number;   // top side pieces (e.g. 3)
@@ -35,6 +40,8 @@ export interface SimpleSubdivisionConfig {
   customPieces?: CustomPieceDef[];
   corner?: CornerSplitConfig;
   road?: RoadConfig;
+  template?: TemplateConfig;
+  manual?: ManualConfig;
 }
 
 interface SimpleSubdivisionInputProps {
@@ -119,10 +126,27 @@ export default function SimpleSubdivisionInput({
     onChange({ ...value, customPieces: updated });
   };
 
+  // Switching to TEMPLATE / MANUAL creates their starting configuration on first use
+  const selectMode = (next: SubdivisionMode) => {
+    if (next === "TEMPLATE" && !value.template) {
+      onChange({
+        ...value,
+        mode: next,
+        template: defaultTemplateConfig(plotWidthFt, plotLengthFt, "ROW", measurementUnit),
+      });
+      return;
+    }
+    if (next === "MANUAL" && !value.manual) {
+      onChange({ ...value, mode: next, manual: { pieces: [] } });
+      return;
+    }
+    onChange({ ...value, mode: next });
+  };
+
   return (
     <div className="border-2 border-black mb-4 bg-white">
       <div className="bg-slate-800 text-white p-3 font-black text-base">
-        3. SUBDIVISION LAYOUT — PLOT TODKAR PLOTS BANAO
+        3. SUBDIVISION LAYOUT — SPLIT THE PLOT INTO PIECES
       </div>
 
       {/* ─── MODE SELECTOR ─── */}
@@ -130,12 +154,14 @@ export default function SimpleSubdivisionInput({
         <label className="font-black text-sm block mb-3">
           SUBDIVISION MODE:
         </label>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { val: "SIMPLE", label: "SIMPLE", hint: "Equal ya custom sizes" },
-            { val: "CORNER", label: "CORNER PLOT", hint: "2 sides me todna" },
-            { val: "WITH_ROAD", label: "WITH ROAD", hint: "Road alag karke pieces" },
-            { val: "CUSTOM_GRID", label: "CUSTOM GRID", hint: "Kitna bhi pieces" },
+            { val: "SIMPLE", label: "SIMPLE", hint: "Equal or custom sizes" },
+            { val: "CORNER", label: "CORNER PLOT", hint: "Split on 2 sides" },
+            { val: "WITH_ROAD", label: "WITH ROAD", hint: "Road strip + pieces" },
+            { val: "CUSTOM_GRID", label: "CUSTOM GRID", hint: "Any rows × columns" },
+            { val: "TEMPLATE", label: "TEMPLATE", hint: "Pick a layout pattern" },
+            { val: "MANUAL", label: "MANUAL", hint: "Build the shapes yourself" },
           ].map((opt) => (
             <label
               key={opt.val}
@@ -150,7 +176,7 @@ export default function SimpleSubdivisionInput({
                 name="subdivisionMode"
                 className="hidden"
                 checked={mode === opt.val}
-                onChange={() => onChange({ ...value, mode: opt.val as SubdivisionMode })}
+                onChange={() => selectMode(opt.val as SubdivisionMode)}
               />
               <span className="text-sm font-black">{opt.label}</span>
               <span className={`text-[10px] ${mode === opt.val ? "text-blue-100" : "text-gray-500"}`}>
@@ -188,8 +214,8 @@ export default function SimpleSubdivisionInput({
               <label className="font-black text-base block mb-3">2. SPLIT MODE</label>
               <div className="flex flex-col gap-2">
                 {[
-                  { val: "EQUAL", label: "EQUAL SPLIT", hint: "Sab pieces barabar" },
-                  { val: "CUSTOM", label: "CUSTOM SIZES", hint: "Har piece alag" },
+                  { val: "EQUAL", label: "EQUAL SPLIT", hint: "All pieces equal" },
+                  { val: "CUSTOM", label: "CUSTOM SIZES", hint: "Each piece different" },
                 ].map((opt) => (
                   <label
                     key={opt.val}
@@ -389,7 +415,7 @@ export default function SimpleSubdivisionInput({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="border-2 border-black p-4 bg-white">
               <label className="font-black text-base block mb-2">
-                SIDE 1 — Kitne pieces?
+                SIDE 1 — How many pieces?
               </label>
               <div className="text-[10px] text-gray-500 mb-2">
                 (Front / main road side)
@@ -417,7 +443,7 @@ export default function SimpleSubdivisionInput({
 
             <div className="border-2 border-black p-4 bg-white">
               <label className="font-black text-base block mb-2">
-                SIDE 2 — Kitne pieces?
+                SIDE 2 — How many pieces?
               </label>
               <div className="text-[10px] text-gray-500 mb-2">
                 (Corner / side road side)
@@ -557,17 +583,17 @@ export default function SimpleSubdivisionInput({
                 <span className="text-sm font-bold">{unit}</span>
               </div>
               <div className="text-[10px] text-gray-500 mt-2">
-                Plot ke andar road ka hissa — pieces ke alawa alag dikhega.
+                Road strip inside the plot — shown separately from the pieces.
               </div>
             </div>
           </div>
 
           <div className="mt-4 border-2 border-black p-4 bg-white">
             <label className="font-black text-base block mb-2">
-              BAKE HUE PIECES (road ke baad jo bache)
+              REMAINING PIECES (after the road strip)
             </label>
             <div className="flex items-center gap-3">
-              <span className="text-sm font-bold">Kitne pieces me todna hai?</span>
+              <span className="text-sm font-bold">Split into how many pieces?</span>
               <input
                 type="number"
                 min={1}
@@ -607,7 +633,7 @@ export default function SimpleSubdivisionInput({
       {mode === "CUSTOM_GRID" && (
         <div className="p-4 bg-green-50">
           <div className="text-sm font-bold mb-4 text-green-900">
-            📐 Custom Grid — Kitne rows × columns me todna hai
+            📐 Custom Grid — choose the number of rows × columns
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -670,6 +696,32 @@ export default function SimpleSubdivisionInput({
         </div>
       )}
 
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* MODE 5: TEMPLATE (pick a pattern, enter sizes)        */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {mode === "TEMPLATE" && value.template && (
+        <TemplateLayoutEditor
+          value={value.template}
+          onChange={(t) => onChange({ ...value, template: t })}
+          plotW={plotWidthFt}
+          plotD={plotLengthFt}
+          unit={measurementUnit}
+        />
+      )}
+
+      {/* ═══════════════════════════════════════════════════ */}
+      {/* MODE 6: MANUAL (build every piece by hand)            */}
+      {/* ═══════════════════════════════════════════════════ */}
+      {mode === "MANUAL" && (
+        <ManualLayoutEditor
+          value={value.manual || { pieces: [] }}
+          onChange={(m) => onChange({ ...value, manual: m })}
+          plotW={plotWidthFt}
+          plotD={plotLengthFt}
+          unit={measurementUnit}
+        />
+      )}
+
       {/* ─── SUMMARY ─── */}
       <div className="border-t-2 border-black p-3 bg-yellow-50">
         <div className="text-xs font-bold text-gray-700 mb-1">
@@ -688,6 +740,12 @@ export default function SimpleSubdivisionInput({
           )}
           {mode === "CUSTOM_GRID" && (
             <> — {corner.side1Pieces} × {corner.side2Pieces} grid</>
+          )}
+          {mode === "TEMPLATE" && value.template && (
+            <> — {value.template.id.replace(/_/g, " ")} pattern</>
+          )}
+          {mode === "MANUAL" && (
+            <> — {(value.manual?.pieces || []).length} pieces drawn manually</>
           )}
         </div>
       </div>

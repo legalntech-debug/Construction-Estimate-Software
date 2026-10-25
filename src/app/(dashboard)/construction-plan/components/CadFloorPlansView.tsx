@@ -513,9 +513,11 @@ export default function CadFloorPlansView({
           if (hi - lo > 0.12) neighbors.push({ room: other, lo, hi });
         }
 
-        const openCuts: [number, number][] = isOpenArea(room)
-          ? neighbors.filter((n) => isOpenArea(n.room)).map((n) => [n.lo, n.hi] as [number, number])
-          : [];
+        // v19: tower me stair + room 70-100 sq.ft => ek hi kamra: beech ki wall nahi (mergeGroup same)
+        const openCuts: [number, number][] = [
+          ...(isOpenArea(room) ? neighbors.filter((n) => isOpenArea(n.room)).map((n) => [n.lo, n.hi] as [number, number]) : []),
+          ...(room?.mergeGroup ? neighbors.filter((n) => n.room?.mergeGroup === room.mergeGroup).map((n) => [n.lo, n.hi] as [number, number]) : []),
+        ];
 
         subtractIntervals(r0, r1, openCuts).forEach(([s, e]) => {
           const others = neighbors.filter((n) => n.hi > s + 0.02 && n.lo < e - 0.02).map((n) => n.room);

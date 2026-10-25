@@ -11,6 +11,9 @@ import { AlertTriangle, Wallet, ArrowRight, Loader2 } from 'lucide-react';
 const MIN_RECHARGE = 100;                    // Platform ka recharge minimum
 const DEFAULT_USER_STATE = 'MADHYA PRADESH'; // Fallback agar profile me state nahi
 
+// Lower-case service labels whose wallet check lives on the preview page.
+const PREVIEW_GATED_SERVICES: string[] = ['construction plan'];
+
 interface WalletGuardProps {
   children: React.ReactNode;
   caseType: string;         // e.g. 'map', 'locationPlan', 'estimate'
@@ -75,6 +78,15 @@ export default function WalletGuard({
 
         // ✅ Admin / Premium → bypass (no check)
         if (isAdmin || isPremium) {
+          if (alive) setChecking(false);
+          return;
+        }
+
+        // ✅ Services whose wallet check is enforced later, on the preview page
+        // (PaymentGateway verifies the balance right before a NEW ref no. is
+        // generated). Reopened cases and same-ref reprints must be able to reach
+        // the input page, so no balance check is done here for these services.
+        if (PREVIEW_GATED_SERVICES.includes(serviceLabel.trim().toLowerCase())) {
           if (alive) setChecking(false);
           return;
         }

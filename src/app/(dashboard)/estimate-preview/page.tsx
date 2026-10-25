@@ -7,6 +7,12 @@ import { useAuth } from "@/lib/auth-context";
 import { QRCodeSVG } from 'qrcode.react';
 import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
 import { getItemRate } from "@/lib/pricing";
+import {
+  NAME_ADDRESS_CHANGE_LIMIT,
+  isRealRef,
+  isNameAddressChangeMajor,
+  isEstimateExpired,
+} from "@/lib/estimateRules";
 
 // The QR code and share link always point to the production verification page
 const VERIFY_BASE_URL = "https://construction-estimate-software.vercel.app";
@@ -15,11 +21,11 @@ const VERIFY_BASE_URL = "https://construction-estimate-software.vercel.app";
 const ESTIMATE_FORM_ROUTE = "/estimate";
 const ESTIMATE_STORAGE_KEY = "estimatePreview";
 
-// A larger change in customer name / property address than this is treated as a NEW estimate (new ref no + new payment)
-const NAME_ADDRESS_CHANGE_LIMIT = 15; // Percent
+// sessionStorage flag read by the input form: "the user deliberately came back from the preview, keep the data"
+const RETURN_TO_FORM_FLAG = "estimateReturnToForm";
 
-// True for a persisted reference number; false for temporary ones (REF-..., TEMP..., placeholders)
-const isRealRef = (r?: string | null) => !!r && !/^(REF-|TEMP)/i.test(r) && !r.includes("...");
+// NAME_ADDRESS_CHANGE_LIMIT, isRealRef and calculatePercentageChange now live in "@/lib/estimateRules"
+// (shared with the input form so both pages always apply the same rule).
 
 // Snapshot used to detect changes: name, address, plot area, rate, floor areas and totals
 const makeSnapshot = (e: any) => {
@@ -36,24 +42,6 @@ const makeSnapshot = (e: any) => {
     f: floors,
   });
 };
-
-// Percentage change between two strings (character level / Levenshtein, so RAMESH -> SURESH still counts as a change)
-const calculatePercentageChange = (str1: string, str2: string) => {
-  const a = (str1 || "").trim().toLowerCase().replace(/\s+/g, " ");
-  const b = (str2 || "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!a && !b) return 0;
-  if (!a || !b) return 100;
-  let prev = Array.from({ length: b.length + 1 }, (_, k) => k);
-  for (let x = 1; x <= a.length; x++) {
-    const cur = [x];
-    for (let y = 1; y <= b.length; y++) {
-      cur[y] = Math.min(prev[y] + 1, cur[y - 1] + 1, prev[y - 1] + (a[x - 1] === b[y - 1] ? 0 : 1));
-    }
-    prev = cur;
-  }
-  return (prev[b.length] / Math.max(a.length, b.length)) * 100;
-};
-
 
 const slabConfig: any = {
   1000: { door: 0.20, plumb: 0.335, elec: 0.335, paint: 0.13, }, //done//
@@ -130,15 +118,15 @@ export default function EstimatePreviewPage() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [legalText, setLegalText] = useState("WE PROVIDE TECHNICAL SERVICES INCLUDING CONSTRUCTION ESTIMATION, BUILDING PLANNING AND DESIGN, BUILDING PERMISSION AND PLAN APPROVAL, SITE LAYOUT .");
   const [disclaimerText, setDisclaimerText] = useState("This estimation is provided purely as a tentative budgetary guide for informational purposes at the request of the customer to understand the potential scope and incurred costs of the house/bungalow. It is not a binding commercial contract, a fixed-price quotation, or a guaranteed construction cost, as final expenses may vary significantly due to market fluctuations in material prices (e.g., steel, cement), unforeseen site-specific conditions, design changes, and local regulatory requirements. Before initiating any financial commitments, the customer is strictly advised to conduct a detailed site inspection and consult with qualified structural engineers and contractors to obtain finalized site-specific BOQs and quotes. The estimator bears no financial or legal liability for any budget shortfalls, cost overruns, or discrepancies that may arise during actual construction, and the use of this document for any financial or institutional application remains the sole responsibility of the customer. This document is valid for 60 days from the date of issue.");
-  const [showSignature, setShowSignature] = useState(false); // Default: false (customer ke liye nahi dikhega)
-  // 3. Custom Letterhead System (Existing code ke neeche)
+  const [showSignature, setShowSignature] = useState(false); // Default: false (hidden for the customer)
+  // 3. Custom Letterhead System (continued)
   const [signatureDetails, setSignatureDetails] = useState<string | null>(null);
   const userCategory = (currentUser?.user_type || 'INDIVIDUAL USER').toUpperCase();
   const [isFinalized, setIsFinalized] = useState(false);
 
-  // 1. Component ke andar ye state aur function add karein
-  const [finalFee, setFinalFee] = useState(150); // Agar aapne ise dynamically fetch kiya hai, toh wo variable use karein
-  const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/..."); // Aapka unique Ref ID
+  // 1. Fee / ref no / payment state for this component
+  const [finalFee, setFinalFee] = useState(150); // Default fee; replaced by the dynamically fetched fee when available
+  const [currentRefNo, setCurrentRefNo] = useState("LNT/26-27/..."); // Unique ref ID (placeholder until saved)
   const [isAlreadyPaid, setIsAlreadyPaid] = useState(false);
   // Smart Change Tracking Ref
   const initialEstimateRef = useRef<string | null>(null); // Snapshot of the estimate as persisted in the database (baseline for change detection)
@@ -187,12 +175,12 @@ export default function EstimatePreviewPage() {
         .maybeSingle();
 
       // 15% rule: compare the current name/address with the saved (paid) record
-      const pct = (dbVal: any, curVal: any) =>
-        String(dbVal || "").trim() ? calculatePercentageChange(String(dbVal), String(curVal || "")) : 0;
-      const changedTooMuch = !!(estData && current) && (
-        pct(estData.customer_name, current.customer_name) > NAME_ADDRESS_CHANGE_LIMIT ||
-        pct(estData.property_address, current.property_address) > NAME_ADDRESS_CHANGE_LIMIT
+      const changedTooMuch = !!(estData && current) && isNameAddressChangeMajor(
+        { customer_name: estData.customer_name, property_address: estData.property_address },
+        { customer_name: current.customer_name, property_address: current.property_address }
       );
+      // 60-day rule: an estimate older than the validity period is a new estimate as well
+      const expired = !!estData && isEstimateExpired(estData.created_at);
 
       let alreadyPaid = !!estData && (estData.platform_payment_status === 'paid' || estData.payment_status === 'paid' || estData.status === 'paid');
 
@@ -207,10 +195,10 @@ export default function EstimatePreviewPage() {
 
       if (!alreadyPaid) return;
 
-      if (changedTooMuch) {
+      if (changedTooMuch || expired) {
         // Treat as a new estimate: detach from the old ref/id and require a new payment
         setNeedsNewPayment(true);
-        setNewPaymentReason("CHANGED");
+        setNewPaymentReason(expired ? "EXPIRED_60_DAYS" : "CHANGED");
         setOriginalRefNo(refNo);
         setIsAlreadyPaid(false);
         setIsPaid(false);
@@ -342,15 +330,14 @@ export default function EstimatePreviewPage() {
   }, []);
 
   
-// Data load hote hi isPaid ka status update karne ke liye (Ye zaroori hai)
+// Update the isPaid status as soon as the estimate data is loaded (required)
   useEffect(() => {
     if (estimate && estimate.platform_payment_status === 'paid' && !needsNewPayment) {
       setIsPaid(true);
     }
   }, [estimate, needsNewPayment]);
 
-  // Page load hote hi local storage se logo uthayein
-  // Page load hote hi local storage se logo aur payment status dono check karein
+  // On page load, read the logo from local storage and check the payment status
   useEffect(() => {
     // 1. Logo Load
     const savedLogo = localStorage.getItem("customLogo");
@@ -366,7 +353,7 @@ export default function EstimatePreviewPage() {
         .eq('estimate_id', estimate.id)
         .maybeSingle();
 
-      // ✅ Sahi code: data.platform_payment_status ka use karein
+      // Use data.platform_payment_status
       if (data && data.platform_payment_status === 'paid' && !needsNewPayment) {
         setIsPaid(true);
       }
@@ -376,7 +363,7 @@ export default function EstimatePreviewPage() {
   syncPaymentStatus();
 }, [estimate?.id]);
 
-  // 1. handleRazorpayPayment ko handlePayment se map karein
+  // 1. Map handleRazorpayPayment to handlePayment
 const handleRazorpayPayment = () => handlePayment();
 
 // Open the print dialog only after React has rendered the final (paid, with ref no) page
@@ -631,7 +618,7 @@ const handleRazorpayPayment = () => handlePayment();
       downloadBlob(await buildPdfBlob());
     } catch (err) {
       console.error("PDF error:", err);
-      alert("PDF nahi ban paya. Kripya dobara try karein.");
+      alert("Could not create the PDF. Please try again.");
     } finally {
       setIsPdfBusy(false);
     }
@@ -657,7 +644,7 @@ const handleRazorpayPayment = () => handlePayment();
     } catch (err: any) {
       if (err?.name !== "AbortError") {
         console.error("Share error:", err);
-        alert("Share nahi ho paya. Kripya 'Download PDF' use karein.");
+        alert("Sharing failed. Please use 'Download PDF' instead.");
       }
     } finally {
       setIsPdfBusy(false);
@@ -745,7 +732,7 @@ const handleRazorpayPayment = () => handlePayment();
     }
   };
   
-// Page load hote hi local storage se logo uthayein
+// On page load, read the logo from local storage
 useEffect(() => {
   const savedLogo = localStorage.getItem("customLogo");
   if (savedLogo) {
@@ -768,7 +755,7 @@ useEffect(() => {
 }, []);
 
 // ==========================================
-// >>> NAYA CODE ADDED HIER (PAYMENT CONTROL) <<<
+// >>> PAYMENT CONTROL <<<
 // ==========================================
 useEffect(() => {
   if (currentUser) {
@@ -780,8 +767,8 @@ useEffect(() => {
       setValidationReason(
         needsNewPayment
           ? (newPaymentReason === "EXPIRED_60_DAYS"
-              ? `⚠️ Purana estimate 60 din se zyada purana hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`
-              : `⚠️ Customer name ya property address ${NAME_ADDRESS_CHANGE_LIMIT}% se zyada badal gaya hai, isliye ye NAYA estimate maana jayega (purani Ref: ${originalRefNo || "-"}). Naya REF NO banega aur print ke liye naya payment karna hoga.`)
+              ? `⚠️ This estimate is older than 60 days, so it will be treated as a NEW estimate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`
+              : `⚠️ Customer name or property address has changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%, so this will be treated as a NEW estimate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`)
           : "Note: To print this estimate, please complete the payment process."
       );
     }
@@ -796,13 +783,13 @@ useEffect(() => {
   }
 }, [needsNewPayment, isPaid, isAlreadyPaid]);
 
-// Estimate data load hote hi Ref No aur Fee sync karne ke liye
+// Sync the ref no and fee as soon as the estimate data is loaded
 useEffect(() => {
   if (estimate) {
     if (estimate.ref_no) {
       setCurrentRefNo(estimate.ref_no);
     }
-    // Agar dynamic fee pehle se bani hui hai toh wo set hogi, nahi toh base fee 150 rahegi
+    // Use the dynamic fee if already computed, otherwise fall back to the base fee of 150
     if (estimate.fee_amount) {
       setFinalFee(Number(estimate.fee_amount));
     }
@@ -828,11 +815,11 @@ useEffect(() => {
   };
   const targetColumn = caseTypeMap[caseType] || "estimate_fee";
 
-  // FIX: Dots, extra spaces hatakar sirf pehla word ya saaf naam lein
+  // FIX: Strip dots and extra spaces and use only the first word / clean name
   const cleanCName = clientName?.split(/[.\s]+/)[0].trim();
   const cleanRName = repName?.split(/[.\s]+/)[0].trim();
   
-  // Query mein partial match use karein
+  // Use a partial match in the query
   const { data, error } = await supabase
     .from("clients")
     .select(targetColumn)
@@ -845,7 +832,7 @@ useEffect(() => {
     return 0;
   }
 
-  // Agar data null hai, toh 0 return karein
+  // Return 0 when there is no data
   const finalFee = data ? Number(data[targetColumn] || 0) : 0;
    return finalFee;
 };
@@ -1027,7 +1014,7 @@ const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
 
 const handlePrint = () => { handleSaveAndPrint(); };
 
-  // --- useEffects (Ab handlePrint ke bahar hain) ---
+  // --- useEffects (kept outside handlePrint) ---
   useEffect(() => {
   let isMounted = true;
 
@@ -1075,18 +1062,24 @@ const handlePrint = () => { handleSaveAndPrint(); };
 
       const forcedNew = !!workingEstimate.force_new_ref && !isRealRef(workingEstimate.ref_no);
 
-      // Agar MIS se aaye hain aur ref_no temp/missing hai, toh database se purana record match karein
+      // If opened from MIS and the ref_no is temporary/missing, match the existing record from the database
       if (!forcedNew && (!workingEstimate.ref_no || workingEstimate.ref_no.startsWith("TEMP") || workingEstimate.ref_no.includes("REF-"))) {
         try {
-          const { data: existingRecord } = await supabase
-            .from("estimates")
-            .select("*")
-            .eq("customer_name", workingEstimate.customer_name)
-            .eq("property_address", workingEstimate.property_address)
-            .maybeSingle();
+          // Scoped to the logged-in user: another user's paid record with the same name/address must never unlock printing
+          const { data: { user: lookupUser } } = await supabase.auth.getUser();
+          const { data: existingRows } = lookupUser
+            ? await supabase
+                .from("estimates")
+                .select("*")
+                .eq("user_id", lookupUser.id)
+                .eq("customer_name", workingEstimate.customer_name)
+                .eq("property_address", workingEstimate.property_address)
+                .limit(1)
+            : { data: null };
+          const existingRecord = existingRows && existingRows.length > 0 ? existingRows[0] : null;
 
           if (existingRecord) {
-            // Purana original ref_no aur details mil gayi, toh wahi set karein
+            // Existing original ref_no and details found, so reuse them
             workingEstimate.id = existingRecord.id;
             workingEstimate.ref_no = existingRecord.ref_no;
             initialEstimateRef.current = makeSnapshot({
@@ -1162,9 +1155,10 @@ console.log('🎯 [STATE RESOLVED]', {
  // --- DATABASE PAYMENT STATUS CHECK (STEP 4) ---
   useEffect(() => {
     const checkPaymentStatus = async () => {
-      if (estimate?.id && !isPaid) {
+      // Never re-mark a new-payment estimate as paid from the old record
+      if (estimate?.id && !isPaid && !needsNewPayment) {
         const { data, error } = await supabase
-          .from('mis_records') // 👈 Yahi query error de rahi hai kyunki table mein estimate_id column nahi hai
+          .from('mis_records') // NOTE: this query errors if the table has no estimate_id column
           .select('payment_status') 
           .eq('estimate_id', estimate.id) 
           .maybeSingle();
@@ -1184,7 +1178,7 @@ console.log('🎯 [STATE RESOLVED]', {
       // Check for Ctrl+P (Windows) or Cmd+P (Mac)
       if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
         e.preventDefault();
-        alert("System Print disabled! Kripya software mein diye gaye 'Save & Print' button ka hi upyog karein.");
+        alert("System print is disabled! Please use the 'Save & Print' button provided in the software.");
         return false;
       }
     };
@@ -1237,14 +1231,20 @@ console.log('🎯 [STATE RESOLVED]', {
   // The data is preserved when going back to the input form (Back to Input / browser back).
   useEffect(() => {
     isMountedRef.current = true;
-    const onPop = () => { goingToFormRef.current = true; };
+    const onPop = () => {
+      goingToFormRef.current = true;
+      try { sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1"); } catch {}
+    };
     window.addEventListener("popstate", onPop);
     return () => {
       window.removeEventListener("popstate", onPop);
       isMountedRef.current = false;
       setTimeout(() => {
         if (!isMountedRef.current && !goingToFormRef.current) {
-          try { localStorage.removeItem(ESTIMATE_STORAGE_KEY); } catch {}
+          try {
+            localStorage.removeItem(ESTIMATE_STORAGE_KEY);
+            sessionStorage.removeItem(RETURN_TO_FORM_FLAG);
+          } catch {}
         }
       }, 0);
     };
@@ -1274,7 +1274,7 @@ console.log('🎯 [STATE RESOLVED]', {
   const activeDetails = estimate?.floor_details || {};
   const selectedFloors = estimate?.selected_floors || [];
 
-  // 🎯 SMART FIX: Agar Ground floor selected nahi hai, toh pehle selected floors me se koi active floor lein
+  // SMART FIX: If Ground Floor is not selected, use the first selected floor instead
   const isGroundFloorSelected = selectedFloors.includes("GROUND FLOOR");
   const fallbackFloorKey = selectedFloors.filter((f: string) => f !== "TOWER")[0] || Object.keys(activeDetails)[0] || "GROUND FLOOR";
   
@@ -1318,7 +1318,7 @@ console.log('🎯 [STATE RESOLVED]', {
   if (!Number.isInteger(width)) width = Math.ceil(width);
   if (!Number.isInteger(length)) length = Math.ceil(length);
 
-  // Safety fallback agar dimensions 0 mil rahe hain
+  // Safety fallback when the dimensions are 0
   if (width <= 0 || length <= 0) {
     width = 20; // Default standard width fallback
     length = 50; // Default standard length fallback
@@ -1441,7 +1441,7 @@ console.log('🎯 [STATE RESOLVED]', {
   // RCC STAIRCASE CALCULATION
   // ===========================
 
-  // Tower ko exclude karke count nikalna
+  // Count floors excluding the tower
   const stairNos = estimate.selected_floors?.filter((f: string) => f !== "TOWER").length || 0;
 
   const stairL = 10;
@@ -1466,7 +1466,7 @@ console.log('🎯 [STATE RESOLVED]', {
       kgPerSqft += (index - 3) * 0.3;
     }
 
-    // 2. Area Logic: 1500 sqft se zyada area hone par +0.2 add karein
+    // 2. Area logic: add +0.2 when the area is above 1500 sqft
     if (floorArea > 1500) {
       kgPerSqft += 0.2;
     }
@@ -1498,7 +1498,7 @@ console.log('🎯 [STATE RESOLVED]', {
   let shutteringRate = baseShutterRate;
 
   if (totalFloorCount > 3) {
-    // 4th, 5th, 6th floors ke liye (+30 per floor)
+    // For the 4th, 5th and 6th floors (+30 per floor)
     const floorsToApply30 = Math.min(totalFloorCount - 3, 3);
     shutteringRate += (floorsToApply30 * 30);
     
@@ -1513,7 +1513,7 @@ console.log('🎯 [STATE RESOLVED]', {
   const builtupAreaSqFt = Number(estimate.total_builtup_area || 0);
   const builtupAreaSqMt = builtupAreaSqFt / 10.76;
 
-  // Floor count fix: Sirf ek baar define karein
+  // Floor count fix: define only once
   const floorCount = estimate.selected_floors?.length || 1;
   const hasTower = estimate.selected_floors?.includes("TOWER");
 
@@ -1534,10 +1534,10 @@ console.log('🎯 [STATE RESOLVED]', {
   // --- DOOR & WINDOW CALCULATIONS ---
   let totalDoorWindowNos = 0;
 
-  // Har floor ke liye loop chalayein
+  // Loop over every floor
   estimate.selected_floors?.forEach((floor: string) => {
       if (floor === "TOWER") {
-          totalDoorWindowNos += 1; // Tower ke liye fixed 1
+          totalDoorWindowNos += 1; // Fixed 1 for the tower
       } else {
           const floorArea = Number(estimate.floor_details?.[floor]?.area || 0);
           let count = 0;
@@ -1567,7 +1567,7 @@ console.log('🎯 [STATE RESOLVED]', {
   const paintQtySqMt = builtupAreaSqMt;
 
   // --- MS STEEL CALCULATION ---
-  // Total Amount (total_value) ka 5%
+  // 5% of the total amount (total_value)
   const msSteelQty = Number(estimate.total_value || 0) * 0.05;
 
   // --- PLUMBING & ELECTRICAL PERCENTAGE LOGIC ---
@@ -1581,8 +1581,8 @@ console.log('🎯 [STATE RESOLVED]', {
   else if (ratePerSqft >= 1801 && ratePerSqft <= 2100) plumbingElectricPercent = 0.09;
   else if (ratePerSqft > 2100) plumbingElectricPercent = 0.10;
 
-  // Percentage display ke liye (Isse update karein)
-  // Number((val).toFixed(2)) ka use karne se trailing zeros hat jaate hain aur value saaf dikhti hai.
+  // For the percentage display
+  // Number((val).toFixed(2)) removes trailing zeros so the value displays cleanly.
   const displayPercent = Number((plumbingElectricPercent * 100).toFixed(2)).toString() + "%";
 
   // --- FLOORING CALCULATION ---
@@ -1652,14 +1652,14 @@ const earthworkQty =
   const plinthLength = gf ? (2 * ((Number(gf.length || 0) / 3.28) + (Number(gf.width || 0) / 3.28))) * 1.8 : 0;
   const plinthBeamQty = plinthLength * 0.20 * 0.30; // Formula: L * W * D
 
-  // B. Roof Beam Calculation (Har floor ke total dimensions par base)
+  // B. Roof beam calculation (based on the total dimensions of each floor)
   const floors = est.selected_floors || [];
   let totalRoofBeamLength = 0;
 
   for (const floor of floors) {
     const fData = est.floor_details?.[floor];
     if (fData) {
-      // Har floor ka beam length calculation
+      // Beam length calculation for each floor
       const floorBeamLen = (2 * ((Number(fData.length || 0) / 3.28) + (Number(fData.width || 0) / 3.28))) * 1.8;
       totalRoofBeamLength += floorBeamLen;
     }
@@ -1693,16 +1693,16 @@ const earthworkQty =
 const rate = ratePerSqft; 
 const selectedFloors = estimate.selected_floors || [];
 
-// Check: Kya sirf GROUND aur TOWER hi hain? (Yaani koi bhi upper floor nahi hai)
+// Check: are only GROUND and TOWER selected? (i.e. no upper floor)
 const isOnlyGroundAndTower = selectedFloors.every(f => f === "GROUND FLOOR" || f === "TOWER");
 
-// Check: Kya First Floor ya usse upar ka koi aur floor selected hai?
+// Check: is the First Floor or any floor above it selected?
 const hasUpperFloors = selectedFloors.some(f => f !== "GROUND FLOOR" && f !== "TOWER");
 
-// Check: Kya rate 1450 se zyada hai?
+// Check: is the rate above 1450?
 const isRateAbove1450 = rate > 1450;
 
-// Check: Kya rate 1550 aur 1900 ke beech mein hai? (Parapet hide condition)
+// Check: is the rate between 1550 and 1900? (parapet hide condition)
 const isRateInRange = rate > 1550 && rate < 1900;
 
 // --- CALCULATIONS ---
@@ -1730,10 +1730,10 @@ const parapetRate = Number(masterItem.parapet_wall_rate || 0);
 // ===========================
 let cobaQty = 0;
 
-// Coba tabhi aayega jab:
-// 1. Rate 1450 se zyada ho
-// 2. Sirf Ground/Tower na ho, balki upper floors (First floor etc.) bhi present hon
-// 3. Aur agar range wala hiding rule nahi lag raha ho
+// The item is shown only when:
+// 1. The rate is above 1450
+// 2. Not only Ground/Tower: upper floors (First floor etc.) are present as well
+// 3. The range-based hiding rule does not apply
 const shouldShowCoba = isRateAbove1450 && hasUpperFloors && !shouldHideParapet;
 
 if (shouldShowCoba) {
@@ -1987,7 +1987,7 @@ const noticesBlock = (
         <p className="text-sm font-medium text-emerald-900">
           Ref No: <span className="font-mono font-bold">{estimate.ref_no}</span>
         </p>
-        <p className="text-xs text-emerald-800 mt-1">Ab aap niche se Print, PDF Download ya Share kar sakte hain.</p>
+        <p className="text-xs text-emerald-800 mt-1">You can now Print, Download the PDF or Share it from below.</p>
       </div>
     )}
 
@@ -2044,7 +2044,7 @@ const noticesBlock = (
 const actionsBlock = (
 <div className="mt-8 mb-12 no-print border-t border-slate-300 pt-6">
   
-  {/* {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && condition ke andar banner */}
+  {/* {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && condition: banner shown inside */}
   {!isPaid && !isAlreadyPaid && userCategory !== 'ADMIN' && (
     <div className="mb-4 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
       
@@ -2131,6 +2131,7 @@ const actionsBlock = (
       onClick={() => {
         // Keep the entered data (and ref no) in localStorage so the input form is still filled
         goingToFormRef.current = true;
+        try { sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1"); } catch {}
         router.push(ESTIMATE_FORM_ROUTE);
       }}
       className="bg-slate-700 text-white px-6 py-3 rounded-lg shadow-md hover:bg-slate-800 transition font-bold uppercase tracking-wide"
@@ -2434,7 +2435,7 @@ return (
         <textarea
   value={legalText}
   onChange={(e) => setLegalText(e.target.value)}
-  // Agar custom mode OFF hai, toh disabled={true} ho jayega
+  // If custom mode is OFF, the field is disabled
   disabled={!useCustomLetterhead}
   className={`w-full text-sm border-none focus:outline-none focus:ring-1 focus:ring-blue-300 resize-none text-center ${!useCustomLetterhead ? "bg-transparent cursor-default" : "bg-white"}`}
   rows={3}
@@ -2616,7 +2617,7 @@ return (
           <>
             {/* Horizontal Layout: QR Left, Details Right */}
           <div className="flex flex-row items-center justify-between gap-4 p-2">
-            {/* QR Code Left Mein */}
+            {/* QR code on the left */}
             <div className="flex flex-col items-center">
               <QRCodeSVG 
   value={`https://construction-estimate-software.vercel.app/verify-estimate?ref=${estimate?.ref_no}`} 
@@ -2626,7 +2627,7 @@ return (
               <p className="text-[8px] mt-1 text-gray-500 font-bold text-center">SCAN TO VERIFY</p>
             </div>
 
-            {/* Signature Details Right Mein */}
+            {/* Signature details on the right */}
             <div className="text-[10px] text-blue-900 border border-blue-200 bg-blue-50 p-2 rounded text-left w-full shadow-sm">
               <p className="font-bold border-b border-blue-200 mb-1">✓ VERIFIED SIGNATURE</p>
               <p className="font-bold">Er. J.TOMAR</p>
@@ -2643,7 +2644,7 @@ return (
             />
           </div>
 
-          {/* Neeche Authorised Signatory ka label */}
+          {/* Authorised Signatory label below */}
           <div className="border-t border-black pt-2 mt-2 text-center">
             <p className="font-bold text-sm">AUTHORISED SIGNATORY</p>
           </div>

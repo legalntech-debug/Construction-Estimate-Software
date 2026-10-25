@@ -1,8 +1,10 @@
 // src/app/(dashboard)/construction-plan-preview/components/PaymentGateway.tsx
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { supabase } from "@/lib/supabase";
 import {
   fetchPricingRow,
   getDisplayPricing,
@@ -32,6 +34,146 @@ type ReuseStatus =
   | { type: "admin_override"; refNo: string }
   | { type: "new"; reason: "major_change" | "expired" | "none"; nameChange?: number; addressChange?: number; refNo?: string }
   | null;
+
+// ============================================================
+// LOCAL CHANGE CHECK — independent enforcement of the 15% rule
+//
+// checkReprintStatus() may report PAID_SAME / PAID_MINOR_CHANGE without really
+// measuring the change (no percentages are returned). This check compares the
+// customer name and property address with the saved record and flags a major
+// change, so a new Ref No. and payment are required.
+// ============================================================
+const normalizeForCompare = (value: string): string =>
+  String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}
+
+/** Percentage change between a saved value and a new value (0 when there is nothing to compare). */
+function changePercent(savedValue: string, newValue: string): number {
+  const a = normalizeForCompare(savedValue);
+  const b = normalizeForCompare(newValue);
+  if (!a) return 0; // no saved baseline -> cannot be measured
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 0;
+  return (levenshteinDistance(a, b) / maxLen) * 100;
+}
+
+type LocalChange = { nameChange: number; addressChange: number; exceeds: boolean };
+
+async function localChangeCheck(
+  refNo: string,
+  customerName: string,
+  propertyAddress: string
+): Promise<LocalChange | null> {
+  try {
+    const { data, error } = await supabase
+      .from("service_records")
+      .select("customer_name, property_address")
+      .eq("ref_no", refNo)
+      .maybeSingle();
+
+    if (error || !data) return null; // no baseline -> defer to checkReprintStatus
+
+    const nameChange = changePercent(data.customer_name || "", customerName);
+    const addressChange = changePercent(data.property_address || "", propertyAddress);
+    console.log("[LOCAL CHANGE CHECK]", { refNo, nameChange, addressChange, limit: MAX_CHANGE_PERCENT });
+
+    return {
+      nameChange,
+      addressChange,
+      exceeds: nameChange > MAX_CHANGE_PERCENT || addressChange > MAX_CHANGE_PERCENT,
+    };
+  } catch (err) {
+    console.error("[LOCAL CHANGE CHECK ERROR]", err);
+    return null;
+  }
+}
+
+// ============================================================
+// WALLET GATE — runs only before a NEW ref no. / new payment is started.
+// Reprints of an already paid record (same data / minor change) never reach it.
+// ============================================================
+const MIN_RECHARGE = 100; // Platform minimum recharge amount (INR)
+
+type WalletBlock = { charge: number; balance: number; state: string };
+
+// Flat shape on purpose: discriminated-union narrowing on a boolean flag
+// does not work when "strict" is disabled in tsconfig.
+type WalletGateResult = {
+  allowed: boolean;
+  block?: WalletBlock;
+  message?: string;
+};
+
+/**
+ * Verifies that the logged-in user's wallet balance covers the service charge
+ * configured in the pricing table for the user's own (profile) state.
+ * Fails closed: if the balance cannot be verified, the user is not allowed to proceed.
+ */
+async function verifyWalletForNewRef(args: {
+  userId?: string | null;
+  fallbackState: string;
+  pricingItem: string;
+  userCategory: string;
+  amountOverride?: number;
+}): Promise<WalletGateResult> {
+  const { userId, fallbackState, pricingItem, userCategory, amountOverride } = args;
+
+  if (!userId) {
+    return { allowed: false, message: "Session expired. Please log in again to continue." };
+  }
+
+  try {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("role, plan_type, wallet_balance, state")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error || !profile) {
+      console.error("[WALLET GATE] Profile fetch failed:", error);
+      return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+    }
+
+    // Admin and premium accounts are exempt (same rule as WalletGuard)
+    const isAdminRole = String(profile.role || "").toLowerCase() === "admin";
+    const isPremium = String(profile.plan_type || "").toUpperCase().includes("PREMIUM");
+    if (isAdminRole || isPremium) return { allowed: true };
+
+    const state = String(profile.state || fallbackState || "").toUpperCase().trim();
+    const balance = Number(profile.wallet_balance ?? 0);
+
+    // Same pricing source as the pay button, so the gate never disagrees with the price shown
+    const row = await fetchPricingRow(pricingItem, state, userCategory);
+    const charge = Number(amountOverride ?? getDisplayPricing(row).price ?? 0);
+
+    console.log("[WALLET GATE]", { userId, state, balance, charge });
+
+    if (!charge || charge <= 0 || balance >= charge) return { allowed: true };
+
+    return { allowed: false, block: { charge, balance, state } };
+  } catch (err) {
+    console.error("[WALLET GATE] Unexpected error:", err);
+    return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+  }
+}
 
 interface PaymentGatewayProps {
   refNo: string;
@@ -79,6 +221,10 @@ export default function PaymentGateway({
   buttonClassName,
 }: PaymentGatewayProps) {
   const { currentUser } = useAuth();
+  const router = useRouter();
+  const [walletBlock, setWalletBlock] = useState<WalletBlock | null>(null);
+  // Ref no. paid in this browser session (skips re-verification right after a successful payment)
+  const paidThisSessionRef = useRef<string | null>(null);
   const [scriptLoaded, setScriptLoaded] = useState(false);
   const isAdminUser = isAdmin || userCategory?.toUpperCase() === "ADMIN";
   const [paymentLoading, setPaymentLoading] = useState(false);
@@ -151,6 +297,9 @@ export default function PaymentGateway({
 
     const runReuseCheck = async () => {
       setReuseChecking(true);
+      // Never carry an earlier approval into a fresh verification: customer name /
+      // address may have changed, and only the new result may unlock printing.
+      setIsPaid(false);
       try {
         // 1) refNo param se lo, warna localStorage ka saved ref
         const savedRef = typeof window !== "undefined"
@@ -165,6 +314,15 @@ export default function PaymentGateway({
           if (alive) {
             setReuseStatus({ type: "new", reason: "none" });
             setEffectiveRefNo("DRAFT");
+          }
+          return;
+        }
+
+        // Just paid in this session -> keep it unlocked, no re-verification needed
+        if (candidateRef === paidThisSessionRef.current) {
+          if (alive) {
+            setIsPaid(true);
+            setEffectiveRefNo(candidateRef);
           }
           return;
         }
@@ -184,19 +342,34 @@ export default function PaymentGateway({
           setIsPaid(true);
           setEffectiveRefNo(candidateRef);
           setReuseStatus({ type: "admin_override", refNo: candidateRef });
-        } else if (status?.status === "PAID_SAME") {
-          setIsPaid(true);
-          setEffectiveRefNo(candidateRef);
-          setReuseStatus({ type: "reuse_same", refNo: candidateRef });
-        } else if (status?.status === "PAID_MINOR_CHANGE") {
-          setIsPaid(true);
-          setEffectiveRefNo(candidateRef);
-          setReuseStatus({
-            type: "reuse_minor",
-            refNo: candidateRef,
-            nameChange: status.nameChangePercent,
-            addressChange: status.addressChangePercent,
-          });
+        } else if (status?.status === "PAID_SAME" || status?.status === "PAID_MINOR_CHANGE") {
+          // Independent 15% verification against the saved record
+          const local = await localChangeCheck(candidateRef, customerName, propertyAddress);
+          if (!alive) return;
+
+          if (local?.exceeds) {
+            // Name / address changed beyond the limit -> new Ref No. + payment
+            setEffectiveRefNo("DRAFT");
+            setReuseStatus({
+              type: "new",
+              reason: "major_change",
+              nameChange: local.nameChange,
+              addressChange: local.addressChange,
+            });
+          } else if (status?.status === "PAID_SAME") {
+            setIsPaid(true);
+            setEffectiveRefNo(candidateRef);
+            setReuseStatus({ type: "reuse_same", refNo: candidateRef });
+          } else {
+            setIsPaid(true);
+            setEffectiveRefNo(candidateRef);
+            setReuseStatus({
+              type: "reuse_minor",
+              refNo: candidateRef,
+              nameChange: status.nameChangePercent ?? local?.nameChange,
+              addressChange: status.addressChangePercent ?? local?.addressChange,
+            });
+          }
         } else if (status?.status === "EXPIRED") {
           setEffectiveRefNo("DRAFT");
           setReuseStatus({
@@ -240,13 +413,20 @@ export default function PaymentGateway({
   // CHECK IF ALREADY PAID (fallback for effectiveRefNo)
   // ============================================================
   useEffect(() => {
+    let alive = true;
     const check = async () => {
       if (!effectiveRefNo || effectiveRefNo === "DRAFT") return;
+      // Only confirm refs that the reuse check already approved. A "new" status
+      // (major change / expired) must never be unlocked by this fallback.
+      if (!reuseStatus || reuseStatus.type === "new") return;
       const paid = await isAlreadyPaid(effectiveRefNo);
-      if (paid) setIsPaid(true);
+      if (alive && paid) setIsPaid(true);
     };
     check();
-  }, [effectiveRefNo]);
+    return () => {
+      alive = false;
+    };
+  }, [effectiveRefNo, reuseStatus]);
 
   // ============================================================
   // HANDLE PAYMENT
@@ -289,7 +469,14 @@ export default function PaymentGateway({
           onPaymentSuccess?.("ADMIN_OVERRIDE", "ADMIN_OVERRIDE", effectiveRefNo);
           return;
         }
-        if (rs?.status === "PAID_MINOR_CHANGE") {
+        // Independent 15% verification: a major change must fall through to a new payment
+        let localExceeds = false;
+        if (rs?.status === "PAID_MINOR_CHANGE" || rs?.status === "PAID_SAME") {
+          const local = await localChangeCheck(effectiveRefNo, customerName, propertyAddress);
+          localExceeds = !!local?.exceeds;
+        }
+
+        if (!localExceeds && rs?.status === "PAID_MINOR_CHANGE") {
           await autoUpdatePaidRecord(effectiveRefNo, {
             customer_name: customerName,
             property_address: propertyAddress,
@@ -302,7 +489,7 @@ export default function PaymentGateway({
           onPaymentSuccess?.("MINOR_UPDATE", "MINOR_UPDATE", effectiveRefNo);
           return;
         }
-        if (rs?.status === "PAID_SAME") {
+        if (!localExceeds && rs?.status === "PAID_SAME") {
           setIsPaid(true);
           onPaymentSuccess?.("SAME_DATA", "SAME_DATA", effectiveRefNo);
           return;
@@ -340,6 +527,7 @@ export default function PaymentGateway({
           status: "finalized",
           ...extraFields,
         });
+        paidThisSessionRef.current = finalRefNo;
         setIsPaid(true);
         onPaymentSuccess?.("ADMIN_FREE", "ADMIN_BYPASS", finalRefNo);
       } catch (err: any) {
@@ -356,6 +544,29 @@ export default function PaymentGateway({
     }
     if (!refNo && !effectiveRefNo) {
       setPaymentError("Reference number is missing.");
+      return;
+    }
+
+    // STEP 4.5: WALLET GATE
+    // Reaching this point means a new ref no. / new payment is required
+    // (fresh case, major change, or expired record). Block if the wallet
+    // balance is below the service charge for the user's state.
+    setPaymentLoading(true);
+    setPaymentError("");
+    setWalletBlock(null);
+
+    const gate = await verifyWalletForNewRef({
+      userId: currentUser?.id,
+      fallbackState: stateName,
+      pricingItem,
+      userCategory,
+      amountOverride,
+    });
+
+    if (!gate.allowed) {
+      setPaymentLoading(false);
+      if (gate.block) setWalletBlock(gate.block);
+      else setPaymentError(gate.message || "Unable to verify wallet balance.");
       return;
     }
 
@@ -410,6 +621,7 @@ export default function PaymentGateway({
               }
             } catch {}
 
+            paidThisSessionRef.current = finalRefNo;
             setIsPaid(true);
             setPaymentLoading(false);
             onPaymentSuccess?.(
@@ -480,6 +692,9 @@ export default function PaymentGateway({
     extraFields,
     currentUser,
     stateName,
+    pricingItem,
+    userCategory,
+    amountOverride,
     clientName,
     representative,
     onPaymentSuccess,
@@ -564,6 +779,70 @@ export default function PaymentGateway({
 
     renderStatusMessage: () => (
       <>
+        {walletBlock && (() => {
+          const shortfall = Math.max(0, walletBlock.charge - walletBlock.balance);
+          const rechargeAmount = Math.max(MIN_RECHARGE, Math.ceil(shortfall));
+          return (
+            <div className="fixed inset-0 z-[100000] flex items-center justify-center bg-black/60 p-4 print:hidden">
+              <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="rounded-full bg-amber-100 p-2.5 text-xl">⚠️</div>
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Insufficient Wallet Balance</h2>
+                    <p className="text-xs text-slate-500">
+                      A new reference number cannot be generated until your wallet covers the service charge.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mb-4 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">🎯 Service Charge</span>
+                    <span className="font-semibold text-gray-800">₹{walletBlock.charge}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-blue-200 pt-2">
+                    <span className="text-gray-600">💼 Your Balance</span>
+                    <span className="font-semibold text-gray-800">₹{walletBlock.balance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-blue-200 pt-2">
+                    <span className="font-semibold text-gray-700">⚠️ Shortfall</span>
+                    <span className="font-bold text-red-600">₹{shortfall.toFixed(2)}</span>
+                  </div>
+                  {walletBlock.state && (
+                    <div className="flex justify-between pt-1">
+                      <span className="text-xs text-gray-500">State</span>
+                      <span className="text-xs font-semibold text-gray-700">{walletBlock.state}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+                  Recharge at least <span className="font-bold">₹{rechargeAmount}</span> to continue.
+                  Your changes are saved, so you can return to this preview after recharging.
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWalletBlock(null)}
+                    className="flex-1 cursor-pointer rounded-lg border border-slate-300 py-2.5 font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(`/wallet-ledger?recharge=1&from=${encodeURIComponent("Construction Plan")}`)
+                    }
+                    className="flex-1 cursor-pointer rounded-lg bg-blue-600 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                  >
+                    Recharge Now →
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
         {paymentError && (
           <div className="bg-red-100 border border-red-400 text-red-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
             ⚠️ {paymentError}
@@ -576,7 +855,9 @@ export default function PaymentGateway({
         )}
         {isPaid && reuseStatus?.type === "reuse_minor" && (
           <div className="bg-green-100 border border-green-400 text-green-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
-            
+            ✅ Minor change (within {MAX_CHANGE_PERCENT}%) — same Ref {reuseStatus.refNo}, no extra charge.
+            {typeof reuseStatus.nameChange === "number" && ` Name changed: ${Math.round(reuseStatus.nameChange)}%.`}
+            {typeof reuseStatus.addressChange === "number" && ` Address changed: ${Math.round(reuseStatus.addressChange)}%.`}
           </div>
         )}
         {isPaid && reuseStatus?.type === "admin_override" && (
@@ -591,7 +872,9 @@ export default function PaymentGateway({
         )}
         {reuseStatus?.type === "new" && reuseStatus.reason === "major_change" && (
           <div className="bg-amber-100 border border-amber-400 text-amber-800 px-3 py-2 mb-2 rounded text-xs font-bold print:hidden">
-            
+            ℹ️ Customer name / address changed by more than {MAX_CHANGE_PERCENT}% — a new Ref No. and payment are required.
+            {typeof reuseStatus.nameChange === "number" && ` Name changed: ${Math.round(reuseStatus.nameChange)}%.`}
+            {typeof reuseStatus.addressChange === "number" && ` Address changed: ${Math.round(reuseStatus.addressChange)}%.`}
           </div>
         )}
       </>

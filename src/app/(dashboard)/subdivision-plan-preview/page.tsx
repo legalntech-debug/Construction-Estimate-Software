@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import PaymentGateway from "./components/PaymentGateway";
 import { buildPlanPdf, downloadBlob } from "../construction-plan-preview/planPdf";
 import SubdivisionCanvas from "../subdivision-plan/components/SubdivisionCanvas";
+import { generateCustomLayoutPieces } from "../subdivision-plan/subdivisionLayouts";
 
 /* =========================================================
    AUTO-GENERATE PIECES from input form config
@@ -18,11 +19,18 @@ import SubdivisionCanvas from "../subdivision-plan/components/SubdivisionCanvas"
      - CORNER (grid split)
      - WITH_ROAD (road cut + pieces)
      - CUSTOM_GRID (rows × columns)
+     - TEMPLATE (layout pattern + piece sizes)
+     - MANUAL (hand-built shapes)
 ========================================================= */
-function generatePiecesFromConfig(dimA: number, dimC: number, config: any) {
+function generatePiecesFromConfig(dimA: number, dimC: number, config: any, unit: "FEET" | "METERS" = "FEET") {
   if (!config) return [];
   const mode = config.mode || "SIMPLE";
   const pieces: any[] = [];
+
+  // TEMPLATE / MANUAL layouts are built by the shared layout module
+  if (mode === "TEMPLATE" || mode === "MANUAL") {
+    return generateCustomLayoutPieces(dimA, dimC, config, unit);
+  }
 
   // ═══════════════════════════════════════════════════
   // MODE 1: SIMPLE (EQUAL / CUSTOM)
@@ -359,7 +367,12 @@ export default function SubdivisionPlanPreview() {
     const dimA = resolve("A") || 30;
     const dimC = resolve("C") || 50;
 
-    const generated = generatePiecesFromConfig(dimA, dimC, cfg);
+    const generated = generatePiecesFromConfig(
+      dimA,
+      dimC,
+      cfg,
+      planData.measurementUnit === "METERS" ? "METERS" : "FEET"
+    );
     console.log(
       "[SUBDIV PREVIEW] Auto-generated pieces:",
       generated.length,
@@ -470,6 +483,9 @@ export default function SubdivisionPlanPreview() {
   const dimC = resolveDim("C") || 50;
   const dimD = resolveDim("D") || dimC;
   const safePlotArea = Number(plotArea) > 0 ? Number(plotArea) : dimA * dimC;
+
+  // Bigger drawing for small plots so the piece text and dimensions stay readable (never below the old 5.5)
+  const canvasScale = Math.min(12, Math.max(5.5, Math.min(480 / dimA, 330 / dimC)));
 
   const selectedClientNameFromData = planData?.selectedClientName || "";
   const representativeFromData = planData?.representative || "";
@@ -629,7 +645,7 @@ export default function SubdivisionPlanPreview() {
     setTimeout(() => window.print(), 200);
   }, [payment, canPrint, isMobile, pdfFileName]);
 
-  // ✅ qrVerifyUrl — EARLY RETURN se PEHLE
+  // qrVerifyUrl — must be computed BEFORE the early return
   const qrVerifyUrl = useMemo(() => {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     return `${origin}/verify-estimate?ref=${encodeURIComponent(
@@ -778,7 +794,7 @@ export default function SubdivisionPlanPreview() {
                 roadWidthEast={roadWidthEast}
                 roadWidthWest={roadWidthWest}
                 pieces={pieces}
-                scale={5.5}
+                scale={canvasScale}
               />
             </svg>
           </div>

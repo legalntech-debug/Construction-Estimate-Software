@@ -1,3 +1,4 @@
+import { resolveDoorConflicts } from './doorResolver';
 import { createPlotGeometry } from './plotEngine';
 import { calculateBuildableGeometry, calculateBuildableFootprint } from './geometryEngine';
 import { calculateSetbacks } from './setbackRules';
@@ -421,6 +422,9 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
     const own = new Map<string, any[]>((rooms as any[]).map((r: any) => [String(r.id), r.doors || []]));
     opened = opened.map((r: any) => ({ ...r, doors: own.has(String(r.id)) ? [...own.get(String(r.id))!] : (r.doors || []) }));
   }
+
+  // v19: plan + openings ban jaane ke baad koi door kisi doosre door / stair se cross na kare (position -> hinge -> swing side)
+  if (!isTower) { try { opened = resolveDoorConflicts(opened as any[], layoutW, layoutL) as any[]; } catch (e) { console.warn('[DOOR RESOLVER] failed', e); } }
 
   if (typeof console !== 'undefined') {
     console.log('[ENGINE] 🔍 after openingPlanner doors:', opened.map((r: any) => ({

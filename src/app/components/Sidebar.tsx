@@ -56,6 +56,11 @@ const FALLBACK_MIN_CHARGES: Record<string, number> = {
   '/reopen-old-case': 36,
 };
 
+// Routes that must stay reachable regardless of wallet balance.
+// Reopening an existing case is free to open; the balance check is
+// enforced later, on the service input page, for chargeable actions only.
+const WALLET_CHECK_EXEMPT_ROUTES: string[] = ['/reopen-old-case'];
+
 export default function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -203,7 +208,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
     e: React.MouseEvent<HTMLAnchorElement>,
     href: string
   ) => {
-    if (isAdmin || isPremium) {
+    if (isAdmin || isPremium || WALLET_CHECK_EXEMPT_ROUTES.includes(href)) {
       onClose?.();
       return;
     }

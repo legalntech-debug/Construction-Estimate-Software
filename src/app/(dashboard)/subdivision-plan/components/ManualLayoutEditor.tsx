@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import SubdivisionSketch from "./SubdivisionSketch";
+import CadPreviewCard from "./CadPreviewCard";
 import {
   ManualConfig,
   ManualKind,
@@ -43,6 +43,7 @@ function NumField({ label, value, onChange, step = 0.5 }: { label: string; value
       <input
         type="number"
         step={step}
+        inputMode="decimal"
         value={value === undefined || Number.isNaN(value) ? "" : value}
         onChange={(e) => onChange(Number(e.target.value) || 0)}
         className="w-full border border-black p-1.5 text-center text-sm font-bold focus:outline-none focus:bg-gray-100"
@@ -137,9 +138,9 @@ export default function ManualLayoutEditor({ value, onChange, plotW, plotD, unit
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
         {/* piece list */}
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
           {list.length === 0 && (
             <div className="border-2 border-dashed border-gray-400 p-8 text-center text-xs font-bold text-gray-500">
               No pieces yet. Use “ADD PIECE” to start drawing the layout.
@@ -305,25 +306,26 @@ export default function ManualLayoutEditor({ value, onChange, plotW, plotD, unit
           })}
         </div>
 
-        {/* live sketch + checks */}
-        <div>
-          <div className="text-[11px] font-black mb-1">LIVE LAYOUT (CLICK A PIECE CARD TO HIGHLIGHT IT)</div>
-          <SubdivisionSketch plotW={plotW} plotD={plotD} pieces={pieces} unit={unit} idPrefix="man-live" selectedPieceId={selected} />
-
-          <div className="mt-3 border-2 border-black p-3 text-xs font-bold space-y-1">
-            <div className="flex justify-between"><span>PLOT AREA</span><span>{check.plotArea} {areaU}</span></div>
-            <div className="flex justify-between"><span>PIECES TOTAL</span><span>{check.allocatedArea} {areaU}</span></div>
-            <div className="flex justify-between border-t border-black pt-1">
-              <span>UNALLOCATED</span><span>{check.balanceArea > 0 ? check.balanceArea : 0} {areaU}</span>
-            </div>
-          </div>
+        {/* CAD view + checks (stays beside the list on desktop, below it on mobile) */}
+        <div className="lg:sticky lg:top-4 space-y-3">
+          <CadPreviewCard
+            plotW={plotW}
+            plotD={plotD}
+            pieces={pieces}
+            unit={unit}
+            idPrefix="man-live"
+            selectedPieceId={selected}
+            plotArea={check.plotArea}
+            allocatedArea={check.allocatedArea}
+            balanceArea={check.balanceArea}
+          />
 
           {check.issues.length > 0 ? (
-            <ul className="mt-3 border-2 border-black bg-gray-100 p-3 text-xs font-bold space-y-1">
+            <ul className="border-2 border-black bg-gray-100 p-3 text-xs font-bold space-y-1">
               {check.issues.map((m, i) => <li key={i}>⚠ {m}</li>)}
             </ul>
           ) : (
-            list.length > 0 && <div className="mt-3 border-2 border-black bg-gray-100 p-2 text-xs font-bold">✔ All pieces are inside the plot and do not overlap.</div>
+            list.length > 0 && <div className="border-2 border-black bg-gray-100 p-2 text-xs font-bold">✔ All pieces are inside the plot and do not overlap.</div>
           )}
         </div>
       </div>

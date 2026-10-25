@@ -4,7 +4,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { PlotDimensions, PlotShape } from "../construction-plan/engine/planningTypes";
-import ClientDetailsSection from "../construction-plan/components/ClientDetailsSection";
+import SubdivisionClientDetails from "./components/SubdivisionClientDetails";
 import SubdivisionConfigSection from "./components/SubdivisionConfigSection";
 import SimpleSubdivisionInput, { SimpleSubdivisionConfig } from "./components/SimpleSubdivisionInput";
 
@@ -199,8 +199,11 @@ export default function SubdivisionPlanInput() {
             : undefined,
           corner: subdivisionConfig.corner,
           road: subdivisionConfig.road,
+          // TEMPLATE / MANUAL modes carry their own layout definition
+          template: subdivisionConfig.mode === "TEMPLATE" ? subdivisionConfig.template : undefined,
+          manual: subdivisionConfig.mode === "MANUAL" ? subdivisionConfig.manual : undefined,
         },
-        pieces: [], // Preview page par actual pieces banayenge
+        pieces: [], // The actual pieces are generated on the preview page
         createdAt: new Date().toISOString(),
       };
 
@@ -227,13 +230,13 @@ export default function SubdivisionPlanInput() {
   const hasPlotGeometry = Boolean(roadFacingOption && plotShape && frontWidthFt > 0 && depthFt > 0);
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto bg-white text-black font-sans uppercase">
-      <div className="bg-slate-900 text-white p-3 text-center font-black text-2xl mb-6 tracking-wide shadow">
+    <div className="p-3 sm:p-6 max-w-[1400px] mx-auto bg-white text-black font-sans uppercase">
+      <div className="bg-slate-900 text-white p-3 text-center font-black text-lg sm:text-2xl mb-4 sm:mb-6 tracking-wide shadow">
         SUBDIVISION PLAN INPUT FORM
       </div>
 
       {/* 1. CLIENT DETAILS */}
-      <ClientDetailsSection
+      <SubdivisionClientDetails
         caseType={caseType} setCaseType={setCaseType}
         feeMode={feeMode} setFeeMode={setFeeMode} setManualFee={setManualFee}
         selectedClientName={selectedClientName} handleClientChange={handleClientChange}
@@ -264,7 +267,7 @@ export default function SubdivisionPlanInput() {
         calculatedNetArea={plotArea}
       />
 
-      {/* 3. SIMPLE SUBDIVISION INPUT (with 4 modes) */}
+      {/* 3. SUBDIVISION INPUT (6 modes: simple, corner, with road, custom grid, template, manual) */}
       {hasPlotGeometry ? (
         <SimpleSubdivisionInput
           value={subdivisionConfig}
@@ -280,18 +283,18 @@ export default function SubdivisionPlanInput() {
       )}
 
       {/* 4. ACTIONS */}
-      <div className="flex flex-wrap gap-2 border-t-2 border-black pt-3">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 border-t-2 border-black pt-3">
         <button
           type="button"
           onClick={handleGeneratePlan}
-          className="bg-black hover:bg-zinc-800 text-white px-6 py-3 text-xs font-black uppercase transition cursor-pointer"
+          className="bg-black hover:bg-zinc-800 text-white px-6 py-3 text-xs font-black uppercase transition cursor-pointer w-full sm:w-auto"
         >
           GENERATE SUBDIVISION PLAN
         </button>
         <button
           type="button"
           onClick={handleClearForm}
-          className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 text-xs font-black uppercase transition cursor-pointer"
+          className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 text-xs font-black uppercase transition cursor-pointer w-full sm:w-auto"
         >
           CLEAR DATA
         </button>

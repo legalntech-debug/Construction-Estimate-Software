@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import PaymentGateway from "./components/PaymentGateway";
 import { buildPlanPdf, downloadBlob } from "../construction-plan-preview/planPdf";
 import SubdivisionCanvas from "../subdivision-plan/components/SubdivisionCanvas";
+import CadViewModal from "../subdivision-plan/components/CadViewModal";
 import { generateCustomLayoutPieces } from "../subdivision-plan/subdivisionLayouts";
 
 /* =========================================================
@@ -321,6 +322,7 @@ export default function SubdivisionPlanPreview() {
   const [screenshotBlocker, setScreenshotBlocker] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [pieces, setPieces] = useState<any[]>([]);
+  const [cadOpen, setCadOpen] = useState(false); // full-screen zoom / pan CAD viewer
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
@@ -670,6 +672,11 @@ export default function SubdivisionPlanPreview() {
     0
   );
 
+  // TEMPLATE / MANUAL layouts need their own layout data from the input page.
+  // If it did not arrive (old input page, cleared storage) there is nothing to draw or print.
+  const layoutMode = planData?.subdivisionConfig?.mode;
+  const layoutMissing = (layoutMode === "TEMPLATE" || layoutMode === "MANUAL") && pieces.length === 0;
+
   return (
     <div
       id="print-root"
@@ -706,19 +713,28 @@ export default function SubdivisionPlanPreview() {
       )}
 
       {/* HEADER */}
-      <div className="max-w-[1600px] mx-auto flex flex-wrap justify-between items-center bg-slate-800 text-white p-2.5 mb-2 rounded print:hidden">
+      <div className="max-w-[1600px] mx-auto flex flex-wrap justify-between items-center gap-2 bg-slate-800 text-white p-2.5 mb-2 rounded print:hidden">
         <button
           onClick={() => router.back()}
           className="bg-slate-700 px-3 py-1.5 text-xs font-bold rounded cursor-pointer"
         >
           ← BACK
         </button>
-        <h1 className="text-xs font-black text-amber-400">
+        <h1 className="text-xs font-black text-amber-400 order-last w-full text-center sm:order-none sm:w-auto">
           SUBDIVISION PLAN PREVIEW
         </h1>
         <button
+          type="button"
+          onClick={() => setCadOpen(true)}
+          disabled={pieces.length === 0}
+          className="bg-black border border-white/60 hover:bg-white hover:text-black px-3 py-1.5 text-xs font-bold rounded cursor-pointer disabled:opacity-40"
+        >
+          🖥 CAD VIEW
+        </button>
+        <button
           onClick={handlePrintClick}
           disabled={
+            layoutMissing ||
             payment.reuseChecking ||
             payment.paymentLoading ||
             payment.pricingLoading
@@ -736,6 +752,13 @@ export default function SubdivisionPlanPreview() {
             : `💳 PAY ₹${payment.price || 0} & PRINT`}
         </button>
       </div>
+
+      {layoutMissing && (
+        <div className="max-w-[1600px] mx-auto mb-2 p-3 border-2 border-red-600 bg-red-50 text-red-700 text-xs font-bold print:hidden">
+          ⚠ NO {layoutMode} LAYOUT DATA WAS RECEIVED. GO BACK TO THE INPUT PAGE, BUILD THE LAYOUT AND PRESS
+          “GENERATE SUBDIVISION PLAN” AGAIN. PRINTING IS DISABLED UNTIL THE LAYOUT IS AVAILABLE.
+        </div>
+      )}
 
       {payment.renderStatusMessage()}
 
@@ -932,6 +955,35 @@ export default function SubdivisionPlanPreview() {
           </div>
         </div>
       </div>
+      {/* FULL-SCREEN CAD VIEWER (zoom / pan; handy on mobile where the sheet is small) */}
+      <CadViewModal
+        open={cadOpen}
+        onClose={() => setCadOpen(false)}
+        title="CAD VIEW — SUBDIVISION LAYOUT"
+        aspect={1000 / 800}
+        status={`${pieces.filter((p: any) => p.kind === "PLOT").length} PLOTS · ${pieces.length} PIECES · ${activeRoadFacing}`}
+      >
+        <svg viewBox="-500 -400 1000 800" className="w-full h-auto" style={{ aspectRatio: "1000 / 800", display: "block" }}>
+          <rect x="-500" y="-400" width="1000" height="800" fill="#ffffff" />
+          <SubdivisionCanvas
+            plotDimensions={{ ...(plotDimensions || {}), A: dimA, B: dimB, C: dimC, D: dimD }}
+            roadFacingOption={activeRoadFacing}
+            boundaries={{
+              north: boundaries.north || "",
+              south: boundaries.south || "",
+              east: boundaries.east || "",
+              west: boundaries.west || "",
+            }}
+            measurementUnit={measurementUnit}
+            roadWidthNorth={roadWidthNorth}
+            roadWidthSouth={roadWidthSouth}
+            roadWidthEast={roadWidthEast}
+            roadWidthWest={roadWidthWest}
+            pieces={pieces}
+            scale={canvasScale}
+          />
+        </svg>
+      </CadViewModal>
     </div>
   );
 }

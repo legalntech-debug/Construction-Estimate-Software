@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import SubdivisionSketch from "./SubdivisionSketch";
+import CadPreviewCard from "./CadPreviewCard";
 import {
   TEMPLATE_META,
   TemplateConfig,
@@ -169,7 +170,7 @@ export default function TemplateLayoutEditor({ value, onChange, plotW, plotD, un
         </div>
       </div>
 
-      {/* STEP 3 — sizes + live sketch */}
+      {/* STEP 3 — sizes + CAD view */}
       <div>
         <div className="flex flex-wrap justify-between items-center gap-2 mb-2">
           <div className="font-black text-sm">STEP 3 — ENTER THE SIZE OF EVERY PIECE</div>
@@ -182,86 +183,130 @@ export default function TemplateLayoutEditor({ value, onChange, plotW, plotD, un
           </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-black text-white">
-                <tr>
-                  <th className="border border-black p-2 w-10">#</th>
-                  <th className="border border-black p-2 text-left">LABEL</th>
-                  <th className="border border-black p-2 w-24">WIDTH ({u})</th>
-                  <th className="border border-black p-2 w-24">DEPTH ({u})</th>
-                  <th className="border border-black p-2 w-24">AREA</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Array.from({ length: slots }).map((_, i) => {
-                  const p = value.pieces[i] || { label: "", widthFt: 0, depthFt: 0 };
-                  const group = slotGroupLabel(value, i);
-                  const showGroup = group !== "" && (i === 0 || slotGroupLabel(value, i - 1) !== group);
-                  return (
-                    <React.Fragment key={i}>
-                      {showGroup && (
-                        <tr>
-                          <td colSpan={5} className="border border-black bg-gray-200 px-2 py-1 text-[11px] font-black">
-                            {group}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
+          <div className="min-w-0">
+            {/* Desktop / tablet: table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead className="bg-black text-white">
+                  <tr>
+                    <th className="border border-black p-2 w-10">#</th>
+                    <th className="border border-black p-2 text-left">LABEL</th>
+                    <th className="border border-black p-2 w-28">WIDTH ({u})</th>
+                    <th className="border border-black p-2 w-28">DEPTH ({u})</th>
+                    <th className="border border-black p-2 w-24">AREA</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: slots }).map((_, i) => {
+                    const p = value.pieces[i] || { label: "", widthFt: 0, depthFt: 0 };
+                    const group = slotGroupLabel(value, i);
+                    const showGroup = group !== "" && (i === 0 || slotGroupLabel(value, i - 1) !== group);
+                    return (
+                      <React.Fragment key={i}>
+                        {showGroup && (
+                          <tr>
+                            <td colSpan={5} className="border border-black bg-gray-200 px-2 py-1 text-[11px] font-black">
+                              {group}
+                            </td>
+                          </tr>
+                        )}
+                        <tr className="bg-white">
+                          <td className="border border-black p-2 text-center font-black">{i + 1}</td>
+                          <td className="border border-black p-1">
+                            <input
+                              type="text"
+                              value={p.label || ""}
+                              placeholder={`PLOT ${i + 1}`}
+                              onChange={(e) => updatePiece(i, { label: e.target.value.toUpperCase() })}
+                              className="w-full p-2 text-sm font-bold uppercase focus:outline-none focus:bg-gray-100"
+                            />
+                          </td>
+                          <td className="border border-black p-1">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.5"
+                              value={p.widthFt || ""}
+                              onChange={(e) => updatePiece(i, { widthFt: Number(e.target.value) || 0 })}
+                              className="w-full p-2 text-center text-sm font-bold focus:outline-none focus:bg-gray-100"
+                            />
+                          </td>
+                          <td className="border border-black p-1">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.5"
+                              value={p.depthFt || ""}
+                              onChange={(e) => updatePiece(i, { depthFt: Number(e.target.value) || 0 })}
+                              className="w-full p-2 text-center text-sm font-bold focus:outline-none focus:bg-gray-100"
+                            />
+                          </td>
+                          <td className="border border-black p-2 text-center text-xs font-bold">
+                            {((p.widthFt || 0) * (p.depthFt || 0)).toFixed(1)}
                           </td>
                         </tr>
-                      )}
-                      <tr className="bg-white">
-                        <td className="border border-black p-2 text-center font-black">{i + 1}</td>
-                        <td className="border border-black p-1">
-                          <input
-                            type="text"
-                            value={p.label || ""}
-                            placeholder={`PLOT ${i + 1}`}
-                            onChange={(e) => updatePiece(i, { label: e.target.value.toUpperCase() })}
-                            className="w-full p-2 text-sm font-bold uppercase focus:outline-none focus:bg-gray-100"
-                          />
-                        </td>
-                        <td className="border border-black p-1">
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile: one card per piece */}
+            <div className="md:hidden space-y-2">
+              {Array.from({ length: slots }).map((_, i) => {
+                const p = value.pieces[i] || { label: "", widthFt: 0, depthFt: 0 };
+                const group = slotGroupLabel(value, i);
+                const showGroup = group !== "" && (i === 0 || slotGroupLabel(value, i - 1) !== group);
+                return (
+                  <React.Fragment key={i}>
+                    {showGroup && <div className="bg-gray-200 border border-black px-2 py-1 text-[11px] font-black">{group}</div>}
+                    <div className="border-2 border-black bg-white p-2">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="w-7 h-7 shrink-0 border-2 border-black rounded-full flex items-center justify-center text-xs font-black">{i + 1}</span>
+                        <input
+                          type="text"
+                          value={p.label || ""}
+                          placeholder={`PLOT ${i + 1}`}
+                          onChange={(e) => updatePiece(i, { label: e.target.value.toUpperCase() })}
+                          className="flex-1 min-w-0 border border-black p-2 text-sm font-bold uppercase"
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 items-end">
+                        <div>
+                          <label className="text-[10px] font-bold block mb-0.5">WIDTH ({u})</label>
                           <input
                             type="number"
                             min={0}
                             step="0.5"
+                            inputMode="decimal"
                             value={p.widthFt || ""}
                             onChange={(e) => updatePiece(i, { widthFt: Number(e.target.value) || 0 })}
-                            className="w-full p-2 text-center text-sm font-bold focus:outline-none focus:bg-gray-100"
+                            className="w-full border border-black p-2 text-center text-sm font-bold"
                           />
-                        </td>
-                        <td className="border border-black p-1">
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold block mb-0.5">DEPTH ({u})</label>
                           <input
                             type="number"
                             min={0}
                             step="0.5"
+                            inputMode="decimal"
                             value={p.depthFt || ""}
                             onChange={(e) => updatePiece(i, { depthFt: Number(e.target.value) || 0 })}
-                            className="w-full p-2 text-center text-sm font-bold focus:outline-none focus:bg-gray-100"
+                            className="w-full border border-black p-2 text-center text-sm font-bold"
                           />
-                        </td>
-                        <td className="border border-black p-2 text-center text-xs font-bold">
-                          {((p.widthFt || 0) * (p.depthFt || 0)).toFixed(1)}
-                        </td>
-                      </tr>
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-
-            <div className="mt-3 border-2 border-black p-3 text-xs font-bold space-y-1">
-              <div className="flex justify-between">
-                <span>PLOT AREA</span>
-                <span>{check.plotArea} {areaU}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>PIECES TOTAL</span>
-                <span>{check.allocatedArea} {areaU}</span>
-              </div>
-              <div className="flex justify-between border-t border-black pt-1">
-                <span>UNALLOCATED</span>
-                <span>{check.balanceArea > 0 ? check.balanceArea : 0} {areaU}</span>
-              </div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[10px] font-bold">AREA</div>
+                          <div className="text-sm font-black py-2">{((p.widthFt || 0) * (p.depthFt || 0)).toFixed(1)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
             </div>
 
             {check.issues.length > 0 ? (
@@ -275,9 +320,17 @@ export default function TemplateLayoutEditor({ value, onChange, plotW, plotD, un
             )}
           </div>
 
-          <div>
-            <div className="text-[11px] font-black mb-1">LIVE LAYOUT (NOT TO SCALE LABELS — DIMENSIONS ARE AS ENTERED)</div>
-            <SubdivisionSketch plotW={plotW} plotD={plotD} pieces={pieces} unit={unit} idPrefix="tpl-live" />
+          <div className="lg:sticky lg:top-4">
+            <CadPreviewCard
+              plotW={plotW}
+              plotD={plotD}
+              pieces={pieces}
+              unit={unit}
+              idPrefix="tpl-live"
+              plotArea={check.plotArea}
+              allocatedArea={check.allocatedArea}
+              balanceArea={check.balanceArea}
+            />
           </div>
         </div>
       </div>

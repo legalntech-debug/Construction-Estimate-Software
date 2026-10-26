@@ -27,21 +27,124 @@ const RETURN_TO_FORM_FLAG = "estimateReturnToForm";
 // NAME_ADDRESS_CHANGE_LIMIT, isRealRef and calculatePercentageChange now live in "@/lib/estimateRules"
 // (shared with the input form so both pages always apply the same rule).
 
-// Snapshot used to detect changes: name, address, plot area, rate, floor areas and totals
+// Effective consulting fee used for change detection.
+// AUTO mode derives the fee from the clients table at save time, so only a MANUAL fee is compared.
+const effectiveFee = (e: any): number | null => {
+  const mode = String(e?.fee_mode || "").trim().toUpperCase();
+  if (mode === "AUTO") return null;
+  return Number(parseFloat(e?.fee_amount) || 0);
+};
+
+// Snapshot used to detect changes: name, address, plot area, rate, floor areas, totals,
+// client / representative, estimate & plan type and the manual consulting fee.
+// Defaults for estimate_type / plan_type mirror the ones used in the save payload so that a
+// record read back from the database produces the same snapshot as the on-screen estimate.
 const makeSnapshot = (e: any) => {
   const fd = e?.floor_details && typeof e.floor_details === "object" ? e.floor_details : {};
   const floors: Record<string, number> = {};
   Object.keys(fd).sort().forEach((k) => { floors[k] = Number(fd[k]?.area || 0); });
+  const norm = (v: any) => String(v || "").trim().toUpperCase();
   return JSON.stringify({
-    n: String(e?.customer_name || "").trim().toUpperCase(),
-    a: String(e?.property_address || "").trim().toUpperCase(),
+    n: norm(e?.customer_name),
+    a: norm(e?.property_address),
     p: Number(e?.plot_area || 0),
     r: Number(e?.rate_per_sqft || 0),
     b: Number(e?.total_builtup_area || 0),
     t: Math.round(Number(e?.total_value ?? e?.total_construction_cost ?? e?.construction_cost ?? 0)),
     f: floors,
+    c: norm(e?.client_name),
+    rp: norm(e?.representative),
+    et: norm(e?.estimate_type || "RENOVATION"),
+    pt: norm(e?.plan_type || "BASIC"),
+    fe: effectiveFee(e),
   });
 };
+
+// Builds the baseline snapshot from a persisted `estimates` row.
+// feeMode is taken from the on-screen estimate because the fee mode itself is not stored in the database.
+// NOTE: confirm the fee column name of the `estimates` table (fee_amount vs fee_standard) - see getSavedFee.
+const getSavedFee = (rec: any) => rec?.fee_amount ?? rec?.fee_standard ?? rec?.consulting_fee ?? 0;
+const snapshotFromRecord = (rec: any, feeMode?: string) =>
+  makeSnapshot({
+    customer_name: rec?.customer_name,
+    property_address: rec?.property_address,
+    plot_area: rec?.plot_area,
+    rate_per_sqft: rec?.rate_per_sqft,
+    total_builtup_area: rec?.total_builtup_area,
+    total_value: rec?.total_construction_cost ?? rec?.total_value,
+    floor_details: rec?.floor_details,
+    client_name: rec?.client_name,
+    representative: rec?.representative,
+    estimate_type: rec?.estimate_type,
+    plan_type: rec?.plan_type,
+    fee_mode: feeMode,
+    fee_amount: getSavedFee(rec),
+  });
+
+// ---------------------------------------------------------------------------
+// WALLET GATE - runs only when a NEW payment is about to start (Pay to Print).
+// Reprints / same-ref updates of an already paid estimate never reach it.
+// ---------------------------------------------------------------------------
+const MIN_RECHARGE = 100; // Platform minimum recharge amount (INR)
+const WALLET_RECHARGE_ROUTE = "/wallet-ledger";
+
+type WalletBlock = { charge: number; balance: number; state: string };
+
+// Flat shape on purpose: discriminated-union narrowing does not work when "strict" is disabled in tsconfig.
+type WalletGateResult = { allowed: boolean; block?: WalletBlock; message?: string };
+
+/**
+ * Verifies that the logged-in user's wallet balance covers the service charge from the pricing table.
+ * Admin, CEO, premium and advanced accounts are exempt. Fails closed: if the balance cannot be verified,
+ * the user is not allowed to continue to the payment.
+ */
+async function verifyWalletForNewPayment(args: {
+  userId?: string | null;
+  fallbackState: string;
+  charge: number;
+}): Promise<WalletGateResult> {
+  const { userId, fallbackState, charge } = args;
+
+  if (!userId) {
+    return { allowed: false, message: "Session expired. Please log in again to continue." };
+  }
+
+  try {
+    // Always read the balance fresh from the database (the cached profile may be stale after a recharge)
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("role, plan_type, wallet_balance, state")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error || !profile) {
+      console.error("[WALLET GATE] Profile fetch failed:", error);
+      return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+    }
+
+    // Exemption rules are the same as the ones the input page applied before its own wallet lock was removed:
+    // admin / CEO roles, premium / advanced plans and the platform owner account.
+    const role = String(profile.role || "").toLowerCase();
+    const plan = String(profile.plan_type || "").toLowerCase();
+    const { data: authData } = await supabase.auth.getUser();
+    const isOwnerAccount = authData?.user?.email === "legalntech@gmail.com";
+    if (role === "admin" || role === "ceo" || plan.includes("premium") || plan.includes("advanced") || isOwnerAccount) {
+      return { allowed: true };
+    }
+
+    const balance = Number(profile.wallet_balance ?? 0);
+    const state = String(profile.state || fallbackState || "").toUpperCase().trim();
+
+    console.log("[WALLET GATE]", { userId, state, balance, charge });
+
+    if (!charge || charge <= 0 || balance >= charge) return { allowed: true };
+
+    return { allowed: false, block: { charge, balance, state } };
+  } catch (err) {
+    console.error("[WALLET GATE] Unexpected error:", err);
+    return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+  }
+}
 
 const slabConfig: any = {
   1000: { door: 0.20, plumb: 0.335, elec: 0.335, paint: 0.13, }, //done//
@@ -110,6 +213,9 @@ export default function EstimatePreviewPage() {
   const [validationReason, setValidationReason] = useState("");
   const [isCheckingHistory, setIsCheckingHistory] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Wallet gate (Pay to Print): modal data when the balance is below the service charge
+  const [walletBlock, setWalletBlock] = useState<WalletBlock | null>(null);
+  const [walletChecking, setWalletChecking] = useState(false);
 
   // 3. Custom Letterhead System
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
@@ -164,7 +270,7 @@ export default function EstimatePreviewPage() {
 
   const checkEstimatePaymentStatus = async (
     refNo: string,
-    current?: { customer_name?: string; property_address?: string }
+    current?: { customer_name?: string; property_address?: string; fee_mode?: string }
   ) => {
     if (!refNo) return;
     try {
@@ -210,15 +316,7 @@ export default function EstimatePreviewPage() {
 
       // Baseline: values persisted in the database (used to detect print-only / minor-change cases)
       if (estData) {
-        initialEstimateRef.current = makeSnapshot({
-          customer_name: estData.customer_name,
-          property_address: estData.property_address,
-          plot_area: estData.plot_area,
-          rate_per_sqft: estData.rate_per_sqft,
-          total_builtup_area: estData.total_builtup_area,
-          total_value: estData.total_construction_cost ?? estData.total_value,
-          floor_details: estData.floor_details,
-        });
+        initialEstimateRef.current = snapshotFromRecord(estData, current?.fee_mode);
       }
 
       setIsAlreadyPaid(true);
@@ -320,6 +418,7 @@ export default function EstimatePreviewPage() {
           await checkEstimatePaymentStatus(parsedData.ref_no, {
             customer_name: parsedData.customer_name,
             property_address: parsedData.property_address,
+            fee_mode: parsedData.fee_mode,
           });
         }
       } catch (err) {
@@ -654,7 +753,27 @@ const handleRazorpayPayment = () => handlePayment();
 
 // Razorpay Payment Handler
   const handlePayment = async () => {
+    if (walletChecking) return; // ignore double clicks while the balance is being verified
     try {
+      // WALLET GATE: verify the wallet balance against the pricing-table charge BEFORE the payment starts.
+      // Insufficient balance -> recharge prompt (the same charge is used for the Razorpay order below).
+      setWalletChecking(true);
+      setWalletBlock(null);
+      try {
+        const gate = await verifyWalletForNewPayment({
+          userId: currentUser?.id,
+          fallbackState: estimateStateName,
+          charge: gatewayFeeAmount || 21,
+        });
+        if (!gate.allowed) {
+          if (gate.block) setWalletBlock(gate.block);
+          else alert(gate.message || "Unable to verify wallet balance. Please try again.");
+          return;
+        }
+      } finally {
+        setWalletChecking(false);
+      }
+
       if (!(window as any).Razorpay) {
         await new Promise((resolve) => {
           const script = document.createElement("script");
@@ -867,6 +986,9 @@ const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
     //    needsNewPayment (name/address changed > 15% or estimate older than 60 days) -> brand new record + new ref no
     let activeEstimateId = needsNewPayment ? null : (estimate?.id || null);
     let activeRefNo: string | null = needsNewPayment ? null : (isRealRef(estimate?.ref_no) ? estimate.ref_no : null);
+    // A record that already had a ref no (reopen / minor change) is an UPDATE, never a new estimate,
+    // even when its id could not be resolved (e.g. record opened by another account)
+    const hadRefNoAtStart = !!activeRefNo;
 
     // State has the ref no but not the id -> find the exact record in the database
     if (!activeEstimateId && activeRefNo) {
@@ -934,7 +1056,7 @@ const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
     }
 
     // 5. Dynamic Fee Calculation
-    let consultingFee = estimate?.fee_mode === "AUTO" 
+    let consultingFee = String(estimate?.fee_mode || "").toUpperCase() === "AUTO" 
       ? await fetchDynamicFee(estimate?.client_name, estimate?.representative, estimate?.estimate_type) 
       : parseFloat(estimate?.fee_amount) || 0;
 
@@ -975,7 +1097,7 @@ const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
 
     // 8. Success Handling
     if (data && data.length > 0) {
-      if (!activeEstimateId) {
+      if (!activeEstimateId && !hadRefNoAtStart) {
         await supabase.from('profiles').update({ estimate_count: (currentUser?.estimate_count || 0) + 1 }).eq('id', userId);
       }
       
@@ -1082,15 +1204,7 @@ const handlePrint = () => { handleSaveAndPrint(); };
             // Existing original ref_no and details found, so reuse them
             workingEstimate.id = existingRecord.id;
             workingEstimate.ref_no = existingRecord.ref_no;
-            initialEstimateRef.current = makeSnapshot({
-              customer_name: existingRecord.customer_name,
-              property_address: existingRecord.property_address,
-              plot_area: existingRecord.plot_area,
-              rate_per_sqft: existingRecord.rate_per_sqft,
-              total_builtup_area: existingRecord.total_builtup_area,
-              total_value: existingRecord.total_construction_cost ?? existingRecord.total_value,
-              floor_details: existingRecord.floor_details,
-            });
+            initialEstimateRef.current = snapshotFromRecord(existingRecord, workingEstimate.fee_mode);
             if (existingRecord.payment_status === 'paid' || existingRecord.status === 'paid') {
               setIsPaid(true);
               setIsAlreadyPaid(true);
@@ -2120,10 +2234,14 @@ const actionsBlock = (
     ) : (
       <button
         onClick={handleRazorpayPayment}
-        disabled={pricingLoading}
+        disabled={pricingLoading || walletChecking}
         className="bg-gradient-to-r from-emerald-600 to-green-600 text-white px-8 py-3 rounded-lg shadow-lg hover:from-emerald-700 hover:to-green-700 transition font-extrabold uppercase tracking-wide flex items-center gap-2 text-base animate-bounce disabled:opacity-50 disabled:animate-none"
       >
-        {pricingLoading ? "⏳ LOADING PRICE..." : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
+        {pricingLoading
+          ? "⏳ LOADING PRICE..."
+          : walletChecking
+          ? "⏳ CHECKING WALLET..."
+          : `🚀 PAY TO PRINT (₹${gatewayFeeAmount})`}
       </button>
     )}
 
@@ -2147,6 +2265,72 @@ return (
     className="print-shell w-full overflow-x-auto bg-slate-100 p-2 md:p-6 flex justify-center"
     style={isMobilePreview ? { flexDirection: "column", alignItems: "center", overflowX: "hidden", padding: "8px 0" } : undefined}
   >
+    {walletBlock && (() => {
+      const shortfall = Math.max(0, walletBlock.charge - walletBlock.balance);
+      const rechargeAmount = Math.max(MIN_RECHARGE, Math.ceil(shortfall));
+      return (
+        <div className="no-print print:hidden fixed inset-0 z-[100000] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-full bg-amber-100 p-2.5 text-xl">⚠️</div>
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">Insufficient Wallet Balance</h2>
+                <p className="text-xs text-slate-500">
+                  Your wallet must cover the service charge before the payment can start.
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-4 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">🎯 Service Charge</span>
+                <span className="font-semibold text-gray-800">₹{walletBlock.charge}</span>
+              </div>
+              <div className="flex justify-between border-t border-blue-200 pt-2">
+                <span className="text-gray-600">💼 Your Balance</span>
+                <span className="font-semibold text-gray-800">₹{walletBlock.balance.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between border-t border-blue-200 pt-2">
+                <span className="font-semibold text-gray-700">⚠️ Shortfall</span>
+                <span className="font-bold text-red-600">₹{shortfall.toFixed(2)}</span>
+              </div>
+              {walletBlock.state && (
+                <div className="flex justify-between pt-1">
+                  <span className="text-xs text-gray-500">State</span>
+                  <span className="text-xs font-semibold text-gray-700">{walletBlock.state}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+              Recharge at least <span className="font-bold">₹{rechargeAmount}</span> to continue.
+              Your estimate is kept, so you can return to this preview after recharging and tap PAY TO PRINT again.
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setWalletBlock(null)}
+                className="flex-1 cursor-pointer rounded-lg border border-slate-300 py-2.5 font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // Keep the estimate in localStorage: the unmount cleanup must not clear it while the user recharges
+                  goingToFormRef.current = true;
+                  router.push(`${WALLET_RECHARGE_ROUTE}?recharge=1&from=${encodeURIComponent("Estimate")}`);
+                }}
+                className="flex-1 cursor-pointer rounded-lg bg-blue-600 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+              >
+                Recharge Now →
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
     {isMobilePreview && <div className="no-print w-full px-3">{noticesBlock}</div>}
     <div
       className="preview-scale-box"

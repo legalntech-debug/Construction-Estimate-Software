@@ -79,64 +79,49 @@ export default function EstimatePage() {
     } catch {}
   }, []);
 
-  // Wallet & Access Control States
-  const [walletBalance, setWalletBalance] = useState<number>(100);
-  const [userPlan, setUserPlan] = useState<string>("BASIC PLAN");
-  const [userRole, setUserRole] = useState<string>("");
+  // Access control: admin / CEO / premium / advanced accounts are "exempt" (used only for the MIS fee update in handleGenerate).
+  // NOTE: the wallet-balance lock that used to block this whole form was removed on purpose. The wallet is now verified
+  // on the preview page, right before a NEW payment (Pay to Print), so reopened / same-ref estimates stay usable.
   const [isAdminOrExempt, setIsAdminOrExempt] = useState<boolean>(false);
-  const [isCheckingWallet, setIsCheckingWallet] = useState<boolean>(true);
 
   useEffect(() => {
-    const checkWalletAndSession = async () => {
+    const checkExemptAccess = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          let exempt = false;
-          let currentRole = "";
-          let currentPlan = "";
+        if (!session) return;
 
-          // Role check via RPC or profiles table
-          const { data: roleData } = await supabase.rpc('get_user_role', { target_user_id: session.user.id });
-          if (roleData) currentRole = roleData.toLowerCase();
+        let currentRole = "";
+        let currentPlan = "";
 
-          const { data: profileData } = await supabase
-            .from('profiles')
-            .select('plan_type, wallet_balance, role')
-            .eq('id', session.user.id)
-            .maybeSingle();
+        // Role check via RPC or profiles table
+        const { data: roleData } = await supabase.rpc('get_user_role', { target_user_id: session.user.id });
+        if (roleData) currentRole = roleData.toLowerCase();
 
-          if (profileData) {
-            if (profileData.plan_type) currentPlan = profileData.plan_type.toLowerCase();
-            if (profileData.wallet_balance !== null && profileData.wallet_balance !== undefined) {
-              setWalletBalance(Number(profileData.wallet_balance));
-            }
-            if (profileData.role) currentRole = profileData.role.toLowerCase();
-          }
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('plan_type, role')
+          .eq('id', session.user.id)
+          .maybeSingle();
 
-          setUserRole(currentRole);
-          setUserPlan(currentPlan);
-
-          // Check if user is Admin, CEO, or has Premium/Advanced plan (Exempt from restriction)
-          if (
-            currentRole === 'admin' || 
-            currentRole === 'ceo' || 
-            currentPlan.includes('premium') || 
-            currentPlan.includes('advanced') ||
-            session.user.email === 'legalntech@gmail.com'
-          ) {
-            exempt = true;
-          }
-
-          setIsAdminOrExempt(exempt);
+        if (profileData) {
+          if (profileData.plan_type) currentPlan = profileData.plan_type.toLowerCase();
+          if (profileData.role) currentRole = profileData.role.toLowerCase();
         }
+
+        // Admin, CEO, or Premium/Advanced plan
+        setIsAdminOrExempt(
+          currentRole === 'admin' ||
+          currentRole === 'ceo' ||
+          currentPlan.includes('premium') ||
+          currentPlan.includes('advanced') ||
+          session.user.email === 'legalntech@gmail.com'
+        );
       } catch (err) {
-        console.error("Wallet check error:", err);
-      } finally {
-        setIsCheckingWallet(false);
+        console.error("Access check error:", err);
       }
     };
 
-    checkWalletAndSession();
+    checkExemptAccess();
   }, []);
 
   // Clear the saved estimate when the user leaves the input form (dashboard, another service, ...).
@@ -514,33 +499,8 @@ export default function EstimatePage() {
   const isAddressFilled = isCustomerFilled && propertyAddress.trim() !== "";
   const isPlotFilled = isAddressFilled && plotArea.trim() !== "";
 
-  // Restriction only applies if NOT admin/CEO/premium/advanced AND wallet balance is less than 21
-  const isWalletRestricted = !isAdminOrExempt && walletBalance < 21;
-
-  if (isCheckingWallet) {
-    return <div className="p-10 text-center font-bold text-lg">Checking wallet balance...</div>;
-  }
-
   return (
     <div className="relative w-full max-w-5xl mx-auto p-2 sm:p-6 font-sans uppercase text-sm sm:text-lg text-black border border-black bg-white shadow-lg leading-tight overflow-x-auto">
-      
-      {/* RESTRICTION OVERLAY ONLY FOR BASIC PLAN USERS WITH WALLET < 21 */}
-      {isWalletRestricted && (
-        <div className="absolute inset-0 bg-white/95 z-50 flex flex-col items-center justify-center p-6 text-center">
-          <div className="bg-red-100 border-2 border-red-600 text-red-700 p-6 rounded-xl max-w-lg shadow-2xl">
-            <h2 className="text-2xl font-black uppercase mb-2">⚠️ Wallet Balance Low (Restricted)</h2>
-            <p className="text-sm font-semibold mb-4">
-              Your wallet balance (₹{walletBalance}) is below ₹21 and you are on the Basic Plan, so the Construction Estimate portal has been locked. Please recharge your wallet.
-            </p>
-            <button 
-              onClick={() => router.push('/wallet-ledger')}
-              className="bg-red-600 text-white font-bold px-6 py-2.5 rounded-lg hover:bg-red-700 shadow uppercase text-sm cursor-pointer"
-            >
-              Go to Wallet Ledger & Recharge
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row justify-between items-center border-2 border-black bg-gray-100 p-3 mb-4 gap-2">
@@ -552,7 +512,6 @@ export default function EstimatePage() {
             <input 
               type="file" 
               className="hidden" 
-              disabled={isWalletRestricted}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) {
@@ -576,24 +535,24 @@ export default function EstimatePage() {
       <div className="grid grid-cols-2 sm:grid-cols-7 gap-3 sm:gap-4 mb-4 border-b border-black pb-4">
         <div className="col-span-1 sm:col-span-2">
           <label className="font-bold block text-xs sm:text-lg">CASE TYPE</label>
-          <select disabled={isWalletRestricted} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg bg-white">
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg bg-white">
             <option>NEW CONSTRUCTION</option>
           </select>
         </div>
         <div className="col-span-1 sm:col-span-1">
           <label className="font-bold block text-xs sm:text-lg">FEE</label>
-          <select disabled={isWalletRestricted} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg bg-white" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
+          <select className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg bg-white" value={feeMode} onChange={(e) => setFeeMode(e.target.value)}>
             <option value="AUTO">AUTO</option>
             <option value="MANUAL">MANUAL</option>
           </select>
           {feeMode === "MANUAL" && (
-            <input type="number" disabled={isWalletRestricted} placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
+            <input type="number" placeholder="ENTER FEE" className="w-full border border-black p-1.5 mt-1 text-center text-xs sm:text-lg" onChange={(e) => setManualFee(Number(e.target.value))} />
           )}
         </div>
         {showClientFields ? (<>
         <div className="est-reveal col-span-1 sm:col-span-2">
           <label className="font-bold block text-xs sm:text-lg">CLIENT NAME</label>
-          <input list="clients-list" disabled={isWalletRestricted} value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
+          <input list="clients-list" value={selectedClientName} onChange={(e) => handleClientChange(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH CLIENT..." />
           <datalist id="clients-list">{[...new Set(clients.map(c => c.client_name))].map((name, i) => <option key={i} value={name} />)}</datalist>
         </div>
         <div className="est-reveal col-span-1 sm:col-span-2">
@@ -602,15 +561,14 @@ export default function EstimatePage() {
             <button
               type="button"
               onClick={toggleClientFields}
-              disabled={isWalletRestricted}
               title="Hide Client Name & Representative"
               aria-label="Hide Client Name and Representative"
-              className="est-eye-btn p-1 border border-black bg-white hover:bg-black hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="est-eye-btn p-1 border border-black bg-white hover:bg-black hover:text-white transition-colors"
             >
               <EyeIcon off />
             </button>
           </div>
-          <input list="reps-list" disabled={isWalletRestricted} value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
+          <input list="reps-list" value={representative} onChange={(e) => setRepresentative(e.target.value)} className="w-full border border-black p-2 uppercase text-center text-xs sm:text-lg" placeholder="SEARCH REP..." />
           <datalist id="reps-list">{filteredReps.map((rep, i) => <option key={i} value={rep} />)}</datalist>
         </div>
         </>) : (
@@ -618,10 +576,9 @@ export default function EstimatePage() {
           <button
             type="button"
             onClick={toggleClientFields}
-            disabled={isWalletRestricted}
             title="Show Client Name & Representative"
             aria-label="Show Client Name and Representative"
-            className="est-eye-btn w-full h-[38px] sm:h-[50px] flex items-center justify-center gap-2 px-2 border-2 border-dashed border-black bg-white text-xs sm:text-base font-bold uppercase tracking-wide hover:bg-black hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="est-eye-btn w-full h-[38px] sm:h-[50px] flex items-center justify-center gap-2 px-2 border-2 border-dashed border-black bg-white text-xs sm:text-base font-bold uppercase tracking-wide hover:bg-black hover:text-white transition-colors"
           >
             <EyeIcon off={false} />
             <span className="truncate">
@@ -640,13 +597,13 @@ export default function EstimatePage() {
           <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">CUSTOMER NAME</label>
           <textarea 
             value={customerName} 
-            disabled={isWalletRestricted || !isClientFilled}
+            disabled={!isClientFilled}
             onChange={(e) => {
               setCustomerName(e.target.value);
               e.target.style.height = "auto";
               e.target.style.height = `${e.target.scrollHeight}px`;
             }} 
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${(!isClientFilled || isWalletRestricted) ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isClientFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={1} 
             placeholder="FILL HERE (e.g. Mr. Raju Dubela, s/o Premchand)"
           />
@@ -655,13 +612,13 @@ export default function EstimatePage() {
           <label className="col-span-1 md:col-span-3 font-bold text-sm sm:text-lg border border-black p-2.5 bg-gray-100">PROPERTY ADDRESS</label>
           <textarea 
             value={propertyAddress} 
-            disabled={isWalletRestricted || !isCustomerFilled}
+            disabled={!isCustomerFilled}
             onChange={(e) => {
               setPropertyAddress(e.target.value);
               e.target.style.height = "auto";
               e.target.style.height = `${e.target.scrollHeight}px`;
             }} 
-            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${(!isCustomerFilled || isWalletRestricted) ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
+            className={`col-span-1 md:col-span-9 border border-black p-2.5 uppercase text-left text-sm sm:text-lg resize-y overflow-hidden placeholder:text-gray-400 placeholder:normal-case ${!isCustomerFilled ? 'bg-gray-100 cursor-not-allowed opacity-60' : ''}`} 
             rows={2} 
             placeholder="FILL HERE (e.g. 110 PATEL MARG, Vill. Rajgarh, Tehsil Sardarpur, Distt. Dhar, State MP)"
           />
@@ -669,14 +626,14 @@ export default function EstimatePage() {
       </div>
 
       {/* Plot Area & Floor Selector */}
-      <div className={`grid grid-cols-12 gap-2 md:gap-4 mb-2 items-center border-t border-black pt-3 ${(!isAddressFilled || isWalletRestricted) ? 'opacity-50 pointer-events-none' : ''}`}>
+      <div className={`grid grid-cols-12 gap-2 md:gap-4 mb-2 items-center border-t border-black pt-3 ${!isAddressFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-5 md:col-span-3">
           <label className="font-bold block text-[11px] sm:text-lg truncate">PLOT AREA</label>
           <div className="relative flex items-center">
             <input 
               type="text" 
               placeholder="0.00" 
-              disabled={isWalletRestricted || !isAddressFilled}
+              disabled={!isAddressFilled}
               value={plotArea} 
               onChange={(e) => handlePlotAreaChange(e.target.value)} 
               className="w-full border border-black p-2 uppercase text-center text-sm sm:text-lg" 
@@ -687,9 +644,9 @@ export default function EstimatePage() {
         <div className="col-span-7 md:col-span-7">
           <label className="font-bold block text-[11px] sm:text-lg truncate">SELECT FLOORS: ({selectedFloors.length})</label>
           <button 
-            disabled={isWalletRestricted || !isPlotFilled}
+            disabled={!isPlotFilled}
             onClick={() => { setTempSelectedFloors(selectedFloors); setIsFloorModalOpen(true); }} 
-            className={`w-full border border-black px-2 py-2.5 font-bold text-[10px] sm:text-lg mt-1 bg-gray-100 hover:bg-gray-200 truncate ${(!isPlotFilled || isWalletRestricted) ? 'cursor-not-allowed' : ''}`}
+            className={`w-full border border-black px-2 py-2.5 font-bold text-[10px] sm:text-lg mt-1 bg-gray-100 hover:bg-gray-200 truncate ${!isPlotFilled ? 'cursor-not-allowed' : ''}`}
           >
             ADD + CHOOSE FLOOR
           </button>
@@ -697,7 +654,7 @@ export default function EstimatePage() {
       </div>
 
       {/* Built Up Area Details */}
-      <div className={`mt-4 border border-black rounded-none overflow-hidden ${(!isPlotFilled || isWalletRestricted) ? 'opacity-50 pointer-events-none' : ''}`}>
+      <div className={`mt-4 border border-black rounded-none overflow-hidden ${!isPlotFilled ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="bg-[#1e293b] text-white py-2.5 font-bold uppercase tracking-wider text-center text-sm sm:text-lg">BUILT UP AREA DETAILS</div>
         <div className="flex flex-col">
           {["BASEMENT", "GROUND FLOOR", "FIRST FLOOR", "SECOND FLOOR", "THIRD FLOOR", "FOURTH FLOOR", "FIFTH FLOOR", "SIXTH FLOOR", "SEVENTH FLOOR", "EIGHTH FLOOR", "NINTH FLOOR", "TENTH FLOOR", "TOWER"]
@@ -706,8 +663,8 @@ export default function EstimatePage() {
               <div key={f} className="grid grid-cols-12 items-center border-b border-black bg-white">
                 <span className="col-span-4 font-bold text-black uppercase text-xs sm:text-lg p-2.5 text-center border-r border-black">{f}</span>
                 <div className="col-span-4 grid grid-cols-2 gap-0 border-r border-black">
-                  <input type="number" step="0.01" min="0" disabled={isWalletRestricted} placeholder="20 FT" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
-                  <input type="number" step="0.01" min="0" disabled={isWalletRestricted} placeholder="50 FT" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="20 FT" value={floorData[f]?.width || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, floorData[f]?.length || 0, parseFloat(e.target.value) || 0)} />
+                  <input type="number" step="0.01" min="0" placeholder="50 FT" value={floorData[f]?.length || ""} className="w-full text-center border-none bg-transparent outline-none p-2.5 text-xs sm:text-lg" onChange={(e) => updateArea(f, parseFloat(e.target.value) || 0, floorData[f]?.width || 0)} />
                 </div>
                 <input type="text" readOnly value={`${floorData[f]?.area || 0} SQ.FT`} className="col-span-4 p-2.5 text-center font-bold text-black text-xs sm:text-lg bg-transparent" />
               </div>
@@ -716,7 +673,7 @@ export default function EstimatePage() {
       </div>
 
       {/* Summary Calculation Bar */}
-      <div className={`grid grid-cols-2 sm:grid-cols-5 mb-3 mt-4 items-center gap-2 ${(totalBuiltUpArea <= 0 || isWalletRestricted) ? 'opacity-50 pointer-events-none' : ''}`}>
+      <div className={`grid grid-cols-2 sm:grid-cols-5 mb-3 mt-4 items-center gap-2 ${totalBuiltUpArea <= 0 ? 'opacity-50 pointer-events-none' : ''}`}>
         <div className="col-span-1 sm:col-span-1">
           <label className="font-bold block text-xs sm:text-lg">TOTAL AREA</label>
           <input type="text" readOnly value={`${totalBuiltUpArea} SQ.FT`} className="w-full border border-black p-2 uppercase text-center bg-gray-100 font-bold text-xs sm:text-lg" />
@@ -727,7 +684,6 @@ export default function EstimatePage() {
           <input 
             type="number" 
             step="0.01" 
-            disabled={isWalletRestricted}
             placeholder="RATE" 
             value={rate || ""} 
             onChange={(e) => { 
@@ -745,7 +701,6 @@ export default function EstimatePage() {
           <label className="font-bold block text-xs sm:text-lg">TOTAL AMOUNT</label>
           <input 
             type="text" 
-            disabled={isWalletRestricted}
             placeholder="TOTAL AMOUNT"
             value={amount ? amount.toLocaleString('en-IN') + "/-" : ""} 
             onChange={(e) => {
@@ -766,22 +721,20 @@ export default function EstimatePage() {
       <div className="flex flex-col sm:flex-row gap-4 border-t border-black pt-4">
         <button 
           onClick={handleGenerate} 
-          disabled={isWalletRestricted}
-          className={`bg-black text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto ${isWalletRestricted ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-800'}`}
+          className="bg-black text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto hover:bg-gray-800"
         >
           GENERATE ESTIMATE
         </button>
         <button 
           onClick={handleClear} 
-          disabled={isWalletRestricted}
-          className={`bg-red-600 text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto ${isWalletRestricted ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-700'}`}
+          className="bg-red-600 text-white px-6 py-3 font-bold uppercase text-sm sm:text-lg w-full sm:w-auto hover:bg-red-700"
         >
           Clear Data
         </button>
       </div>
 
       {/* Floor Selector Modal */}
-      {isFloorModalOpen && !isWalletRestricted && (
+      {isFloorModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 border border-black w-full max-w-[400px] uppercase text-xs sm:text-base">
             <h2 className="font-bold mb-4 border-b border-black pb-2 text-sm sm:text-lg">SELECT FLOORS</h2>

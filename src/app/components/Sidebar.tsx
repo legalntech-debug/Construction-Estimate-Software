@@ -57,9 +57,13 @@ const FALLBACK_MIN_CHARGES: Record<string, number> = {
 };
 
 // Routes that must stay reachable regardless of wallet balance.
-// Reopening an existing case is free to open; the balance check is
-// enforced later, on the service input page, for chargeable actions only.
-const WALLET_CHECK_EXEMPT_ROUTES: string[] = ['/reopen-old-case'];
+// Reopening an existing case is free to open; for the services below the balance
+// check is enforced later, on the preview page, right before a NEW payment
+// (Pay to Print), so reopened / same-ref estimates stay usable.
+const WALLET_CHECK_EXEMPT_ROUTES: string[] = [
+  '/reopen-old-case',
+  '/estimate', // New Construction: wallet verified on the preview page
+];
 
 export default function Sidebar({ onClose }: SidebarProps) {
   const pathname = usePathname();
@@ -250,8 +254,10 @@ export default function Sidebar({ onClose }: SidebarProps) {
   // ════════════════════════════════════════════════════════════════
   const serviceCharge = warning?.required ?? 0;                       // Actual service price
   const rechargeMin = MIN_RECHARGE;                                    // Platform minimum
-  const topUpNeeded = Math.max(MIN_RECHARGE, serviceCharge);           // At least this much
-  const shortfall = warning ? Math.max(0, topUpNeeded - walletBalance) : 0;
+  // Amount still missing to cover the service charge (can exceed the platform minimum on a negative balance)
+  const shortfall = warning ? Math.max(0, serviceCharge - walletBalance) : 0;
+  // Suggested top-up: never below the platform minimum, and always enough to cover the shortfall
+  const rechargeAmount = Math.max(MIN_RECHARGE, Math.ceil(shortfall));
 
   return (
     <>
@@ -497,9 +503,9 @@ export default function Sidebar({ onClose }: SidebarProps) {
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-5 text-xs text-emerald-800 leading-relaxed">
               <p className="font-bold mb-1">💡 How to fix:</p>
               <p>
-                Recharge <span className="font-bold">₹{rechargeMin}</span> (minimum) —
+                Recharge at least <span className="font-bold">₹{rechargeAmount}</span> —
                 after that your balance will be{' '}
-                <span className="font-bold">₹{(walletBalance + rechargeMin).toFixed(2)}</span>,
+                <span className="font-bold">₹{(walletBalance + rechargeAmount).toFixed(2)}</span>,
                 which covers this service charge of{' '}
                 <span className="font-bold">₹{serviceCharge}</span>.
               </p>
@@ -516,7 +522,7 @@ export default function Sidebar({ onClose }: SidebarProps) {
                 onClick={handleRecharge}
                 className="flex-1 py-2.5 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition cursor-pointer"
               >
-                Recharge ₹{rechargeMin} Now
+                Recharge ₹{rechargeAmount} Now
               </button>
             </div>
           </div>

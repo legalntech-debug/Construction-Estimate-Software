@@ -94,6 +94,27 @@ type WalletBlock = { charge: number; balance: number; state: string };
 type WalletGateResult = { allowed: boolean; block?: WalletBlock; message?: string };
 
 /**
+ * Confirms against the database that a ref no really belongs to a PAID estimate.
+ * Local flags (React state / localStorage) can be edited by the user, so every action that releases
+ * a printout (print, PDF download, share, save of a paid record) is checked here first.
+ * Fails closed: a missing record or a network error counts as "not paid".
+ */
+async function verifyPaidOnServer(refNo?: string | null): Promise<boolean> {
+  if (!isRealRef(refNo)) return false;
+  try {
+    const { data: est } = await supabase.from("estimates").select("*").eq("ref_no", refNo).maybeSingle();
+    if (est && (est.platform_payment_status === "paid" || est.payment_status === "paid" || est.status === "paid")) {
+      return true;
+    }
+    const { data: mis } = await supabase.from("mis_records").select("platform_payment_status").eq("ref_no", refNo).maybeSingle();
+    return !!mis && String(mis.platform_payment_status || "").toLowerCase() === "paid";
+  } catch (err) {
+    console.error("[PRINT GUARD] Payment verification failed:", err);
+    return false;
+  }
+}
+
+/**
  * Verifies that the logged-in user's wallet balance covers the service charge from the pricing table.
  * Admin, CEO, premium and advanced accounts are exempt. Fails closed: if the balance cannot be verified,
  * the user is not allowed to continue to the payment.
@@ -245,6 +266,10 @@ export default function EstimatePreviewPage() {
   const goingToFormRef = useRef(false);
   const isMountedRef = useRef(false);
   const allowPrintRef = useRef(false); // true only while the in-app Print button triggers window.print()
+  // Print guard: true only when the estimate is paid, signed (verified seal), saved and confirmed by the database (admin: always)
+  const [printAuthorized, setPrintAuthorized] = useState(false);
+  const printAuthorizedRef = useRef(false);
+  const latestEstimateRef = useRef<any>(null);
   // Mobile preview: the A4 page is scaled down to fit the screen width (desktop stays at scale 1)
   const [previewScale, setPreviewScale] = useState(1);
   const [scaledHeight, setScaledHeight] = useState<number | null>(null);
@@ -472,6 +497,9 @@ const handleRazorpayPayment = () => handlePayment();
         requestAnimationFrame(() => {
           // Printing is only permitted when it is started from the in-app Print button
           allowPrintRef.current = true;
+          // The print guard class was raised by ensureSavedAndVerified; drop it again afterwards unless the state says authorized
+          const restoreGuard = () => document.body.classList.toggle("print-authorized", printAuthorizedRef.current);
+          window.addEventListener("afterprint", restoreGuard, { once: true });
           try {
             window.print();
           } finally {
@@ -485,8 +513,10 @@ const handleRazorpayPayment = () => handlePayment();
   const handleSaveAndPrint = async () => {
     setIsSaving(true);
     try {
-      const ok = await ensureSaved();
+      const ok = await ensureSavedAndVerified();
       if (!ok) return;
+      // Release the printout for this in-app print (payment + save + server check are all done at this point)
+      document.body.classList.add("print-authorized");
       await printAfterRender();
     } catch (error) {
       console.error("Save failed", error);
@@ -515,6 +545,59 @@ const handleRazorpayPayment = () => handlePayment();
   const isExportReady = () =>
     (isPaid || isAlreadyPaid || userCategory === 'ADMIN') &&
     !!estimate?.ref_no && !String(estimate.ref_no).startsWith("TEMP") && !String(estimate.ref_no).includes("...");
+
+  // Save (if needed) and then confirm the payment against the database before ANY output is released
+  // (print / PDF download / share). Admin accounts skip the payment check.
+  const ensureSavedAndVerified = async (): Promise<boolean> => {
+    if (!(await ensureSaved())) return false;
+    if (userCategory === 'ADMIN') return true;
+    const verified = await verifyPaidOnServer(latestEstimateRef.current?.ref_no);
+    if (!verified) {
+      alert("Payment could not be verified for this estimate. Please complete the payment to print or download it.");
+      return false;
+    }
+    return true;
+  };
+
+  // ---------------------------------------------------------------------------
+  // PRINT GUARD
+  // The browser print (Ctrl+P, browser menu, ...) is blocked by print.css unless <body> carries "print-authorized".
+  // That class is set only when: paid + signed (verified seal) + real ref no + saved + confirmed by the database.
+  // ---------------------------------------------------------------------------
+  latestEstimateRef.current = estimate;
+  printAuthorizedRef.current = printAuthorized;
+
+  useEffect(() => {
+    let alive = true;
+    if (userCategory === 'ADMIN') {
+      setPrintAuthorized(true);
+      return;
+    }
+    const eligible =
+      (isPaid || isAlreadyPaid) &&
+      !needsNewPayment &&
+      isRealRef(estimate?.ref_no) &&
+      (isFinalized || isUnchangedFromSaved());
+    if (!eligible) {
+      setPrintAuthorized(false);
+      return;
+    }
+    verifyPaidOnServer(estimate.ref_no).then((ok) => { if (alive) setPrintAuthorized(ok); });
+    return () => { alive = false; };
+  }, [isPaid, isAlreadyPaid, needsNewPayment, isFinalized, userCategory, estimate]);
+
+  // Switch the guard on for this page only (print.css rules are scoped to html[data-print-guard="on"])
+  useEffect(() => {
+    document.documentElement.setAttribute("data-print-guard", "on");
+    return () => {
+      document.documentElement.removeAttribute("data-print-guard");
+      document.body.classList.remove("print-authorized");
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("print-authorized", printAuthorized);
+  }, [printAuthorized]);
 
   // File name: <Ref No> - <Customer Name> (LnT Consultant).pdf   (characters not allowed in file names, e.g. "/", are replaced)
   const pdfFileName = () => {
@@ -550,7 +633,8 @@ const handleRazorpayPayment = () => handlePayment();
       for (const rule of Array.from(rules)) {
         if (rule instanceof CSSMediaRule && /print/i.test(rule.media.mediaText)) {
           for (const inner of Array.from(rule.cssRules)) {
-            if (inner instanceof CSSStyleRule) printCss += inner.cssText + "\n";
+            // The print-guard rules only exist to block the browser print dialog; they must not reach the PDF clone
+            if (inner instanceof CSSStyleRule && !inner.selectorText.includes("print-authorized")) printCss += inner.cssText + "\n";
           }
         }
       }
@@ -713,7 +797,7 @@ const handleRazorpayPayment = () => handlePayment();
     if (!isExportReady() || isPdfBusy) return;
     setIsPdfBusy(true);
     try {
-      if (!(await ensureSaved())) return;
+      if (!(await ensureSavedAndVerified())) return;
       downloadBlob(await buildPdfBlob());
     } catch (err) {
       console.error("PDF error:", err);
@@ -727,7 +811,7 @@ const handleRazorpayPayment = () => handlePayment();
     if (!isExportReady() || isPdfBusy) return;
     setIsPdfBusy(true);
     try {
-      if (!(await ensureSaved())) return;
+      if (!(await ensureSavedAndVerified())) return;
       const blob = await buildPdfBlob();
       const file = new File([blob], pdfFileName(), { type: "application/pdf" });
       const verifyUrl = `${VERIFY_BASE_URL}/verify-estimate?ref=${estimate?.ref_no || ""}`;
@@ -966,7 +1050,12 @@ useEffect(() => {
 
 const handleSaveAndFinalize = async (paymentData?: any): Promise<boolean> => {
   // 1. Authorization
-  const isAuthorized = userCategory === 'ADMIN' || isPaid || isAlreadyPaid || paymentData;
+  // A fresh payment or an admin is always authorized. A "paid" flag alone is NOT trusted (it can be edited in
+  // localStorage / React state): the ref no must exist in the database as a paid estimate.
+  let isAuthorized: boolean = userCategory === 'ADMIN' || !!paymentData;
+  if (!isAuthorized && (isPaid || isAlreadyPaid) && !needsNewPayment) {
+    isAuthorized = await verifyPaidOnServer(estimate?.ref_no);
+  }
   if (!isAuthorized) {
     alert(`Payment of ₹${gatewayFeeAmount}/- is required to save and print.`);
     handlePayment();
@@ -1290,9 +1379,12 @@ console.log('🎯 [STATE RESOLVED]', {
   useEffect(() => {
     const preventSystemPrint = (e: KeyboardEvent) => {
       // Check for Ctrl+P (Windows) or Cmd+P (Mac)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+        // Admin, or an estimate that is paid + signed + saved + confirmed by the database, may use the shortcut
+        if (printAuthorizedRef.current) return;
         e.preventDefault();
-        alert("System print is disabled! Please use the 'Save & Print' button provided in the software.");
+        e.stopPropagation();
+        alert("Printing is locked. It unlocks only after the payment is completed and the estimate is digitally signed.");
         return false;
       }
     };
@@ -2343,6 +2435,19 @@ return (
     >
 <style jsx global>{`
   @media print {
+    /* PRINT GUARD: nothing is printed unless <body> has "print-authorized" (paid + signed + confirmed) */
+    html[data-print-guard="on"] body:not(.print-authorized) > * {
+      display: none !important;
+    }
+    html[data-print-guard="on"] body:not(.print-authorized)::before {
+      content: "🔒 PRINT LOCKED\A Printing unlocks only after the payment is completed and the estimate is digitally signed.";
+      display: block !important;
+      white-space: pre-line !important;
+      text-align: center !important;
+      font: 700 16pt Arial, sans-serif !important;
+      color: #cc0000 !important;
+      margin: 40mm 15mm 0 !important;
+    }
     .preview-scale-box {
       width: auto !important;
       height: auto !important;

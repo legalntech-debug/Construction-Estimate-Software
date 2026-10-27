@@ -141,14 +141,40 @@ export default function ConstructionPlanInput() {
       if (saved.customerName) setCustomerName(saved.customerName);
       if (saved.propertyAddress) setPropertyAddress(saved.propertyAddress);
 
+      // ---- Header / fee / section config (pehle restore nahi hote the) ----
+      if (saved.caseType) setCaseType(saved.caseType);
+      if (saved.manualFee !== undefined) setManualFee(Number(saved.manualFee) || 0);
+      if (saved.registeredFee !== undefined) setRegisteredFee(Number(saved.registeredFee) || 0);
+      if (Array.isArray(saved.sectionCuts) && saved.sectionCuts.length > 0) setSectionCuts(saved.sectionCuts);
+      if (Array.isArray(saved.elevationSides) && saved.elevationSides.length > 0) setElevationSides(saved.elevationSides);
+
+      // ---- CAD me set kiya hua side-angle / slant (irregular / trapezoid shape ke liye) ----
+      if (saved.plotAngles || saved.plotSlant) {
+        setPlotShapeParams({ angles: saved.plotAngles || {}, slant: saved.plotSlant || {} });
+      }
+
       if (saved.plotShape) setPlotShape(saved.plotShape);
       if (saved.roadFacingOption) setRoadFacingOption(saved.roadFacingOption);
       if (saved.parkingSide) setParkingSide(saved.parkingSide);
       if (saved.coverageType) setCoverageType(saved.coverageType);
       if (saved.measurementUnit) setMeasurementUnit(saved.measurementUnit);
 
-      if (saved.plotDimensions) setPlotDimensions(saved.plotDimensions);
-      if (saved.dimDetails) setDimDetails(saved.dimDetails);
+      {
+        // Rectangle / Square me B = A aur D = C hona chahiye. Purane saved cases me B/D stale
+        // ho sakte hain -> normalize, warna dimension badalne par shape bigad jata hai.
+        const savedShape = String(saved.plotShape || "").toUpperCase();
+        const simpleRect = savedShape === "RECTANGLE" || savedShape === "RECTANGULAR" || savedShape === "SQUARE";
+        const sd: any = { ...(saved.plotDimensions || saved.dimensions || {}) };
+        const sdet: any = { ...(saved.dimDetails || {}) };
+        if (simpleRect) {
+          if (savedShape === "SQUARE") { sd.C = sd.A; sdet.C = sdet.A; }
+          sd.B = sd.A; sd.D = sd.C;
+          if (sdet.A) sdet.B = sdet.A;
+          if (sdet.C) sdet.D = sdet.C;
+        }
+        if (saved.plotDimensions || saved.dimensions) setPlotDimensions(sd);
+        if (saved.dimDetails) setDimDetails(sdet);
+      }
       if (saved.setbackInputs) setSetbackInputs(saved.setbackInputs);
 
       if (saved.boundaries) {
@@ -162,11 +188,45 @@ export default function ConstructionPlanInput() {
         setSelectedFloors(saved.selectedFloors);
         setTempSelectedFloors(saved.selectedFloors);
       }
-      if (saved.floorData && typeof saved.floorData === "object") {
-        setFloorData(saved.floorData);
+
+      // ✅ ROOT-CAUSE FIX
+      // Saved `floorData` / `floorRooms` GENERATED output hain (rooms ki purani x,y,w,h, walls, outline).
+      // Unhe seedha input state me daalne par engine purane room size pin kar deta hai aur
+      // dimension / shape badalne par plan bigad jata hai. Isliye sirf USER INPUT restore karo.
+      if (saved.inputFloorData && typeof saved.inputFloorData === "object") {
+        setFloorData(saved.inputFloorData);
+      } else if (saved.floorData && typeof saved.floorData === "object") {
+        // Legacy saved case: generated floorData se sirf dimension wali fields rakho.
+        // Ground floor ko dimension-effect apne aap plot ke hisaab se bhar dega,
+        // baaki floors bhi (userDims nahi hai) plot dimension se refresh ho jayenge.
+        const cleaned: Record<string, FloorData> = {};
+        Object.entries(saved.floorData as Record<string, any>).forEach(([floor, fd]) => {
+          if (!fd || typeof fd !== "object") return;
+          if (floor.toUpperCase().includes("GROUND")) return;
+          if (fd.userDims) {
+            cleaned[floor] = { width: Number(fd.width) || 0, length: Number(fd.length) || 0, area: Number(fd.area) || 0, userDims: true } as any;
+          }
+        });
+        if (Object.keys(cleaned).length) setFloorData(prev => ({ ...prev, ...cleaned }));
       }
-      if (saved.floorRooms && typeof saved.floorRooms === "object") {
-        setFloorRooms(saved.floorRooms);
+
+      if (saved.inputFloorRooms && typeof saved.inputFloorRooms === "object") {
+        setFloorRooms(saved.inputFloorRooms);
+      } else if (saved.floorRooms && typeof saved.floorRooms === "object") {
+        // Legacy: arrays = generated rooms (fixed w/h) -> drop. Sirf user-selection map (object) rakho,
+        // aur usme se bhi generated position/size fields hata do.
+        const cleanedRooms: Record<string, Record<string, FloorRoom>> = {};
+        Object.entries(saved.floorRooms as Record<string, any>).forEach(([floor, rooms]) => {
+          if (!rooms || Array.isArray(rooms) || typeof rooms !== "object") return;
+          const m: Record<string, FloorRoom> = {};
+          Object.entries(rooms).forEach(([k, v]: any) => {
+            if (!v || typeof v !== "object") return;
+            const { x, y, w, h, doors, windows, ...rest } = v as any;
+            m[k] = rest;
+          });
+          cleanedRooms[floor] = m;
+        });
+        setFloorRooms(cleanedRooms);
       }
       if (saved.floorBhkConfig) setFloorBhkConfig(saved.floorBhkConfig);
 
@@ -270,7 +330,9 @@ export default function ConstructionPlanInput() {
             };
           }
         } else {
-          if (!updated[floor]) {
+          // User ne is floor ke dimension manually nahi badle (userDims) -> plot dimension ke saath sync rakho.
+          // (Pehle sirf tab set hota tha jab floor missing ho -> plot badalne par upar ki floors purani rehti thi.)
+          if (!updated[floor] || !(updated[floor] as any).userDims) {
             updated[floor] = { width: currentWidth, length: currentLength, area: calculatedArea };
           }
         }
@@ -315,7 +377,7 @@ export default function ConstructionPlanInput() {
   const updateFloorAreaDirect = (floor: string, areaVal: number) => {
     setFloorData(prev => ({
       ...prev,
-      [floor]: { ...(prev[floor] || { width: 0, length: 0 }), area: areaVal }
+      [floor]: { ...(prev[floor] || { width: 0, length: 0 }), area: areaVal, userDims: true } as any
     }));
   };
 
@@ -527,13 +589,18 @@ export default function ConstructionPlanInput() {
     const updatedDetail = { ...currentDetail, [field]: val };
     const totalFeet = Number(updatedDetail.ft || 0) + Number(updatedDetail.in || 0) / 12;
 
+    const isRectShape = String(plotShape || "").toUpperCase() === "RECTANGLE";
     setDimDetails(prev => {
       if (plotShape === "SQUARE") {
         const next = { ...prev };
         ['A', 'B', 'C', 'D'].forEach(s => { next[s] = updatedDetail; });
         return next;
       }
-      return { ...prev, [side]: updatedDetail };
+      const next = { ...prev, [side]: updatedDetail };
+      // Rectangle: B = A, D = C (inputs hidden hain, isliye yahin sync karo)
+      if (isRectShape && side === 'A') next.B = updatedDetail;
+      if (isRectShape && side === 'C') next.D = updatedDetail;
+      return next;
     });
 
     setPlotDimensions(prevDims => {
@@ -547,6 +614,8 @@ export default function ConstructionPlanInput() {
       } else {
         if (side === 'A') next.width = totalFeet;
         if (side === 'C') next.length = totalFeet;
+        if (isRectShape && side === 'A') next.B = totalFeet;
+        if (isRectShape && side === 'C') next.D = totalFeet;
 
         const finalA = side === 'A' ? totalFeet : (Number(prevDims.A) || 0);
         const finalC = side === 'C' ? totalFeet : (Number(prevDims.C) || 0);
@@ -696,9 +765,12 @@ export default function ConstructionPlanInput() {
       };
 
       const safeA = getDim('A');
-      const safeB = getDim('B') || safeA;
+      const shapeUpper = String(plotShape || "RECTANGLE").toUpperCase();
+      const isSimpleRectShape = shapeUpper === "RECTANGLE" || shapeUpper === "RECTANGULAR" || shapeUpper === "SQUARE";
       const safeC = getDim('C');
-      const safeD = getDim('D') || safeC;
+      // Rectangle / Square me B = A, D = C hamesha (stale B/D shape bigad dete the)
+      const safeB = isSimpleRectShape ? safeA : (getDim('B') || safeA);
+      const safeD = isSimpleRectShape ? safeC : (getDim('D') || safeC);
 
       const safePlotDimensions: PlotDimensions = {
         ...plotDimensions,
@@ -816,6 +888,13 @@ export default function ConstructionPlanInput() {
         floorRooms: (generated?.floorRooms && Object.keys(generated.floorRooms).length > 0)
           ? generated.floorRooms
           : floorRooms,
+
+        // ✅ PURE USER INPUT (reopen/edit ke liye). Generated floorData/floorRooms me purani room
+        // x,y,w,h hoti hain jo dobara input me load nahi honi chahiye.
+        inputFloorData: JSON.parse(JSON.stringify(floorData)),
+        inputFloorRooms: JSON.parse(JSON.stringify(floorRooms)),
+        plotAngles: plotShapeParams.angles,
+        plotSlant: plotShapeParams.slant,
 
         // Generated output (backup ke liye)
         generatedFloorPlans: generated.floors,
@@ -1156,6 +1235,7 @@ export default function ConstructionPlanInput() {
         plotArea={plotArea}
         isMultiDimShape={isMultiDimShape}
         onPlotShapeParamsChange={handlePlotShapeParams}
+        plotShapeParams={plotShapeParams}
         boundaryNorth={boundaryNorth}
         setBoundaryNorth={setBoundaryNorth}
         boundarySouth={boundarySouth}

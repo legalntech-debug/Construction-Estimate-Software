@@ -276,3 +276,25 @@
     z-index: 9999 !important;
   }
 }
+
+/* --- 4. PRINT GUARD (payment + digital signature required) ---
+   The estimate-preview page switches this guard on by setting html[data-print-guard="on"] and unlocks it by
+   adding the class "print-authorized" to <body>. The class is set only when the estimate is paid, signed
+   (verified QR seal), saved and confirmed by the database; admin accounts are always unlocked.
+   Scoped to the attribute so that other pages sharing this stylesheet are never affected.
+   Applies to every route to the print dialog: Ctrl+P, browser menu, right-click, window.print() from the console. */
+@media print {
+  html[data-print-guard="on"] body:not(.print-authorized) > * {
+    display: none !important;
+  }
+
+  html[data-print-guard="on"] body:not(.print-authorized)::before {
+    content: "🔒 PRINT LOCKED\A Printing unlocks only after the payment is completed and the estimate is digitally signed.";
+    display: block !important;
+    white-space: pre-line !important;
+    text-align: center !important;
+    font: 700 16pt Arial, sans-serif !important;
+    color: #cc0000 !important;
+    margin: 40mm 15mm 0 !important;
+  }
+}

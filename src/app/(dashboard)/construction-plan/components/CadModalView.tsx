@@ -62,6 +62,8 @@ interface CadModalViewProps {
   isMultiDimShape: boolean;
   /** v12: irregular plot ke side-angle / slant (CAD me user ne jo set kiya) -> engine ko plan shape ke liye */
   onPlotShapeParamsChange?: (p: { angles: Record<string, number>; slant: Record<string, string> }) => void;
+  /** Parent se aane wale (restore / reopen) angles & slant -> CAD ke local state me sync honge */
+  plotShapeParams?: { angles?: Record<string, number>; slant?: Record<string, string> };
   boundaryNorth: string;
   setBoundaryNorth: (val: string) => void;
   boundarySouth: string;
@@ -180,6 +182,7 @@ export default function CadModalView({
   floorBhkConfig,
   planningMode,
   onPlotShapeParamsChange,
+  plotShapeParams,
 }: CadModalViewProps) {
   
   const [sideAngles, setSideAngles] = useState<Record<string, number>>({ A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 });
@@ -189,6 +192,18 @@ export default function CadModalView({
     if (onPlotShapeParamsChange) onPlotShapeParamsChange({ angles: sideAngles, slant: sideSlant });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sideAngles, sideSlant]);
+
+  // ✅ Reopen: parent ne saved angles/slant restore kiye hon to CAD ke local state me bhi daalo
+  // (pehle local state hamesha 0/MID se shuru hota tha aur parent ko wahi wapas bhej deta tha).
+  useEffect(() => {
+    if (!plotShapeParams) return;
+    const defAngles = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+    const defSlant: Record<string, "MID" | "LEFT" | "RIGHT"> = { A: "MID", B: "MID", C: "MID", D: "MID", E: "MID", F: "MID" };
+    const nextAngles = { ...defAngles, ...(plotShapeParams.angles || {}) };
+    const nextSlant = { ...defSlant, ...(plotShapeParams.slant || {}) } as Record<string, "MID" | "LEFT" | "RIGHT">;
+    setSideAngles(prev => (JSON.stringify(prev) === JSON.stringify(nextAngles) ? prev : nextAngles));
+    setSideSlant(prev => (JSON.stringify(prev) === JSON.stringify(nextSlant) ? prev : nextSlant));
+  }, [plotShapeParams]);
   
   const [localNorthRoad, setLocalNorthRoad] = useState<number>(roadWidthNorth ?? 15);
   const [localSouthRoad, setLocalSouthRoad] = useState<number>(roadWidthSouth ?? 15);

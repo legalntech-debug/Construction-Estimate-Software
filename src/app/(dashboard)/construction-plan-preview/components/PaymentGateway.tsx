@@ -704,6 +704,45 @@ export default function PaymentGateway({
   ]);
 
   // ============================================================
+  // ✅ SYNC LATEST DATA TO THE SAVED (PAID) RECORD
+  //
+  // Reopen -> edit -> print: jab record pehle se paid hai (reuse_same / reuse_minor /
+  // admin_override), "Print" button seedha print/PDF chalata hai aur handlePayment()
+  // tak jata hi nahi. autoUpdatePaidRecord sirf handlePayment ke andar (aur sirf
+  // reuse_minor par) chalta tha -> naya form_snapshot (dimension / rooms / shape)
+  // kabhi DB me save nahi hota tha, aur agli baar reopen par purana plan aata tha.
+  // Name/address ka 15% rule checkReprintStatus hi dekhta hai, plan geometry ko nahi,
+  // isliye "reuse_same" me bhi snapshot update hona chahiye.
+  // Print / PDF se pehle page.tsx isse call karta hai.
+  // ============================================================
+  const syncPaidRecord = useCallback(async (): Promise<boolean> => {
+    const ref = effectiveRefNo;
+    if (!ref || ref === "DRAFT") return true; // naya / unsaved draft -> payment flow create karega
+    if (!isPaid) return true;
+    // major change / expired => naya ref + payment lagega, purane record ko mat chedo
+    if (reuseStatus?.type === "new" && paidThisSessionRef.current !== ref) return true;
+    try {
+      await autoUpdatePaidRecord(ref, {
+        customer_name: customerName,
+        property_address: propertyAddress,
+        client_name: clientName,
+        representative: representative,
+        form_snapshot: formSnapshot,
+        ...extraFields,
+      });
+      console.log("[SYNC PAID RECORD] saved latest plan to", ref);
+      return true;
+    } catch (err) {
+      console.error("[SYNC PAID RECORD ERROR]", err);
+      return false;
+    }
+  }, [
+    effectiveRefNo, isPaid, reuseStatus,
+    customerName, propertyAddress, clientName, representative,
+    formSnapshot, extraFields,
+  ]);
+
+  // ============================================================
   // RETURN OBJECT
   // ============================================================
   return {
@@ -732,6 +771,7 @@ export default function PaymentGateway({
     userServiceFee,
 
     handlePayment,
+    syncPaidRecord,
 
     renderButton: (customText?: string, customClass?: string) => (
       <button

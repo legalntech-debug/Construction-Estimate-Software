@@ -536,8 +536,11 @@ export default function ConstructionPlanPreview() {
   const makePdf = useCallback(async (): Promise<Blob | null> => {
     const verified = await verifyPaidOnServer();
     if (!verified) { alert("🔒 Server verification failed."); return null; }
+    // ✅ Reopen + edit ke baad latest plan DB record me save karo (pehle sirf print hota tha)
+    const saved = await payment.syncPaidRecord();
+    if (!saved) alert("⚠️ Latest changes server par save nahi ho paaye. Internet check karke dobara print karein.");
     return buildPlanPdf({ isMobile, title: pdfFileName });
-  }, [verifyPaidOnServer, isMobile, pdfFileName]);
+  }, [verifyPaidOnServer, payment.syncPaidRecord, isMobile, pdfFileName]);
 
   const handleDownloadPdf = useCallback(async () => {
     if (!canPrint || pdfBusy) return;
@@ -598,6 +601,9 @@ export default function ConstructionPlanPreview() {
     if (isMobile) { await handleMobilePrint(); return; }
     const verified = await verifyPaidOnServer();
     if (!verified) { alert("🔒 Server verification failed."); return; }
+    // ✅ Print se pehle latest edited plan save karo
+    const saved = await payment.syncPaidRecord();
+    if (!saved) alert("⚠️ Latest changes server par save nahi ho paaye. Internet check karke dobara print karein.");
     setTimeout(() => window.print(), 200);
   }, [payment.reuseChecking, canPrint, payment, verifyPaidOnServer, isMobile, handleMobilePrint]);
 

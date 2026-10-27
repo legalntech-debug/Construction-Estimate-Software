@@ -63,6 +63,8 @@ export interface DynamicFloorRequest {
   groundWetStack?: GroundWetStack | null;
   /** v13: floor ka W/L user ne khud diya (tower box ke liye) */
   userDims?: boolean;
+  /** v20: bedroom wali upper floor selected hai? (false => stair sirf ground ke angle se) */
+  hasUpperFloor?: boolean;
 }
 
 export interface GeneratedFloorPlan {
@@ -319,8 +321,9 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
         roomWidth: num(ps.towerRoomWidth, 0),
         roomLength: num(ps.towerRoomLength, 0),
         // v13: user ne tower floor ka W x L khud diya ho to wahi box (default 10x10 hardcode nahi)
-        boxW: (request as any).userDims ? requestedW : 0,
-        boxL: (request as any).userDims ? requestedL : 0,
+        // tower area (sq.ft) se W x L auto-fill hota hai -> wo bhi box hai (stair ki width uske andar, bahar nahi)
+        boxW: ((request as any).userDims || (num(ps.towerArea, 0) > 0 && Math.abs(requestedW * requestedL - num(ps.towerArea, 0)) <= 0.2 * num(ps.towerArea, 0))) ? requestedW : 0,
+        boxL: ((request as any).userDims || (num(ps.towerArea, 0) > 0 && Math.abs(requestedW * requestedL - num(ps.towerArea, 0)) <= 0.2 * num(ps.towerArea, 0))) ? requestedL : 0,
       },
     );
     rooms = tower.rooms;
@@ -359,6 +362,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       groundStairPosition: isGround ? undefined : request.groundStairPosition,
       groundStairRelativeOffset: isGround ? undefined : request.groundStairRelativeOffset,
       groundStairSpec: isGround ? undefined : (request.groundStairSpec ?? request.groundStairPosition?.spec),
+      hasUpperFloor: request.hasUpperFloor,
     }); } finally { setGroundWetStack(null); } })();
     rooms = smart.rooms;
     warnings.push(...smart.warnings);
@@ -701,6 +705,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
       groundWetStack: isGround ? undefined : groundWet,
       userDims: !!input.userDims,
+      hasUpperFloor: selectedFloors.some(f => !f.includes('GROUND') && !f.includes('BASEMENT') && !f.includes('TOWER') && !f.includes('MUMTY')),
     }, planFootprint);
 
     floors[floorName] = plan;

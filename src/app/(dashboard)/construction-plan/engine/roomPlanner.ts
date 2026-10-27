@@ -55,6 +55,8 @@ export interface ArchitecturalPlanRequest {
   groundStairRelativeOffset?: { dx: number; dy: number };
   /** Ground par final hui stair ka spec (type, flight width, treads, riser count). Upar ki floors/tower isi ko reuse karti hain. */
   groundStairSpec?: StaircaseFootprint;
+  /** v20: upar ki (bedroom wali) floor selected hai? false => stair sirf ground ke hisaab se chuni jaati hai. Default true. */
+  hasUpperFloor?: boolean;
 }
 
 export interface ArchitecturalPlanResult {
@@ -669,7 +671,10 @@ function chooseStaircaseCorner(
       const lo = minBed + topP, hi = planH - sH - botP - minBed;
       if (yy.y < lo - 0.01 || yy.y > hi + 0.01) yPenalty = 500;
     }
-    cands.push({ placement, weight, score: weight * 1000 + yPenalty + (face === 'TOP' || face === 'LEFT' ? 5 : 0) + (xx.n === 'RIGHT' ? 0.1 : 0) - slack });
+    const ovf = STAIR_OVERRIDE;
+    const faceBias = ovf?.faceFlip ? ((face === 'BOTTOM' || face === 'RIGHT') ? 12 : 0) : ((face === 'TOP' || face === 'LEFT') ? 5 : 0);
+    const cornerBias = ovf?.cornerX ? (xx.n === ovf.cornerX ? 0 : 12) : (xx.n === 'RIGHT' ? 0.1 : 0);
+    cands.push({ placement, weight, score: weight * 1000 + yPenalty + faceBias + cornerBias - slack });
   }
 
   cands.sort((a, b) => a.score - b.score);
@@ -1151,7 +1156,7 @@ function finalizeRooms(rooms: FloorRoom[]): FloorRoom[] {
  *   rotated: true  -> stair ki run X direction me (entry LEFT/RIGHT), false -> portrait (entry TOP/BOTTOM), undefined -> auto
  *   type: sirf yahi stair type try ho (U = DOG_LEGGED, C = 2_QUARTER_LANDING / 2_QUARTER_WINDER, L = L_SHAPED)
  */
-type StairOverride = { rotated?: boolean; type?: StaircaseType } | null;
+type StairOverride = { rotated?: boolean; type?: StaircaseType; faceFlip?: boolean; cornerX?: 'LEFT' | 'RIGHT' } | null;
 let STAIR_OVERRIDE: StairOverride = null;
 
 function buildUniversalGroundFloor(
@@ -4506,16 +4511,45 @@ function generateArchitecturalFloorPlanCore(request: ArchitecturalPlanRequest): 
 const UPPER_LANDING_FT = 3.5;
 const stairVariantMemo = new Map<string, StairOverride>();
 
+
+/** v20: rect B me obstacles ke baad sabse bada khaali rectangle (furniture fit check ke liye) */
+function largestFreeRect(B: { x: number; y: number; w: number; h: number }, obs: Array<{ x: number; y: number; w: number; h: number }>, minSide = 0) {
+  const xs = [B.x, B.x + B.w], ys = [B.y, B.y + B.h];
+  for (const o of obs) { xs.push(o.x, o.x + o.w); ys.push(o.y, o.y + o.h); }
+  const ux = [...new Set(xs.map(v => Number(v.toFixed(3))))].filter(v => v >= B.x - 1e-6 && v <= B.x + B.w + 1e-6).sort((a, b) => a - b);
+  const uy = [...new Set(ys.map(v => Number(v.toFixed(3))))].filter(v => v >= B.y - 1e-6 && v <= B.y + B.h + 1e-6).sort((a, b) => a - b);
+  const hit = (r: any, o: any) => Math.min(r.x + r.w, o.x + o.w) - Math.max(r.x, o.x) > 0.05 && Math.min(r.y + r.h, o.y + o.h) - Math.max(r.y, o.y) > 0.05;
+  let best = { x: B.x, y: B.y, w: 0, h: 0 };
+  for (let i = 0; i < ux.length; i++) for (let j = i + 1; j < ux.length; j++) for (let k = 0; k < uy.length; k++) for (let l = k + 1; l < uy.length; l++) {
+    const r = { x: ux[i], y: uy[k], w: ux[j] - ux[i], h: uy[l] - uy[k] };
+    if (r.w * r.h <= best.w * best.h) continue;
+    if (Math.min(r.w, r.h) < minSide) continue;
+    if (obs.some(o => hit(r, o))) continue;
+    best = r;
+  }
+  return best;
+}
+/** stair rect + uski pehli riser ke samne 3.5 ft landing (obstacle) */
+function stairObstacles(room: any) {
+  const e = room?.embeddedStair; if (!e) return [];
+  const S = { x: (room.x || 0) + (e.relX ?? 0), y: (room.y || 0) + (e.relY ?? 0), w: Number(e.w || 0), h: Number(e.h || 0) };
+  const ec = 3.5, f = e.entryFace;
+  const L = f === 'BOTTOM' ? { x: S.x, y: S.y + S.h, w: S.w, h: ec } : f === 'TOP' ? { x: S.x, y: S.y - ec, w: S.w, h: ec }
+    : f === 'LEFT' ? { x: S.x - ec, y: S.y, w: ec, h: S.h } : { x: S.x + S.w, y: S.y, w: ec, h: S.h };
+  return [S, L];
+}
+
 function isBedroomName(nm: any) { return /BEDROOM/.test(String(nm || '').toUpperCase()); }
 
-function evaluateStairVariant(ground: ArchitecturalPlanResult, upper: ArchitecturalPlanResult, W: number, H: number) {
+function evaluateStairVariant(ground: ArchitecturalPlanResult, upper: ArchitecturalPlanResult | null, W: number, H: number) {
   const gl: any = ground.rooms.find(r => canonical(r.name) === 'LIVING ROOM');
   const ges = gl?.embeddedStair;
-  const ul: any = upper.rooms.find(r => canonical(r.name) === 'LIVING ROOM');
+  const ul: any = upper ? upper.rooms.find(r => canonical(r.name) === 'LIVING ROOM') : null;
   const ues = ul?.embeddedStair;
   const out = { score: -1e9, groundUsable: false, landingFt: 0, minBedDepth: 0, notes: [] as string[] };
   if (!ges || ges.usable === false) { out.notes.push('ground stair unusable / missing'); return out; }
   out.groundUsable = true;
+  if (!upper) return evaluateGroundOnly(ground, gl, out);
   if (!ues || !ul) { out.notes.push('upper stair missing'); out.score = -5000; return out; }
 
   const st = { x: Number(ues.absX ?? ((ul.x || 0) + (ues.relX || 0))), y: Number(ues.absY ?? ((ul.y || 0) + (ues.relY || 0))), w: Number(ues.w), h: Number(ues.h) };
@@ -4555,8 +4589,47 @@ function evaluateStairVariant(ground: ArchitecturalPlanResult, upper: Architectu
     + Math.min(gMin, 10) * 12
     - ground.warnings.filter(w => /UNUSABLE|OVERLAP|exceeds/i.test(w)).length * 400
     - upper.warnings.filter(w => /UNUSABLE|OVERLAP|exceeds/i.test(w)).length * 400
-    - ground.errors.length * 300 - upper.errors.length * 300;
+    - ground.errors.length * 300 - upper.errors.length * 300
+    + furnitureTerm(ground, true) + furnitureTerm(upper, false);
+  out.notes.push(`furniture g/u ${furnitureTerm(ground, true)}/${furnitureTerm(upper, false)}`);
   out.notes.push(`landing ${out.landingFt} ft, min bedroom depth ${out.minBedDepth.toFixed(1)} ft, ground min ${gMin.toFixed(1)} ft`);
+  return out;
+}
+
+
+/** v20: stair ke baad bacha space me furniture aata hai? ground: living ka free rect; upper: har bedroom ka free rect (toilet/dressing/duct ke baad)
+ *   living me sofa+TV+walk ~ 9 x 9 ft, bedroom me bed + dono taraf cabinet ~ 10 x 10 ft. Na aaye to bhaari penalty -> selector stair position / type / up-down face badalta hai. */
+function furnitureTerm(res: ArchitecturalPlanResult, isGround: boolean, bonus = false): number {
+  let t = 0;
+  const rooms: any[] = res.rooms || [];
+  t -= (res.furnitureChecks || []).filter(f => !f.ok).length * 150;
+  if (isGround) {
+    const lv = rooms.find(r => canonical(r.name) === 'LIVING ROOM' && !r.isSubRoom);
+    if (lv) {
+      const fr = largestFreeRect({ x: lv.x, y: lv.y, w: lv.w, h: lv.h }, stairObstacles(lv), 7.5);
+      if (bonus) t += Math.min(fr.w * fr.h, 500) / 4;
+      if (fr.w * fr.h < 80) t -= 350;   // sofa set + TV unit nahi aata
+    }
+  }
+  for (const B of rooms.filter(r => /BEDROOM/.test(String(r.name)) && !r.isSubRoom && !r.subZoneOf)) {
+    const subs = rooms.filter(x => x !== B && (x.attachedTo === B.id || x.subZoneOf === B.id));
+    const obs = subs.map(x => ({ x: x.x, y: x.y, w: x.w, h: x.h })).concat(isGround ? stairObstacles(rooms.find(r => r.embeddedStair)) : []);
+    const fr = largestFreeRect({ x: B.x, y: B.y, w: B.w, h: B.h }, obs, 8.5);
+    if (bonus) t += Math.min(fr.w * fr.h, 200) / 8;
+    if (fr.w * fr.h < 100) t -= 250;            // bed + side cabinets nahi aate
+  }
+  return t;
+}
+function evaluateGroundOnly(ground: ArchitecturalPlanResult, gl: any, out: any) {
+  // sirf ground floor: living ko max free area, koi ground room na ghate
+  const gKey = ground.rooms.filter(r => /PARKING|KITCHEN|LIVING/.test(String(r.name).toUpperCase()) && !(r as any).isSubRoom);
+  const gMin = gKey.length ? Math.min(...gKey.map(r => Math.min(Number(r.w) || 0, Number(r.h) || 0))) : 8;
+  const beds = ground.rooms.filter(r => isBedroomName(r.name) && !(r as any).isSubRoom);
+  const bedArea = beds.reduce((a, r) => a + (Number(r.w) || 0) * (Number(r.h) || 0), 0);
+  out.score = 600 + Math.min(gMin, 10) * 40 + Math.min(bedArea, 800) / 6
+    - ground.warnings.filter(w => /UNUSABLE|OVERLAP|exceeds/i.test(w)).length * 400 - ground.errors.length * 300
+    + furnitureTerm(ground, true, true);
+  out.notes.push(`ground-only: min room side ${gMin.toFixed(1)} ft`);
   return out;
 }
 
@@ -4568,7 +4641,7 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
 
   const W = Math.max(1, n(request.width, 20)), H = Math.max(1, n(request.length, 40));
   const memoKey = JSON.stringify([W, H, request.bhk, request.selectedRooms, request.planningMode, request.hasParking,
-    request.parkingMode, request.floorToFloorHeightFeet, request.planningArea, request.groundFloorProgram]);
+    request.parkingMode, request.floorToFloorHeightFeet, request.planningArea, request.groundFloorProgram, request.hasUpperFloor !== false]);
 
   const runWith = (ov: StairOverride) => {
     STAIR_OVERRIDE = ov;
@@ -4587,21 +4660,31 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
     let bestScore = -Infinity; let bestOv: StairOverride = null; const table: any[] = [];
     try {
       if (saved) { console.log = () => {}; console.warn = () => {}; console.info = () => {}; console.error = () => {}; (console as any).groupCollapsed = () => {}; (console as any).groupEnd = () => {}; }
-      for (const v of variants) {
+      const hasUpper = request.hasUpperFloor !== false;
+      const results: Array<{ v: { label: string; ov: StairOverride }; score: number }> = [];
+      const evalVariant = (v: { label: string; ov: StairOverride }) => {
         try {
           const g = runWith(v.ov);
           const pos = extractStairPositionFromResult(g);
-          if (!pos) { table.push({ v: v.label, score: 'no stair' }); continue; }
-          const u = generateArchitecturalFloorPlanCore({
+          if (!pos) { table.push({ v: v.label, score: 'no stair' }); return; }
+          const u = hasUpper ? generateArchitecturalFloorPlanCore({
             ...request, floorName: 'FIRST FLOOR', hasParking: false,
             groundStairPosition: { x: pos.x, y: pos.y, w: pos.w, h: pos.h, corner: pos.corner, entryFace: pos.entryFace, exitFace: pos.exitFace, flightDirection: pos.flightDirection, staircaseType: pos.staircaseType, spec: pos.spec } as any,
             groundStairSpec: pos.spec, groundStairRelativeOffset: pos.relativeOffset || undefined,
-          });
+          }) : null;
           const ev = evaluateStairVariant(g, u, W, H);
           const score = ev.score + (v.ov === null ? 20 : 0);   // tie => purana (auto) behaviour
           table.push({ v: v.label, score: Math.round(score), notes: ev.notes.join('; ') });
+          results.push({ v, score });
           if (score > bestScore) { bestScore = score; bestOv = v.ov; }
         } catch (e) { table.push({ v: v.label, score: 'error', err: String(e) }); }
+      };
+      for (const v of variants) evalVariant(v);
+      // v20 stage 2: top-3 variants par stair ka UP/DOWN face (flip) aur LEFT/RIGHT corner badal ke dekho — jahan furniture + max room area mile
+      const top = [...results].sort((p, q) => q.score - p.score).slice(0, 3);
+      for (const t of top) for (const faceFlip of [false, true]) for (const cornerX of [undefined, 'LEFT', 'RIGHT'] as Array<'LEFT' | 'RIGHT' | undefined>) {
+        if (!faceFlip && !cornerX) continue;
+        evalVariant({ label: `${t.v.label}${faceFlip ? '+FLIP' : ''}${cornerX ? '+' + cornerX : ''}`, ov: { ...(t.v.ov || {}), faceFlip, cornerX } });
       }
     } finally {
       if (saved) { console.log = saved.log; console.warn = saved.warn; console.info = saved.info; console.error = saved.error; (console as any).groupCollapsed = saved.gc; (console as any).groupEnd = saved.ge; }

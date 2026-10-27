@@ -121,12 +121,13 @@ function planTowerLayoutCore(inp: TowerLayoutInput): TowerLayout {
       else if (canL) x0 = s.x + s.w - boxW;
       else x0 = clamp(s.x - ew / 2, 0, W - boxW);
     }
-    // v14: HAMESHA EK HI TOWER ROOM (rectangle) - stair ke saath ek poora sahi kamra, multiple tukde nahi.
+    // v20: box (W x L) ka poora area use ho: stair ke bagal ki patti (stair ki length tak) + stair ke peeche/aage ki patti (poori box width).
+    //   Dono tukde disjoint hain; bada tukda TOWER ROOM, doosra stair (mumty) / room ke saath merge hota hai (planTowerLayout decide karta hai).
     const cands: Array<{ r: Rect; tag: string }> = [];
     const sideOK = ew > 0.4, endOK = el > 0.4;
     if (sideOK) {
       const sx = x0 < s.x - 0.01 ? x0 : s.x + s.w;
-      cands.push({ r: { x: r2(sx), y: r2(y0), w: r2(ew), h: r2(boxL) }, tag: 'side' });
+      cands.push({ r: { x: r2(sx), y: r2(s.y), w: r2(ew), h: r2(s.h) }, tag: 'side' });
     }
     if (endOK) {
       const ey = y0 < s.y - 0.01 ? y0 : s.y + s.h;
@@ -137,12 +138,29 @@ function planTowerLayoutCore(inp: TowerLayoutInput): TowerLayout {
     const okRect = (r: Rect) => r.w >= TOWER_MIN_ROOM_SIDE_FT * 0.8 && r.h >= TOWER_MIN_ROOM_SIDE_FT * 0.8 &&
       r.x >= -0.01 && r.y >= -0.01 && r.x + r.w <= W + 0.01 && r.y + r.h <= L + 0.01 &&
       !(Math.min(r.x + r.w, s.x + s.w) - Math.max(r.x, s.x) > 0.01 && Math.min(r.y + r.h, s.y + s.h) - Math.max(r.y, s.y) > 0.01) && !hitsClear(r);
+    // end patti bahut patli (< min) ho to wo side patti me jud jaye (side ki length poori box length) - area waste nahi
+    {
+      const ci = cands.findIndex((c) => c.tag === 'end'), si = cands.findIndex((c) => c.tag === 'side');
+      if (ci >= 0 && si >= 0 && !okRect(cands[ci].r)) {
+        cands[si].r = { ...cands[si].r, y: r2(y0), h: r2(boxL) };
+        cands.splice(ci, 1);
+      }
+    }
     const good = cands.filter((c) => okRect(c.r)).sort((a, b) => b.r.w * b.r.h - a.r.w * a.r.h);
     if (good.length) {
       const room = good[0].r;
-      notes.push(`Tower: stair (${r2(s.w)} x ${r2(s.h)}) ke ${good[0].tag === 'side' ? 'bagal' : good[0].tag === 'end' && room.y < s.y ? 'peeche' : 'aage'} ek hi TOWER ROOM (${room.w} x ${room.h} ft).`);
+      notes.push(`Tower box ${r2(boxW)} x ${r2(boxL)} ft (stair ke saath): stair ke ${good[0].tag === 'side' ? 'bagal' : good[0].tag === 'end' && room.y < s.y ? 'peeche' : 'aage'} TOWER ROOM (${room.w} x ${room.h} ft).`);
       const lay = done(room, null);
       lay.placement = good[0].tag === 'side' ? (room.x < s.x ? 'LEFT' : 'RIGHT') : (room.y < s.y ? 'ABOVE' : 'BELOW');
+      if (good.length > 1) {
+        lay.extraRooms = good.slice(1).map((g) => g.r);
+        const all = [s, room, ...lay.extraRooms];
+        const bx0 = Math.min(...all.map((q) => q.x)), by0 = Math.min(...all.map((q) => q.y));
+        const bx1 = Math.max(...all.map((q) => q.x + q.w)), by1 = Math.max(...all.map((q) => q.y + q.h));
+        lay.bounds = { x: r2(bx0), y: r2(by0), w: r2(bx1 - bx0), h: r2(by1 - by0) };
+        lay.roomArea = r2(room.w * room.h + lay.extraRooms.reduce((a, q) => a + q.w * q.h, 0));
+        lay.totalArea = r2(lay.stairArea + lay.roomArea);
+      }
       return lay;
     }
     notes.push('Tower box stair ke bagal me ek sahi room ki tarah fit nahi hua - sirf stair rakhi (box size/entry landing check karo).');
@@ -217,7 +235,7 @@ export function planTowerLayout(inp: TowerLayoutInput): TowerLayout {
   const wantSeparate = total > 100 && extra >= 80;
   if (wantSeparate) {
     // room ka area >= ~80 hona chahiye: box wala ek-rectangle chhota nikla to area-path se (extra area) dobara try
-    if ((lay.roomArea || 0) < extra * 0.9 && !explicit) {
+    if ((lay.roomArea || 0) < extra * 0.9 && !explicit && !boxA) {
       const alt = planTowerLayoutCore({ ...inp, boxW: 0, boxL: 0, towerArea: total });
       if (alt.room && alt.roomArea > (lay.roomArea || 0)) { alt.mode = 'SEPARATE'; alt.notes.unshift(`Tower: total ${r2(total)} sq.ft, stair ke baad ${r2(extra)} sq.ft >= 80 -> mumty (stair) alag + adjoining room alag.`); return alt; }
     }
@@ -311,5 +329,7 @@ export function buildTowerRooms(layout: TowerLayout, canvasW?: number, canvasL?:
     } as FloorRoom);
   }
   if (layout.mode === 'SINGLE' && rooms.length > 1) for (const r of rooms) (r as any).mergeGroup = 'TOWER_ONE_ROOM';
+  // SEPARATE: stair + uske bagal ki chhoti patti = mumty (ek), bada TOWER ROOM alag
+  if (layout.mode === 'SEPARATE' && (layout.extraRooms || []).length) for (const r of rooms) if (r.id === 'tower_stair' || /^tower_room_\d+$/.test(String(r.id))) (r as any).mergeGroup = 'TOWER_MUMTY';
   return rooms;
 }

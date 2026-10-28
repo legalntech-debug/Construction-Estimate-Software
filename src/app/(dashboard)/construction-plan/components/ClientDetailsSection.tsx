@@ -19,6 +19,8 @@ interface ClientDetailsSectionProps {
   feeMode: "AUTO" | "MANUAL";
   setFeeMode: (val: "AUTO" | "MANUAL") => void;
   setManualFee: (val: number) => void;
+  /** current fee (reopen par MANUAL input me wahi dikhane ke liye) */
+  manualFee?: number;
   selectedClientName: string;
   handleClientChange: (val: string) => void;
   clients: any[];
@@ -37,6 +39,7 @@ export default function ClientDetailsSection({
   feeMode,
   setFeeMode,
   setManualFee,
+  manualFee,
   selectedClientName,
   handleClientChange,
   clients,
@@ -182,6 +185,7 @@ export default function ClientDetailsSection({
             <input
               type="number"
               placeholder="ENTER FEE"
+              value={manualFee ? manualFee : ""}
               className="w-full border border-black p-2 md:p-1 mt-1 text-center bg-white text-xs md:text-sm"
               onChange={(e) => setManualFee(Number(e.target.value))}
             />

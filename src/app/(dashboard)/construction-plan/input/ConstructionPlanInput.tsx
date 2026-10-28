@@ -193,8 +193,13 @@ export default function ConstructionPlanInput() {
       // Saved `floorData` / `floorRooms` GENERATED output hain (rooms ki purani x,y,w,h, walls, outline).
       // Unhe seedha input state me daalne par engine purane room size pin kar deta hai aur
       // dimension / shape badalne par plan bigad jata hai. Isliye sirf USER INPUT restore karo.
+      const keepFloors: string[] | null =
+        Array.isArray(saved.selectedFloors) && saved.selectedFloors.length > 0 ? saved.selectedFloors : null;
+      const onlySelected = <T,>(obj: Record<string, T>): Record<string, T> =>
+        keepFloors ? Object.fromEntries(Object.entries(obj).filter(([f]) => keepFloors.includes(f))) as Record<string, T> : obj;
+
       if (saved.inputFloorData && typeof saved.inputFloorData === "object") {
-        setFloorData(saved.inputFloorData);
+        setFloorData(onlySelected(saved.inputFloorData));
       } else if (saved.floorData && typeof saved.floorData === "object") {
         // Legacy saved case: generated floorData se sirf dimension wali fields rakho.
         // Ground floor ko dimension-effect apne aap plot ke hisaab se bhar dega,
@@ -211,7 +216,7 @@ export default function ConstructionPlanInput() {
       }
 
       if (saved.inputFloorRooms && typeof saved.inputFloorRooms === "object") {
-        setFloorRooms(saved.inputFloorRooms);
+        setFloorRooms(onlySelected(saved.inputFloorRooms));
       } else if (saved.floorRooms && typeof saved.floorRooms === "object") {
         // Legacy: arrays = generated rooms (fixed w/h) -> drop. Sirf user-selection map (object) rakho,
         // aur usme se bhi generated position/size fields hata do.
@@ -228,10 +233,10 @@ export default function ConstructionPlanInput() {
         });
         setFloorRooms(cleanedRooms);
       }
-      if (saved.floorBhkConfig) setFloorBhkConfig(saved.floorBhkConfig);
+      if (saved.floorBhkConfig) setFloorBhkConfig(onlySelected(saved.floorBhkConfig));
 
       if (saved.planningMode) setPlanningMode(saved.planningMode);
-      if (saved.floorSettings) setFloorSettings(saved.floorSettings);
+      if (saved.floorSettings) setFloorSettings(onlySelected(saved.floorSettings));
 
       if (saved.groundStairPosition) setGroundStairPos(saved.groundStairPosition);
       if (saved.groundStairRelativeOffset) setGroundStairOffset(saved.groundStairRelativeOffset);
@@ -322,7 +327,7 @@ export default function ConstructionPlanInput() {
           const towerLength = Math.min(10, currentLength);
           const towerArea = Number((towerWidth * towerLength).toFixed(2));
           
-          if (!updated[floor]) {
+          if (!updated[floor] || !(updated[floor] as any).userDims) {
             updated[floor] = {
               width: towerWidth,
               length: towerLength,
@@ -891,8 +896,12 @@ export default function ConstructionPlanInput() {
 
         // ✅ PURE USER INPUT (reopen/edit ke liye). Generated floorData/floorRooms me purani room
         // x,y,w,h hoti hain jo dobara input me load nahi honi chahiye.
-        inputFloorData: JSON.parse(JSON.stringify(floorData)),
-        inputFloorRooms: JSON.parse(JSON.stringify(floorRooms)),
+        inputFloorData: JSON.parse(JSON.stringify(
+          Object.fromEntries(Object.entries(floorData).filter(([f]) => selectedFloors.includes(f)))
+        )),
+        inputFloorRooms: JSON.parse(JSON.stringify(
+          Object.fromEntries(Object.entries(floorRooms).filter(([f]) => selectedFloors.includes(f)))
+        )),
         plotAngles: plotShapeParams.angles,
         plotSlant: plotShapeParams.slant,
 
@@ -1080,6 +1089,7 @@ export default function ConstructionPlanInput() {
         feeMode={feeMode}
         setFeeMode={setFeeMode}
         setManualFee={setManualFee}
+        manualFee={manualFee}
         selectedClientName={selectedClientName}
         handleClientChange={handleClientChange}
         clients={clients}
@@ -1290,6 +1300,22 @@ export default function ConstructionPlanInput() {
               <button className="border border-black px-4 py-2 cursor-pointer hover:bg-gray-100" onClick={() => setIsFloorModalOpen(false)}>CANCEL</button>
               <button className="bg-black text-white px-4 py-2 font-bold cursor-pointer hover:bg-gray-800" onClick={() => {
                 const sortedFloors = [...tempSelectedFloors].sort((a, b) => FLOOR_SEQUENCE.indexOf(a) - FLOOR_SEQUENCE.indexOf(b));
+                // ✅ Hatayi hui floor / tower ka purana data bhi hatao, warna dobara add karne par
+                // purane rooms / dimension wapas aa jate the aur saved inputs me bhi chale jate the.
+                const removed = selectedFloors.filter(f => !sortedFloors.includes(f));
+                if (removed.length > 0) {
+                  const drop = <T,>(prev: Record<string, T>): Record<string, T> => {
+                    const next = { ...prev };
+                    removed.forEach(f => { delete next[f]; });
+                    return next;
+                  };
+                  setFloorData(drop);
+                  setFloorRooms(drop);
+                  setFloorBhkConfig(drop);
+                  setFloorSettings(drop);
+                  if (removed.includes(roomEditorFloor || "")) setRoomEditorFloor(null);
+                  if (removed.includes(settingsFloor || "")) setSettingsFloor(null);
+                }
                 setSelectedFloors(sortedFloors);
                 sortedFloors.forEach(f => ensureFloorRooms(f));
                 setIsFloorModalOpen(false);

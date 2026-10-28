@@ -121,18 +121,24 @@ export default function ConstructionPlanPreview() {
         ? `${String(now.getFullYear()).slice(-2)}-${String(now.getFullYear() + 1).slice(-2)}`
         : `${String(now.getFullYear() - 1).slice(-2)}-${String(now.getFullYear()).slice(-2)}`;
       const firstName = (currentUser?.full_name || "GUEST").split(' ')[0].toUpperCase();
-      const { count: globalCount } = await supabase
-        .from('service_records')
-        .select('*', { count: 'exact', head: true })
-        .eq('case_type', 'CONSTRUCTION_PLAN');
-      const globalSeq = (globalCount || 0) + 1;
+      // ✅ GLOBAL counter (DB sequence). Pehle yahan service_records ka count liya jata tha, lekin
+      // RLS ki wajah se har user ko sirf apni rows dikhti thi -> P-number har user ka alag chalta tha.
+      // next_construction_plan_seq() SECURITY DEFINER hai aur atomic hai (do user ek hi number nahi pate).
+      const { data: seqVal, error: seqErr } = await supabase.rpc("next_construction_plan_seq");
+      if (seqErr || seqVal === null || seqVal === undefined) {
+        throw seqErr || new Error("next_construction_plan_seq returned empty");
+      }
+      const globalSeq = Number(seqVal);
       const formattedSeq = `P${String(globalSeq).padStart(3, '0')}`;
       return `LnT/${fy}/${firstName}/${formattedSeq}`;
     } catch (err) {
       console.error("Ref No generation failed:", err);
       const now = new Date();
       const fy = `${String(now.getFullYear()).slice(-2)}-${String(now.getFullYear() + 1).slice(-2)}`;
-      return `LnT/${fy}/GUEST/P001`;
+      // Fallback: kabhi P001 mat do (primary key ref_no collide hoga aur payment ke baad save fail hoga).
+      // Unique timestamp-based number; SQL setup (next_construction_plan_seq) hone par ye kabhi nahi chalega.
+      const fbName = (currentUser?.full_name || "GUEST").split(' ')[0].toUpperCase();
+      return `LnT/${fy}/${fbName}/P${String(Date.now()).slice(-7)}`;
     }
   }, [currentUser]);
 
@@ -425,7 +431,13 @@ export default function ConstructionPlanPreview() {
       boundary_north: boundaries.north || null,
       boundary_south: boundaries.south || null,
       floor_details: planData?.floorData || normalizedFloorData,
-      fee_mode: "Auto",
+      // ✅ Input form ka FEE (AUTO = client se fetch hui fee, MANUAL = user ki daali fee).
+      // Dono case me input page `manualFee` me effective fee rakhta hai. Pehle yahan fee_mode
+      // hardcoded "Auto" tha aur user_payment kabhi set nahi hota tha (0 hi jata tha).
+      // extraFields PaymentGateway me last me spread hota hai, isliye ye har save/update
+      // (naya payment, admin bypass, reprint sync) me user_payment ko override karega.
+      user_payment: Math.max(0, Number(planData?.manualFee) || 0),
+      fee_mode: String(planData?.feeMode || "AUTO").toUpperCase() === "MANUAL" ? "Manual" : "Auto",
     },
     onPaymentSuccess: (paymentId, orderId, finalRefNo) => {
       console.log("[PAYMENT SUCCESS]", { paymentId, orderId, finalRefNo });

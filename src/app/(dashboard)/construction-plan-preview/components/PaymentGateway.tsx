@@ -107,6 +107,75 @@ async function localChangeCheck(
 }
 
 // ============================================================
+// FEE COLUMNS — user_payment / fee_mode ko seedha service_records me verify + likho.
+//
+// createOrUpdateServiceRecord / autoUpdatePaidRecord in columns ko ignore kar sakte hain.
+// Isliye yahan rpc_save_map_service se likhte hain aur re-read karke verify karte hain.
+// Sirf tab UPDATE bhejte hain jab value sach me alag ho (table par trg_sync_wallet
+// UPDATE trigger hai).
+// ============================================================
+async function ensureFeeColumns(
+  refNo: string,
+  fee: number | undefined,
+  feeMode: string | undefined
+): Promise<boolean> {
+  if (!refNo || refNo === "DRAFT") return true;
+  if (fee === undefined && !feeMode) return true;
+  try {
+    const { data: cur, error: readErr } = await supabase
+      .from("service_records")
+      .select(
+        "user_id, case_type, payment_status, platform_payment_status, user_payment, gateway_fee, user_service_fee, fee_mode, status"
+      )
+      .eq("ref_no", refNo)
+      .maybeSingle();
+    if (readErr) { console.error("[FEE COLUMNS] read failed", readErr); return false; }
+    if (!cur) { console.error("[FEE COLUMNS] record not found / not readable (RLS?)", refNo); return false; }
+
+    const newFee = fee !== undefined ? Number(fee) : Number(cur.user_payment ?? 0);
+    const newMode = feeMode || cur.fee_mode || "Auto";
+    if (Number(cur.user_payment ?? 0) === newFee && String(cur.fee_mode || "") === String(newMode)) {
+      return true; // already same -> UPDATE (aur wallet trigger) mat chalao
+    }
+
+    // rpc_save_map_service (SECURITY DEFINER, RLS bypass). IMPORTANT: is function ke kuch
+    // parameters ke DEFAULT non-null hain ('pending', 'unpaid', 0, 'Auto', 'finalized') aur
+    // update me COALESCE(p_x, old) use hota hai -> default pass hua to paid record overwrite
+    // ho jayega. Isliye current values wapas explicitly bhej rahe hain; baaki params null
+    // (= purana value rakho).
+    const { error: rpcErr } = await supabase.rpc("rpc_save_map_service", {
+      p_ref_no: refNo,
+      p_user_id: cur.user_id,
+      p_case_type: cur.case_type,
+      p_payment_status: cur.payment_status,
+      p_platform_payment_status: cur.platform_payment_status,
+      p_user_payment: newFee,
+      p_gateway_fee: cur.gateway_fee,
+      p_user_service_fee: cur.user_service_fee,
+      p_fee_mode: newMode,
+      p_status: cur.status,
+    });
+    if (rpcErr) { console.error("[FEE COLUMNS] rpc failed", rpcErr); return false; }
+
+    // verify
+    const { data: after } = await supabase
+      .from("service_records")
+      .select("user_payment, fee_mode, payment_status, platform_payment_status, gateway_fee")
+      .eq("ref_no", refNo)
+      .maybeSingle();
+    if (!after || Number(after.user_payment ?? 0) !== newFee) {
+      console.error("[FEE COLUMNS] verify failed — value row me nahi mili", { refNo, wanted: newFee, after });
+      return false;
+    }
+    console.log("[FEE COLUMNS] saved", { refNo, ...after });
+    return true;
+  } catch (err) {
+    console.error("[FEE COLUMNS ERROR]", err);
+    return false;
+  }
+}
+
+// ============================================================
 // WALLET GATE — runs only before a NEW ref no. / new payment is started.
 // Reprints of an already paid record (same data / minor change) never reach it.
 // ============================================================
@@ -445,6 +514,7 @@ export default function PaymentGateway({
             form_snapshot: formSnapshot,
             ...extraFields,
           });
+          await ensureFeeColumns(reuseStatus.refNo, (extraFields as any)?.user_payment, (extraFields as any)?.fee_mode);
         } catch (err) {
           console.error("[AUTO UPDATE MINOR CHANGE ERROR]", err);
         }
@@ -527,6 +597,7 @@ export default function PaymentGateway({
           status: "finalized",
           ...extraFields,
         });
+        await ensureFeeColumns(finalRefNo, (extraFields as any)?.user_payment, (extraFields as any)?.fee_mode);
         paidThisSessionRef.current = finalRefNo;
         setIsPaid(true);
         onPaymentSuccess?.("ADMIN_FREE", "ADMIN_BYPASS", finalRefNo);
@@ -610,6 +681,7 @@ export default function PaymentGateway({
                 ...extraFields,
               });
               console.log("[SERVICE RECORD] ✅ Saved with ref:", finalRefNo);
+              await ensureFeeColumns(finalRefNo, (extraFields as any)?.user_payment, (extraFields as any)?.fee_mode);
             } catch (recErr: any) {
               console.error("[SERVICE RECORD SAVE ERROR]", recErr);
             }
@@ -715,6 +787,7 @@ export default function PaymentGateway({
   // isliye "reuse_same" me bhi snapshot update hona chahiye.
   // Print / PDF se pehle page.tsx isse call karta hai.
   // ============================================================
+  const lastSyncedSigRef = useRef<string>("");
   const syncPaidRecord = useCallback(async (): Promise<boolean> => {
     const ref = effectiveRefNo;
     if (!ref || ref === "DRAFT") return true; // naya / unsaved draft -> payment flow create karega
@@ -722,16 +795,29 @@ export default function PaymentGateway({
     // major change / expired => naya ref + payment lagega, purane record ko mat chedo
     if (reuseStatus?.type === "new" && paidThisSessionRef.current !== ref) return true;
     try {
-      await autoUpdatePaidRecord(ref, {
+      const fields = {
         customer_name: customerName,
         property_address: propertyAddress,
         client_name: clientName,
         representative: representative,
         form_snapshot: formSnapshot,
         ...extraFields,
-      });
-      console.log("[SYNC PAID RECORD] saved latest plan to", ref);
-      return true;
+      };
+      // service_records par UPDATE trigger (trg_sync_wallet) chalta hai -> bina badlav ke
+      // baar-baar update mat bhejo.
+      const sig = ref + "|" + JSON.stringify(fields);
+      if (sig !== lastSyncedSigRef.current) {
+        await autoUpdatePaidRecord(ref, fields);
+        lastSyncedSigRef.current = sig;
+        console.log("[SYNC PAID RECORD] saved latest plan to", ref);
+      }
+      // user_payment / fee_mode alag se verify (lib in columns ko skip kar sakta hai)
+      const feeOk = await ensureFeeColumns(
+        ref,
+        (extraFields as any)?.user_payment,
+        (extraFields as any)?.fee_mode
+      );
+      return feeOk;
     } catch (err) {
       console.error("[SYNC PAID RECORD ERROR]", err);
       return false;

@@ -1023,6 +1023,18 @@ export default function FloorManagerSection({
     (groundStairPosition as any)?.h,
   ]);
 
+  // ✅ Floor / tower hataya gaya ho to uska "inheritance / auto" cache bhi saaf karo,
+  // warna dobara add karne par stair inherit / auto-rooms dobara apply nahi hote the.
+  useEffect(() => {
+    Object.keys(inheritanceApplied.current).forEach((f) => {
+      if (!selectedFloors.includes(f)) delete inheritanceApplied.current[f];
+    });
+    Object.keys(autoProcessedSignature.current).forEach((f) => {
+      if (!selectedFloors.includes(f)) delete autoProcessedSignature.current[f];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFloors.join('|')]);
+
   const plotFrontWidth = Number(plotWidth) > 0 ? Number(plotWidth) : 20;
   const plotDepth = Number(plotLength) > 0 ? Number(plotLength) : 50;
 

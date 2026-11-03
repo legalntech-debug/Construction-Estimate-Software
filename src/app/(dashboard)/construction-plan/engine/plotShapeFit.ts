@@ -50,8 +50,100 @@ export function normalizePolygon(p: Pt[]): Pt[] {
   return p.map(q => ({ x: Number((q.x - b.minX).toFixed(4)), y: Number((q.y - b.minY).toFixed(4)) }));
 }
 
+/**
+ * v26: irregular plot par user ka SPECIFIC area -> rectangular (outer) dims. Core (plot ke andar ka max rectangle) ke
+ * aspect ke hisaab se; core se bada nahi jaata. cw/ch = core ka OUTER size (core + 2 wall).
+ */
+export function rectForArea(area: number, cw: number, ch: number): { w: number; l: number; clamped: boolean } {
+  const a = Math.max(1, area), W0 = Math.max(1, cw), H0 = Math.max(1, ch);
+  let w = Math.sqrt((a * W0) / H0), l = a / w;
+  if (w > W0) { w = W0; l = a / w; }
+  if (l > H0) { l = H0; w = a / l; }
+  const clamped = w > W0 + 1e-6 || l > H0 + 1e-6 || a > W0 * H0 + 1e-6;
+  w = Math.min(w, W0); l = Math.min(l, H0);
+  return { w: Number(w.toFixed(2)), l: Number(l.toFixed(2)), clamped };
+}
+
+/** v26: base fit ke core ke andar (core ke top-left se) outerW x outerL ka RECTANGULAR floor fit (polygon = rectangle) */
+export function makeRectFit(base: PlotShapeFit, outerW: number, outerL: number): PlotShapeFit {
+  const wall = base.wall;
+  const iw = Math.max(1, Math.min(outerW - 2 * wall, base.core.w));
+  const il = Math.max(1, Math.min(outerL - 2 * wall, base.core.h));
+  const X0 = base.core.x, Y0 = base.core.y;
+  const inner: Pt[] = [{ x: X0, y: Y0 }, { x: X0 + iw, y: Y0 }, { x: X0 + iw, y: Y0 + il }, { x: X0, y: Y0 + il }];
+  const outer: Pt[] = [{ x: X0, y: Y0 }, { x: X0 + iw + 2 * wall, y: Y0 }, { x: X0 + iw + 2 * wall, y: Y0 + il + 2 * wall }, { x: X0, y: Y0 + il + 2 * wall }];
+  return { outer, inner, width: Number((iw + 2 * wall).toFixed(3)), length: Number((il + 2 * wall).toFixed(3)), core: { x: X0, y: Y0, w: iw, h: il }, wall };
+}
+
+/**
+ * v23: IRREGULAR plot - 3 sides di ho to 4th side auto.  A=front(bottom), B=back(top), C=left, D=right.
+ * Side <= 0 / blank = missing. Sirf EK side missing ho tab calculate hota hai
+ * (assumption: front horizontal, back horizontal, left vertical => right-angle trapezoid).
+ * Return: poore 4 sides + auto = jis side ko calculate kiya.
+ */
+export function completeQuadSides(A: number, B: number, C: number, D: number): { A: number; B: number; C: number; D: number; auto: 'A' | 'B' | 'C' | 'D' | null } {
+  const v = { A: Number(A) || 0, B: Number(B) || 0, C: Number(C) || 0, D: Number(D) || 0 };
+  const miss = (['A', 'B', 'C', 'D'] as const).filter((k) => !(v[k] > 0));
+  if (miss.length !== 1) {
+    // purana fallback: opposite side ke barabar
+    return { A: v.A, B: v.B > 0 ? v.B : v.A, C: v.C, D: v.D > 0 ? v.D : v.C, auto: null };
+  }
+  const k = miss[0];
+  const r2 = (n: number) => Number(n.toFixed(2));
+  const sq = (n: number) => Math.sqrt(Math.max(0, n));
+  if (k === 'D') v.D = r2(Math.hypot(v.B - v.A, v.C));
+  else if (k === 'C') v.C = r2(v.D > Math.abs(v.B - v.A) ? sq(v.D * v.D - (v.B - v.A) ** 2) : v.D);
+  else if (k === 'B') v.B = r2(v.D >= v.C ? v.A + sq(v.D * v.D - v.C * v.C) : v.A);
+  else { const t = sq(v.D * v.D - v.C * v.C); v.A = r2(v.B - t > 0.5 ? v.B - t : v.B + t); }
+  return { ...v, auto: k };
+}
+
+function circleIntersect(p0: Pt, r0: number, p1: Pt, r1: number): Pt[] | null {
+  const dx = p1.x - p0.x, dy = p1.y - p0.y, d = Math.hypot(dx, dy);
+  if (d < 1e-9 || d > r0 + r1 + 1e-9 || d < Math.abs(r0 - r1) - 1e-9) return null;
+  const a = (r0 * r0 - r1 * r1 + d * d) / (2 * d);
+  const h = Math.sqrt(Math.max(0, r0 * r0 - a * a));
+  const mx = p0.x + (a * dx) / d, my = p0.y + (a * dy) / d;
+  return [{ x: mx + (h * dy) / d, y: my - (h * dx) / d }, { x: mx - (h * dy) / d, y: my + (h * dx) / d }];
+}
+
+/**
+ * v23: chaaro sides ki ASLI length se quad (front horizontal). Return [TL, TR, BR, BL] (y neeche), ya null.
+ *  1) front/back parallel (trapezoid) ban sakta ho to wahi (sab 4 sides exact)
+ *  2) warna left (slant LEFT me right) side vertical rakh kar baaki sides exact
+ */
+export function quadFromSides(A: number, B: number, C: number, D: number, slant: 'MID' | 'LEFT' | 'RIGHT' = 'MID'): Pt[] | null {
+  if (!(A > 0 && B > 0 && C > 0 && D > 0)) return null;
+  const eps = 1e-6, diff = A - B;
+  let TL: Pt, TR: Pt; const BL = { x: 0, y: 0 }, BR = { x: A, y: 0 };
+  if (Math.abs(diff) < eps) {
+    if (Math.abs(C - D) < eps) return normalizePolygon([{ x: 0, y: -C }, { x: A, y: -C }, { x: A, y: 0 }, { x: 0, y: 0 }]);
+  } else {
+    const x1 = (C * C - D * D + diff * diff) / (2 * diff);
+    const h2 = C * C - x1 * x1;
+    if (h2 > eps) { const h = Math.sqrt(h2); return normalizePolygon([{ x: x1, y: h }, { x: x1 + B, y: h }, BR, BL].map((q) => ({ x: q.x, y: -q.y }))); }
+  }
+  if (slant === 'LEFT') {
+    TR = { x: A, y: D };
+    const c = circleIntersect(BL, C, TR, B)?.filter((q) => q.y > 0);
+    if (!c || !c.length) return null;
+    TL = c.reduce((m, q) => (q.x < m.x ? q : m));
+  } else {
+    TL = { x: 0, y: C };
+    const c = circleIntersect(BR, D, TL, B)?.filter((q) => q.y > 0);
+    if (!c || !c.length) return null;
+    TR = c.reduce((m, q) => (q.x > m.x ? q : m));
+  }
+  return normalizePolygon([TL, TR, BR, BL].map((q) => ({ x: q.x, y: -q.y })));
+}
+
 /** CAD modal jaisa quad: bottom = A (front/road), top = B, left = C, right = D. Return [TL, TR, BR, BL] */
 export function quadFromDims(A: number, B: number, C: number, D: number, slantB: 'MID' | 'LEFT' | 'RIGHT' = 'MID', angles?: { A?: number; B?: number; C?: number; D?: number } | null): Pt[] {
+  // v23: DEG (angle) nahi diya -> chaaro sides ki asli length wala geometry
+  if (!(angles && (angles.A || angles.B || angles.C || angles.D))) {
+    const q = quadFromSides(A, B, C, D, slantB);
+    if (q) return q;
+  }
   const diff = B - A;
   let shL = -diff / 2, shR = diff / 2;
   if (slantB === 'LEFT') { shL = -diff; shR = 0; }

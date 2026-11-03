@@ -216,7 +216,24 @@ export default function CadFloorElevationRenderer({
 
   const getFloorPoints = (floorName: string) => {
     const isTowerFloor = floorName.toUpperCase().includes("TOWER");
-    if (isTowerFloor) return adjustedBuiltUpPoints;
+    if (isTowerFloor) {
+      // v22: roof frame = TOP floor + max 3 ft projection (engine: roofWidth/roofLength). Pehle poora plot (adjustedBuiltUpPoints) tha.
+      const tInfo: any = getFloorDataItem(floorName);
+      const rW = Number(tInfo?.roofWidth) * scale;
+      const rL = Number(tInfo?.roofLength) * scale;
+      if (rW > 0 && rL > 0) {
+        const hasOl = !!tInfo?.outline;
+        const bx = hasOl ? Math.min(...adjustedBuiltUpPoints.map((q: any) => q.x)) : adjustedBuiltUpPoints[0].x;
+        const by = hasOl ? Math.min(...adjustedBuiltUpPoints.map((q: any) => q.y)) : adjustedBuiltUpPoints[0].y;
+        return [
+          { x: bx, y: by },
+          { x: bx + rW, y: by },
+          { x: bx + rW, y: by + rL },
+          { x: bx, y: by + rL },
+        ];
+      }
+      return adjustedBuiltUpPoints;
+    }
 
     const floorInfo = getFloorDataItem(floorName);
     const targetWidth = floorInfo?.width ? floorInfo.width * scale : null;

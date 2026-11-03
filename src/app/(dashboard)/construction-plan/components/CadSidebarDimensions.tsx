@@ -24,6 +24,9 @@ interface CadSidebarDimensionsProps {
   actualLenD: number;
   dimA: number;
   dimC: number;
+  /** v23: irregular plot me jis side ko 3 sides se auto calculate kiya gaya */
+  autoSide?: "A" | "B" | "C" | "D" | null;
+  autoSideValue?: number;
   calculatedArea: number;
   plotArea: number;
   measurementUnit: "FEET" | "METERS";
@@ -70,6 +73,8 @@ export default function CadSidebarDimensions({
   actualLenD,
   dimA,
   dimC,
+  autoSide,
+  autoSideValue,
   calculatedArea,
   plotArea,
   measurementUnit,
@@ -144,6 +149,8 @@ export default function CadSidebarDimensions({
         else if (side === "D") mosLabel = `RIGHT (D)`;
 
         let displayLength = plotDimensions?.[side as keyof PlotDimensions] || 0;
+        const isAutoSide = !isSimpleRect && autoSide === side;
+        if (isAutoSide && autoSideValue) displayLength = Number(autoSideValue.toFixed(2));
         if (!isSimpleRect) {
           if (side === "A" && sideAngles.A) displayLength = Number(actualLenA.toFixed(1));
           if (side === "B" && sideAngles.B) displayLength = Number(actualLenB.toFixed(1));
@@ -156,7 +163,7 @@ export default function CadSidebarDimensions({
 
         return (
           <div key={side} className="border border-black bg-white p-1.5 flex flex-col gap-1 shadow-sm">
-            <span className="font-black text-[10px]">{mosLabel}:</span>
+            <span className="font-black text-[10px]">{mosLabel}:{isAutoSide ? <span className="ml-1 text-[8px] text-blue-700">(AUTO)</span> : null}</span>
             {isSimpleRect ? (
               <div className="grid grid-cols-2 gap-1">
                 <div className="flex items-center gap-0.5 bg-gray-50 border border-black px-1 py-0.5">

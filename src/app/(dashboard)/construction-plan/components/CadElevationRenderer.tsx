@@ -132,9 +132,9 @@ export default function CadElevationRenderer({ model, levels, scale, x0, measure
       ))}
 
       {/* parapet with coping */}
-      <rect {...rect(0, len, levels.roofSlabTop, levels.parapetTop)} fill={PAPER} stroke={INK} {...sw(1.1)} />
-      <rect {...rect(-0.15, len + 0.15, levels.parapetTop - 0.3, levels.parapetTop)} fill={PAPER} stroke={INK} {...sw(1.3)} />
-      <line x1={X(0)} y1={Y(levels.roofSlabTop + 0.9)} x2={X(len)} y2={Y(levels.roofSlabTop + 0.9)} stroke={GREY} {...sw(0.4)} />
+      <rect {...rect(model.roof.a0, model.roof.a1, levels.roofSlabTop, levels.parapetTop)} fill={PAPER} stroke={INK} {...sw(1.1)} />
+      <rect {...rect(model.roof.a0 - 0.15, model.roof.a1 + 0.15, levels.parapetTop - 0.3, levels.parapetTop)} fill={PAPER} stroke={INK} {...sw(1.3)} />
+      <line x1={X(model.roof.a0)} y1={Y(levels.roofSlabTop + 0.9)} x2={X(model.roof.a1)} y2={Y(levels.roofSlabTop + 0.9)} stroke={GREY} {...sw(0.4)} />
 
       <GroundLine xa={X(0)} xb={X(len)} plinthFt={plinth} scale={scale} />
 

@@ -11,7 +11,7 @@ import {
   type SectionModel,
 } from './sectionEngine';
 import { generateWallsFromRooms, generateStructuralColumns } from './cad/cadGeometry';
-import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit } from './plotShapeFit';
+import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit, completeQuadSides, quadFromDims, polygonArea, rectForArea, makeRectFit } from './plotShapeFit';
 import { PlotDimensions, PlotShape, FloorRoom, PlanningMode, ParkingMode, VastuAssessment, VastuDirection } from './planningTypes';
 import { toFiniteNumber, cleanFloorName } from './planningInput';
 import { getRoadOrientation } from './roadOrientation';
@@ -365,6 +365,17 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       hasUpperFloor: request.hasUpperFloor,
     }); } finally { setGroundWetStack(null); } })();
     rooms = smart.rooms;
+    // v23: upper floor chhoti thi -> planner ne attached toilet hataya / bedroom -> hall/pooja kiya; validation ko bhi wahi program do
+    const adapt: any = (smart as any).adaptations;
+    if (adapt) {
+      const lastI = (a: string[], f: (x: string) => boolean) => { for (let i = a.length - 1; i >= 0; i--) if (f(String(a[i]).toUpperCase())) return i; return -1; };
+      for (let i = 0; i < (adapt.droppedAttached || 0); i++) { const k = lastI(requestedProgram, (x) => x.includes('ATTACHED')); if (k >= 0) requestedProgram.splice(k, 1); }
+      for (const c of (adapt.converted || [])) {
+        const k = lastI(requestedProgram, (x) => x.includes('BEDROOM'));
+        if (k < 0) continue;
+        if (!c.to) requestedProgram.splice(k, 1); else requestedProgram[k] = canonical(c.to);
+      }
+    }
     warnings.push(...smart.warnings);
     errors.push(...smart.errors);
     staircase = smart.staircase;
@@ -623,11 +634,20 @@ function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, orig
 export function generateCompleteConstructionPlan(payload: any): GeneratedConstructionPlan {
   resetGroundParts();
   const raw = payload?.plotDimensions || payload?.dimensions || {};
-  const A = Math.max(1, num(raw.A ?? raw.width ?? raw.a, 30));
-  const C = Math.max(1, num(raw.C ?? raw.length ?? raw.c, 50));
-  const dimensions: PlotDimensions = { ...raw, A, B: num(raw.B, A), C, D: num(raw.D, C), E: num(raw.E, 0), F: num(raw.F, 0), width: A, length: C, area: A * C };
   const shape = (payload?.plotShape || payload?.plot_shape || 'RECTANGULAR') as PlotShape;
+  // v23: irregular plot -> 3 sides se 4th auto + chaaro sides asli length
+  const isIrrShape = !/^(RECTANGLE|RECTANGULAR|SQUARE)$/i.test(String(shape)) && !String(shape).toUpperCase().includes('L-SHAPE');
+  const qs = isIrrShape ? completeQuadSides(num(raw.A ?? raw.width ?? raw.a, 0), num(raw.B, 0), num(raw.C ?? raw.length ?? raw.c, 0), num(raw.D, 0)) : null;
+  const A = Math.max(1, qs && qs.A > 0 ? qs.A : num(raw.A ?? raw.width ?? raw.a, 30));
+  const C = Math.max(1, qs && qs.C > 0 ? qs.C : num(raw.C ?? raw.length ?? raw.c, 50));
+  const dimB = qs && qs.B > 0 ? qs.B : num(raw.B, A);
+  const dimD = qs && qs.D > 0 ? qs.D : num(raw.D, C);
+  const dimensions: PlotDimensions = { ...raw, A, B: dimB, C, D: dimD, E: num(raw.E, 0), F: num(raw.F, 0), width: A, length: C, area: A * C };
   const plotGeometry = createPlotGeometry(dimensions, shape, payload?.plotVertices);
+  // v23: polygon ka asli area (shoelace) - avg-formula nahi
+  if (isIrrShape && !(Array.isArray(payload?.plotVertices) && payload.plotVertices.length >= 3) && !(payload?.plotAngles && Object.values(payload.plotAngles).some((v: any) => Number(v)))) {
+    try { const pa = Math.abs(polygonArea(quadFromDims(A, dimB, C, dimD, payload?.plotSlant?.B, null))); if (pa > 1) { (plotGeometry as any).area = Number(pa.toFixed(2)); (dimensions as any).area = Number(pa.toFixed(2)); } } catch (e) { /* ignore */ }
+  }
   const setbacks = calculateSetbacks(plotGeometry.area, 20, false, payload?.setbackInputs || payload?.setbacks, payload?.coverageType || 'AS_PER_NORMS');
   const buildableGeometry = calculateBuildableGeometry(dimensions, shape, setbacks, payload?.plotVertices);
   const fallback = calculateBuildableFootprint(dimensions, setbacks);
@@ -636,7 +656,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   let shapeFit: PlotShapeFit | null = null;
   try {
     shapeFit = buildPlotShapeFit({
-      dims: { A, B: num(raw.B, A), C, D: num(raw.D, C) },
+      dims: { A, B: dimB, C, D: dimD },
       shape: String(shape),
       vertices: Array.isArray(payload?.plotVertices) ? payload.plotVertices : null,
       slantB: payload?.plotSlant?.B,
@@ -676,7 +696,36 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const generatedFloorData: Record<string, any> = {};
   const generatedFloorRooms: Record<string, FloorRoom[]> = {};
 
-  const floorOrder = [...selectedFloors].sort((a, b) => (b.includes('GROUND') ? 1 : 0) - (a.includes('GROUND') ? 1 : 0));
+  // ==========================================================================
+  // v22: ROOF (tower / terrace) frame
+  //   Pehle tower floor ka frame poora plot (maxFootprint) tha -> upar ki floor chhoti ho tab bhi roof plot jitna aata tha.
+  //   Ab: roof = TOP main floor ka size + (jahan plot me jagah ho wahan) max 3 ft projection (right / front taraf, kyunki floors top-left se anchor hain).
+  //   Irregular plot: roof = plot polygon (outline) ki bounding box, projection 0.
+  // ==========================================================================
+  const ROOF_PROJECTION_FT = 3;
+  const isTowerName = (n: string) => n.toUpperCase().includes('TOWER') || n.toUpperCase().includes('MUMTY');
+  const floorRank = (n: string): number => {
+    const u = n.toUpperCase();
+    if (u.includes('GROUND')) return 1;
+    const words = ['FIRST', 'SECOND', 'THIRD', 'FOURTH', 'FIFTH', 'SIXTH', 'SEVENTH', 'EIGHTH', 'NINTH', 'TENTH'];
+    const wi = words.findIndex((w) => u.includes(w));
+    if (wi >= 0) return wi + 2;
+    const m = u.match(/(\d+)/);
+    return m ? parseInt(m[1], 10) + 1 : 50;
+  };
+  const mainFloorNames = selectedFloors.filter((f) => !f.toUpperCase().includes('BASEMENT') && !isTowerName(f));
+  const topMainName: string | undefined = mainFloorNames.slice().sort((a, b) => floorRank(b) - floorRank(a))[0];
+  const topIn: any = topMainName ? (floorDataInput[topMainName] || floorDataInput[topMainName.toUpperCase()] || {}) : {};
+  const topW = shapeFit ? shapeFit.width : Math.min(Math.max(1, num(topIn.width, maxFootprint.width)), maxFootprint.width);
+  const topL = shapeFit ? shapeFit.length : Math.min(Math.max(1, num(topIn.length, maxFootprint.length)), maxFootprint.length);
+  const roofExtW = shapeFit ? 0 : Math.min(ROOF_PROJECTION_FT, Math.max(0, maxFootprint.width - topW));
+  const roofExtL = shapeFit ? 0 : Math.min(ROOF_PROJECTION_FT, Math.max(0, maxFootprint.length - topL));
+  const roofW = Number((topW + roofExtW).toFixed(2));
+  const roofL = Number((topL + roofExtL).toFixed(2));
+
+  // ground pehle, tower sabse last (tower ko top floor ka final plan + stair chahiye)
+  const orderKey = (f: string) => (f.includes('GROUND') ? 0 : isTowerName(f) ? 2 : 1);
+  const floorOrder = [...selectedFloors].sort((a, b) => orderKey(a) - orderKey(b));
   for (const floorName of floorOrder) {
     const input = floorDataInput[floorName] || floorDataInput[floorName.toUpperCase()] || {};
     let width = Math.max(1, num(input.width, maxFootprint.width));
@@ -684,11 +733,46 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     const isGround = floorName.includes('GROUND');
     const isTowerF = floorName.toUpperCase().includes('TOWER') || floorName.toUpperCase().includes('MUMTY');
     const useFit = !!shapeFit && !isTowerF;
+    // v26: irregular plot par user ne is floor ka SPECIFIC area / dims diya (userRect) -> floor RECTANGULAR banao (plot ke core ke andar)
+    let floorFit: PlotShapeFit | null = shapeFit;
+    let rectNote = '';
+    if (useFit && shapeFit && (input as any).userRect) {
+      const wl = shapeFit.wall;
+      const coreOW = shapeFit.core.w + 2 * wl, coreOL = shapeFit.core.h + 2 * wl;
+      const reqW = num(input.width, 0), reqL = num(input.length, 0), reqA = num(input.area, reqW * reqL);
+      let rw = reqW, rl = reqL;
+      if (!(rw > 0 && rl > 0) || Math.abs(rw * rl - reqA) > 1) { const d = rectForArea(reqA, coreOW, coreOL); rw = d.w; rl = d.l; }
+      const tooBig = rw > coreOW + 0.01 || rl > coreOL + 0.01;
+      rw = Math.min(rw, coreOW); rl = Math.min(rl, coreOL);
+      if (rw > 2 * wl + 4 && rl > 2 * wl + 4) {
+        floorFit = makeRectFit(shapeFit, rw, rl);
+        rectNote = tooBig
+          ? `Specific area plot ke andar ke max rectangle (${coreOW.toFixed(1)}' x ${coreOL.toFixed(1)}') se bada tha: rectangular floor ${floorFit.width.toFixed(1)}' x ${floorFit.length.toFixed(1)}' tak limit kiya gaya.`
+          : `Specific area ke hisaab se floor rectangular: ${floorFit.width.toFixed(1)}' x ${floorFit.length.toFixed(1)}'.`;
+      }
+    }
     let planFootprint = maxFootprint;
-    if (useFit && shapeFit) {
-      width = shapeFit.core.w + 2 * shapeFit.wall;
-      length = shapeFit.core.h + 2 * shapeFit.wall;
+    if (useFit && floorFit) {
+      width = floorFit.core.w + 2 * floorFit.wall;
+      length = floorFit.core.h + 2 * floorFit.wall;
       planFootprint = { width, length, originX: maxFootprint.originX, originY: maxFootprint.originY };
+    }
+
+    // v22: tower = roof frame (top floor + projection), stair = TOP floor ki final stair (ground ki nahi)
+    let towerStairPos: typeof groundStairPos = null;
+    let roofWUse = roofW, roofLUse = roofL;
+    if (isTowerF) {
+      const topP: any = topMainName ? floors[topMainName] : null;
+      if (shapeFit && topP && Number(topP.width) > 0 && Number(topP.length) > 0) { roofWUse = Number(topP.width); roofLUse = Number(topP.length); }   // v26: top floor rectangular ho sakti hai
+      else if (shapeFit) { roofWUse = shapeFit.width; roofLUse = shapeFit.length; }
+      planFootprint = shapeFit
+        ? { width: roofWUse, length: roofLUse, originX: maxFootprint.originX, originY: maxFootprint.originY }
+        : { width: roofW, length: roofL, originX: maxFootprint.originX, originY: maxFootprint.originY };
+      try {
+        const topPlan: any = topMainName ? floors[topMainName] : null;
+        const si: any = topPlan ? extractStairPositionFromResult(topPlan) : null;
+        if (si) towerStairPos = { x: si.x, y: si.y, w: si.w, h: si.h, spec: si.spec, corner: si.corner, entryFace: si.entryFace, exitFace: si.exitFace, flightDirection: si.flightDirection, staircaseType: si.staircaseType };
+      } catch (e) { towerStairPos = null; }
     }
 
     const plan = generateDynamicFloorPlan({
@@ -701,7 +785,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       hasParking: isGround,
       planningArea: useFit ? Math.max(1, (width - 2 * (4 / 12)) * (length - 2 * (4 / 12))) : Math.max(1, num(input.area, width * length)),
       groundFloorProgram: isGround ? undefined : groundFloorProgram,
-      groundStairPosition: isGround ? undefined : (groundStairPos ? { ...groundStairPos } : undefined),
+      groundStairPosition: isGround ? undefined : (isTowerF && towerStairPos ? { ...towerStairPos } : (groundStairPos ? { ...groundStairPos } : undefined)),
       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
       groundWetStack: isGround ? undefined : groundWet,
       userDims: !!input.userDims,
@@ -722,8 +806,8 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       } catch (e) { console.error('[PLANNING ENGINE] ground stair extract failed', e); }
     }
 
-    if (useFit && shapeFit) {
-      try { applyShapeFitToPlan(plan as any, shapeFit, maxFootprint.originX, maxFootprint.originY); }
+    if (useFit && floorFit) {
+      try { applyShapeFitToPlan(plan as any, floorFit, maxFootprint.originX, maxFootprint.originY); if (rectNote) (plan as any).warnings = [...((plan as any).warnings || []), rectNote]; }
       catch (e) { console.error('[PLANNING ENGINE] shape fit failed', e); }
     }
 
@@ -753,7 +837,9 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       width: plan.width, length: plan.length, clearWidth: plan.clearWidth, clearLength: plan.clearLength,
       area: plan.area, outerArea: plan.outerArea, buildableArea: plan.buildableArea,
       originX: plan.originX, originY: plan.originY, rooms: plan.rooms, walls: plan.walls, columns: plan.columns,
-      outline: (plan as any).outline || undefined,
+      // v22: tower/roof -> irregular plot me top floor ki outline (actual polygon) use hoti hai
+      outline: (plan as any).outline || (isTowerF && shapeFit ? ((floors[topMainName as string] as any)?.outline || undefined) : undefined),
+      ...(isTowerF ? { roofWidth: roofWUse, roofLength: roofLUse, roofProjection: { right: roofExtW, bottom: roofExtL } } : {}),
       openings: plan.openings, staircase: plan.staircase, staircaseConfig: plan.staircase,
       outerWallThickness: getExternalWallThicknessFt(), innerWallThickness: 4 / 12,
       connectivity: plan.connectivity, orientation: plan.orientation,

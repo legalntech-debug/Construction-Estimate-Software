@@ -45,7 +45,7 @@ export default function Section4TransactionDocs({ formData, setFormData, handleC
             <textarea 
               name="parentDocument" 
               rows={2}
-              placeholder="e.g. Reg. No / Date / Title History" 
+              placeholder="e.g. MP179142018A1603352 दिनांक – 20/08/2018 से विधिवत रूप से क्रय किया है" 
               value={formData.parentDocument} 
               onChange={handleChange} 
               className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase resize-y min-h-[46px]" 
@@ -76,7 +76,7 @@ export default function Section4TransactionDocs({ formData, setFormData, handleC
               <textarea 
                 name="parentDocument" 
                 rows={2}
-                placeholder="e.g. Reg. No / Date / Title History" 
+                placeholder="e.g. MP179142018A1603352 दिनांक – 20/08/2018 से विधिवत रूप से क्रय किया है" 
                 value={formData.parentDocument} 
                 onChange={handleChange} 
                 className="w-full p-2 border rounded text-xs sm:text-sm bg-white uppercase resize-y min-h-[46px]" 

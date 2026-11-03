@@ -117,6 +117,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   });
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPdfDownloading, setIsPdfDownloading] = useState(false);
   const [userProfileState, setUserProfileState] = useState<string>("MADHYA PRADESH");
   const [userFullName, setUserFullName] = useState<string>("Client"); 
   const [userRole, setUserRole] = useState<string>("user"); 
@@ -380,6 +381,82 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
     URL.revokeObjectURL(url);
   };
 
+  // ✅ REAL PDF FILE DOWNLOAD (payment ke baad draft modal se) — print dialog nahi, seedha .pdf file save hoti hai
+  const handleDownloadRealPdf = async () => {
+    if (!generatedDocHtml || isPdfDownloading) return;
+    setIsPdfDownloading(true);
+
+    const buyerNameClean = formData.buyers?.[0]?.name
+      ? formData.buyers[0].name.replace(/[^a-zA-Z0-9]/g, "_")
+      : "Buyer";
+    const fileName = `${formData.deedType.replace(/\s+/g, "_")}_${buyerNameClean}_${currentRefNo || "Draft"}.pdf`;
+
+    let iframe: HTMLIFrameElement | null = null;
+    try {
+      // @ts-ignore - html2pdf.js ke paas types nahi hote
+      const html2pdfModule: any = await import("html2pdf.js");
+      const html2pdf = html2pdfModule.default || html2pdfModule;
+
+      // Alag iframe me render karte hain taaki deed ki CSS (body::before watermark etc.) app page ko affect na kare
+      iframe = document.createElement("iframe");
+      iframe.style.cssText = "position:fixed;left:-10000px;top:0;width:170mm;height:297mm;border:0;visibility:hidden;";
+      document.body.appendChild(iframe);
+
+      await new Promise<void>((resolve) => {
+        iframe!.onload = () => resolve();
+        iframe!.srcdoc = generatedDocHtml;
+      });
+
+      const idoc = iframe.contentDocument!;
+      // CSS watermark PDF me kaam nahi karta, niche jsPDF se har page par lagayenge
+      const st = idoc.createElement("style");
+      st.textContent = "body::before{display:none !important;} body{padding:0 !important;margin:0 !important;}";
+      idoc.head.appendChild(st);
+      try { await (idoc as any).fonts?.ready; } catch {}
+      await new Promise((r) => setTimeout(r, 300));
+
+      await html2pdf()
+        .set({
+          margin: [20, 20, 20, 20], // mm (A4 @page margin jaisa)
+          filename: fileName,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff", windowWidth: iframe.clientWidth },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+          pagebreak: { mode: ["css", "legacy"], avoid: ["p", "tr", ".signature-section", ".boundaries-box", ".study-notice-footer"] },
+        })
+        .from(idoc.body)
+        .toPdf()
+        .get("pdf")
+        .then((pdf: any) => {
+          // Har page par halka "DRAFT" watermark (screen/print jaisa)
+          try {
+            const total = pdf.internal.getNumberOfPages();
+            const w = pdf.internal.pageSize.getWidth();
+            const h = pdf.internal.pageSize.getHeight();
+            for (let i = 1; i <= total; i++) {
+              pdf.setPage(i);
+              pdf.saveGraphicsState();
+              pdf.setGState(new pdf.GState({ opacity: 0.12 }));
+              pdf.setTextColor(120, 120, 120);
+              pdf.setFontSize(110);
+              pdf.text("DRAFT", w / 2, h / 2, { angle: 45, align: "center" });
+              pdf.restoreGraphicsState();
+            }
+          } catch (wmErr) {
+            console.warn("Watermark skip:", wmErr);
+          }
+        })
+        .save();
+    } catch (err) {
+      console.error("PDF download failed, falling back to print dialog:", err);
+      alert("Direct PDF download me dikkat aayi. Print window khol rahe hain — wahan 'Save as PDF' select karein.");
+      handleDownloadPdf();
+    } finally {
+      if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      setIsPdfDownloading(false);
+    }
+  };
+
   const handleDownloadPdf = () => {
     if (!generatedDocHtml) return;
 
@@ -397,25 +474,51 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
     }
   };
 
+  // ✅ Template poora HTML document (apni <style> ke saath) return karta hai. Use dobara <html> ke andar wrap karne se
+  // do alag CSS (body margin 40px, 850px container, padding 40px) aapas me takrate the aur A4 me fit nahi baithta tha.
+  // Isliye yahan sirf <body> ka content nikaal kar EK hi clean A4 stylesheet lagate hain.
+  const extractDeedBody = (html: string): string => {
+    const m = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    let body = m ? m[1] : html;
+    body = body.replace(/<style[\s\S]*?<\/style>/gi, "");
+    body = body.replace(/<div class="print-btn-container">[\s\S]*?<\/button>\s*<\/div>/i, "");
+    return body;
+  };
+
   const buildPrintableHtml = (refNo: string, currentFormData: DeedFormData) => {
     const rawHtml = generateDeedHtmlContent({ ...currentFormData, refNo });
+    const deedBody = extractDeedBody(rawHtml);
     return `
       <!DOCTYPE html>
       <html lang="hi">
         <head>
           <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
           <title>${currentFormData.deedType} - ${currentFormData.buyers?.[0]?.name || 'Draft'}</title>
           <style>
-            @page { size: A4; margin: 20mm; }
+            /* ---------- A4 PAGE SETUP ---------- */
+            @page { size: A4 portrait; margin: 18mm 18mm 20mm 18mm; }
+            *, *::before, *::after { box-sizing: border-box; }
+            html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             body {
-              font-family: 'Mangal', 'Arial', sans-serif;
+              font-family: 'Mangal', 'Noto Sans Devanagari', 'Arial', sans-serif;
               font-size: 14px;
-              line-height: 1.8;
+              line-height: 1.75;
               color: #111;
               margin: 0;
               padding: 0;
               background: #ffffff;
+              width: 100%;
               position: relative;
+              overflow-wrap: anywhere;
+              word-break: break-word;
+            }
+            /* screen preview: page jaisa margin (print me @page margin lagta hai) */
+            @media screen {
+              body { padding: 18mm; }
+            }
+            @media screen and (max-width: 600px) {
+              body { padding: 12px; }
             }
             body::before {
               content: "DRAFT";
@@ -423,30 +526,36 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
               top: 50%;
               left: 50%;
               transform: translate(-50%, -50%) rotate(-45deg);
-              font-size: 120px;
+              font-size: 110px;
               font-weight: 900;
               color: rgba(200, 200, 200, 0.22);
               z-index: -1000;
               pointer-events: none;
-              letter-spacing: 20px;
+              letter-spacing: 15px;
+              white-space: nowrap;
             }
-            .deed-container { max-width: 100%; margin: 0 auto; padding: 0; background: transparent; }
-            .header-title { text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 20px; text-transform: uppercase; color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; }
+            /* ---------- CONTENT ---------- */
+            .deed-container { width: 100%; max-width: none; margin: 0; padding: 0; border: 0; box-shadow: none; background: transparent; }
+            .deed-container > div { max-width: 100%; }
+            p { margin: 0 0 10px 0; text-align: justify; orphans: 3; widows: 3; }
+            img, table { max-width: 100%; }
+            table { border-collapse: collapse; }
+            td, th { overflow-wrap: anywhere; vertical-align: top; }
+            .header-title { text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 20px; text-transform: uppercase; color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px; break-after: avoid; page-break-after: avoid; }
             .section-box { margin-bottom: 15px; text-align: justify; }
-            .boundaries-box { background: #f8fafc !important; border: 1px solid #cbd5e1; padding: 15px; border-radius: 6px; margin: 15px 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .signature-section { margin-top: 40px; display: flex; justify-content: space-between; page-break-inside: avoid; }
-            .sig-box { width: 45%; text-align: center; border-top: 1px dashed #333; padding-top: 10px; margin-top: 40px; }
-            .study-notice-footer { background: #fef3c7 !important; border: 1px dashed #d97706; color: #92400e; padding: 12px; font-size: 12px; text-align: center; margin-top: 30px; font-weight: bold; border-radius: 4px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            .print-btn-container, .deed-footer-meta { display: none; }
+            .boundaries-box { background: #f8fafc; border: 0; box-shadow: inset 0 0 0 1px #cbd5e1; padding: 12px 15px; border-radius: 6px; margin: 15px 0; break-inside: avoid; page-break-inside: avoid; }
+            .signature-section { margin-top: 40px; display: flex; justify-content: space-between; gap: 24px; break-inside: avoid; page-break-inside: avoid; }
+            .sig-box { width: 47%; text-align: center; border-top: 1px dashed #333; padding-top: 10px; margin-top: 40px; }
+            .study-notice-footer { background: #fef3c7; border: 1px dashed #d97706; color: #92400e; padding: 12px; font-size: 12px; text-align: center; margin-top: 30px; font-weight: bold; border-radius: 4px; break-inside: avoid; page-break-inside: avoid; }
+            .print-btn-container, .deed-footer-meta { display: none !important; }
             @media print {
-              .print-btn-container { display: none !important; }
               body::before { position: absolute; }
             }
           </style>
         </head>
         <body>
           <div class="deed-container">
-            ${rawHtml}
+            ${deedBody}
           </div>
         </body>
       </html>
@@ -939,10 +1048,18 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  onClick={handleDownloadPdf}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition flex items-center gap-2 cursor-pointer"
+                  onClick={handleDownloadRealPdf}
+                  disabled={isPdfDownloading}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition flex items-center gap-2 cursor-pointer"
                 >
-                  📥 Direct Download PDF
+                  {isPdfDownloading ? "⏳ PDF ban rahi hai..." : "📥 Download PDF"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  className="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow transition flex items-center gap-2 cursor-pointer"
+                >
+                  🖨️ Print
                 </button>
                 <button
                   type="button"
@@ -963,36 +1080,28 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
               </div>
             </div>
 
-            <div className="flex-1 bg-gray-200 p-4 sm:p-8 overflow-y-auto flex justify-center relative">
-              <div 
-                className="bg-white shadow-2xl w-full max-w-[210mm] min-h-[297mm] p-[20mm] box-border text-black relative mx-auto my-auto"
-                style={{
-                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)',
+            <div className="flex-1 bg-gray-200 p-2 sm:p-6 overflow-y-auto flex justify-center">
+              {/* Deed ka HTML iframe me dikhate hain: A4 (210mm) width, print/PDF jaisa hi layout, aur deed ki CSS app me leak nahi hoti */}
+              <iframe
+                title="Deed Preview"
+                srcDoc={generatedDocHtml}
+                onLoad={(e) => {
+                  const f = e.currentTarget;
+                  const fit = () => {
+                    const h = f.contentDocument?.documentElement?.scrollHeight;
+                    if (h) f.style.height = h + "px";
+                  };
+                  fit();
+                  setTimeout(fit, 300);
                 }}
-              >
-                <div 
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: '50%',
-                    transform: 'translate(-50%, -50%) rotate(-45deg)',
-                    fontSize: '110px',
-                    fontWeight: '900',
-                    color: 'rgba(200, 200, 200, 0.25)',
-                    zIndex: 10,
-                    pointerEvents: 'none',
-                    letterSpacing: '15px',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  DRAFT
-                </div>
-
-                <div 
-                  className="relative z-0"
-                  dangerouslySetInnerHTML={{ __html: generatedDocHtml }}
-                />
-              </div>
+                className="bg-white border-0 shrink-0 mx-auto"
+                style={{
+                  width: "210mm",
+                  maxWidth: "100%",
+                  minHeight: "297mm",
+                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.3)",
+                }}
+              />
             </div>
 
           </div>

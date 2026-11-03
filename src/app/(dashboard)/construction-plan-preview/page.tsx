@@ -1313,7 +1313,9 @@ export default function ConstructionPlanPreview() {
               </div>
               <div className={`flex justify-between ${isMobile ? "text-[8px]" : "text-[10px]"} text-gray-600 mt-1`}>
                 <span>PLOT SIZE:</span>
-                <span>{dimA}' × {dimC}'</span>
+                <span>{(Math.abs(dimB - dimA) > 0.01 || Math.abs(dimD - dimC) > 0.01)
+                  ? `${dimA}' / ${dimB}' × ${dimC}' / ${dimD}'`
+                  : `${dimA}' × ${dimC}'`}</span>
               </div>
             </div>
 

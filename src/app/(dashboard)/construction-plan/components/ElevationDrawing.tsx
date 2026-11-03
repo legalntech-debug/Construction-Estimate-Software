@@ -24,7 +24,7 @@ export default function ElevationDrawing({ ctx, side = "FRONT", scale = 14, clas
   const y = (z: number) => topM + (zTop - z) * S;
   const roofTop = lv.roofSlabTop;
   const f0 = m.floors[0];
-  const a0 = f0 ? f0.a0 : 0, a1 = f0 ? f0.a1 : L;
+  const a0 = m.roof ? m.roof.a0 : (f0 ? f0.a0 : 0), a1 = m.roof ? m.roof.a1 : (f0 ? f0.a1 : L);   // v22: roof span
 
   const els: React.ReactNode[] = [];
   m.floors.forEach((f, fi) => {

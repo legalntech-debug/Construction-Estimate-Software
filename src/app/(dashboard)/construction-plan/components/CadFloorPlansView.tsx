@@ -646,11 +646,44 @@ export default function CadFloorPlansView({
     roomList: any[], clearInnerWFt: number, clearInnerHFt: number,
     innerX: number, innerY: number, outerX: number, outerY: number,
     outerW: number, outerH: number, outerWallThicknessFt: number,
+    outlineInner?: { x: number; y: number }[] | null,
   ) => {
     void outerW; void outerH;
     const cuts: React.ReactElement[] = [];
     const bg = BG_FILL;
     const extend = Math.max(0.35, outerWallThicknessFt * scale + 1);
+    // v25: irregular floor - door/window ka cut polygon ki ASLI (inner) wall par lagao (rooms grid par snap hote hain, wall se 0.2 ft+ door ho sakta hai)
+    const tryPolyCut = (room: any, wall: string, spanFt: number, offFt: number, key: string): boolean => {
+      if (!outlineInner || outlineInner.length < 3) return false;
+      let c = { x: 0, y: 0 }, n = { x: 0, y: 0 };
+      if (wall === "BOTTOM") { c = { x: room.x + offFt + spanFt / 2, y: room.y + room.h }; n = { x: 0, y: 1 }; }
+      else if (wall === "TOP") { c = { x: room.x + offFt + spanFt / 2, y: room.y }; n = { x: 0, y: -1 }; }
+      else if (wall === "LEFT") { c = { x: room.x, y: room.y + offFt + spanFt / 2 }; n = { x: -1, y: 0 }; }
+      else if (wall === "RIGHT") { c = { x: room.x + room.w, y: room.y + offFt + spanFt / 2 }; n = { x: 1, y: 0 }; }
+      else return false;
+      let best: { t: number; ex: number; ey: number } | null = null;
+      for (let i = 0; i < outlineInner.length; i++) {
+        const a = outlineInner[i], b = outlineInner[(i + 1) % outlineInner.length];
+        const ex = b.x - a.x, ey = b.y - a.y;
+        const den = n.x * ey - n.y * ex;
+        if (Math.abs(den) < 1e-9) continue;
+        const t = ((a.x - c.x) * ey - (a.y - c.y) * ex) / den;
+        const sPar = ((a.x - c.x) * n.y - (a.y - c.y) * n.x) / den;
+        if (sPar < -1e-6 || sPar > 1 + 1e-6 || t < -0.5 || t > 1.2) continue;
+        if (!best || Math.abs(t) < Math.abs(best.t)) best = { t, ex, ey };
+      }
+      if (!best) return false;
+      const len = Math.hypot(best.ex, best.ey) || 1;
+      let px = -best.ey / len, py = best.ex / len;                // wall ka normal
+      if (px * n.x + py * n.y < 0) { px = -px; py = -py; }         // bahar ki taraf
+      const hx = c.x + n.x * best.t, hy = c.y + n.y * best.t;
+      const cx = innerX + (hx + px * outerWallThicknessFt / 2) * scale;
+      const cy = innerY + (hy + py * outerWallThicknessFt / 2) * scale;
+      const w = spanFt * scale, h = outerWallThicknessFt * scale + extend;
+      const deg = (Math.atan2(best.ey, best.ex) * 180) / Math.PI;
+      cuts.push(<rect key={`ext-poly-${key}`} x={cx - w / 2} y={cy - h / 2} width={w} height={h} fill={bg} transform={`rotate(${deg} ${cx} ${cy})`} />);
+      return true;
+    };
     const pushOpening = (room: any, o: any) => {
       const wall = String(o.wall || "").toUpperCase();
       const wallLenFt = (wall === "TOP" || wall === "BOTTOM") ? room.w : room.h;
@@ -658,6 +691,7 @@ export default function CadFloorPlansView({
       const spanFt = Math.max(0, rs.widthFeet);
       const offFt = Math.max(0, rs.offsetFeet);
       if (!spanFt) return;
+      if (tryPolyCut(room, wall, spanFt, offFt, `${room.id}-${o.id}`)) return;
       if (wall === "BOTTOM" && Math.abs(room.y + room.h - clearInnerHFt) <= 0.2) {
         cuts.push(<rect key={`ext-bottom-${room.id}-${o.id}`} x={innerX + (room.x + offFt) * scale} y={innerY + clearInnerHFt * scale - extend / 2} width={spanFt * scale} height={outerWallThicknessFt * scale + extend} fill={bg} />);
       } else if (wall === "TOP" && Math.abs(room.y) <= 0.2) {
@@ -1122,7 +1156,7 @@ export default function CadFloorPlansView({
               const wallAudit = renderPartitionWalls(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y, hasOutline ? outline.core : null);
               return (
                 <>
-                  {renderExternalWallCuts(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y, p0.x, p0.y, plotWidthPx, Math.abs(p3.y - p0.y), outerWallThicknessFt)}
+                  {renderExternalWallCuts(roomList, clearInnerWFt, clearInnerHFt, i0.x, i0.y, p0.x, p0.y, plotWidthPx, Math.abs(p3.y - p0.y), outerWallThicknessFt, hasOutline ? outline.inner : null)}
                   {wallAudit.node}
                   {hasOutline && Array.isArray(outline.extWalls) && (
                     <g id="irregular-wedge-partition-walls">

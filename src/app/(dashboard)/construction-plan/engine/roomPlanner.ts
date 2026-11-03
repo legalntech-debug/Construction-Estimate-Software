@@ -68,6 +68,8 @@ export interface ArchitecturalPlanResult {
   stairType: StaircaseType;
   staircase: ReturnType<typeof calculateStaircase>;
   orientation: ReturnType<typeof getRoadOrientation>;
+  /** v23: upper floor chhoti thi -> program auto-adjust hua (attached toilet hata / bedroom -> hall / pooja) */
+  adaptations?: { droppedAttached: number; converted: Array<{ from: string; to: string }>; notes: string[] };
 }
 
 type RoomSpec = {
@@ -1910,7 +1912,7 @@ const parkingDoorW = Math.max(2.0, Math.min(3.5, Number((sizes.parking.w - 1).to
         meta.rotated = !!(best as Pick).rotated;
         (living as any).embeddedStair = meta;
       } else {
-        console.error('[STAIR FAILED ❌] Koi stair type living me fit nahi hua', { lw, lh, floorH });
+        console.warn('[STAIR VARIANT SKIPPED] Koi stair type living me fit nahi hua', { lw, lh, floorH });
       }
     }
   }
@@ -4287,6 +4289,9 @@ function generateArchitecturalFloorPlanCore(request: ArchitecturalPlanRequest): 
     ground, mode, W, H, request.groundFloorProgram,
   );
 
+  LAST_PROGRAM = [...program];
+  if (!ground && !isTower && PROGRAM_DEGRADE) applyProgramDegrade(program, specs as any[]);
+
   console.log('[GENERATE] PROGRAM', program);
 
   if (specs.length === 0 && ground && program.includes('LIVING ROOM') && program.includes('STAIRCASE')) {
@@ -4633,9 +4638,126 @@ function evaluateGroundOnly(ground: ArchitecturalPlanResult, gl: any, out: any) 
   return out;
 }
 
+// ============================================================
+// v23. ADAPTIVE UPPER-FLOOR PROGRAM
+//   User upper floor ki width/length kam kare aur bedroom me jagah na bane to (architect jaisa):
+//     1) ATTACHED TOILET hatao (pehle rear wali)
+//     2) phir bhi bedroom layak nahi -> us bedroom ko HALL / DRAWING ROOM (open hall) me badlo,
+//        wo bhi na ban sake -> POOJA ROOM
+//   Har step par plan dobara banta hai; jo pehla plan valid ho wahi final.
+// ============================================================
+type ProgramDegrade = { dropAttached: number; convert: string[] };
+let PROGRAM_DEGRADE: ProgramDegrade | null = null;
+let LAST_PROGRAM: string[] = [];
+const isBedroomProgKey = (k: string) => /BEDROOM/.test(String(k));
+const isAttachedProgKey = (k: string) => /ATTACHED/.test(String(k));
+const lastIdx = <T,>(a: T[], f: (x: T) => boolean) => { for (let i = a.length - 1; i >= 0; i--) if (f(a[i])) return i; return -1; };
+
+function applyProgramDegrade(program: string[], specs: any[]): void {
+  const d = PROGRAM_DEGRADE; if (!d) return;
+  for (let i = 0; i < d.dropAttached; i++) { const k = lastIdx(program, isAttachedProgKey); if (k < 0) break; program.splice(k, 1); }
+  for (const target of d.convert) {
+    if (program.filter(isBedroomProgKey).length <= 1) break;      // layout ko >= 1 bedroom chahiye
+    const k = lastIdx(program, isBedroomProgKey); if (k >= 0) program[k] = target;
+  }
+  // explicit specs (user ne rooms select kiye hon) ko bhi same rakho
+  let drop = d.dropAttached;
+  for (let i = specs.length - 1; i >= 0 && drop > 0; i--) {
+    if (!isAttachedProgKey(specs[i].key)) continue;
+    const take = Math.min(drop, specs[i].count || 1); specs[i].count = (specs[i].count || 1) - take; drop -= take;
+    if (specs[i].count <= 0) specs.splice(i, 1);
+  }
+  for (const target of d.convert) {
+    if (specs.reduce((a: number, x: any) => a + (isBedroomProgKey(x.key) ? (x.count || 1) : 0), 0) <= 1) break;
+    const k = lastIdx(specs, (x: any) => isBedroomProgKey(x.key));
+    if (k < 0) continue;
+    specs[k].count = (specs[k].count || 1) - 1;
+    if (specs[k].count <= 0) specs.splice(k, 1);
+    specs.push({ key: target, count: 1, areaMode: 'AUTO' });
+  }
+}
+
+/** Bedrooms jo layak nahi: attached toilet / dressing nikalne ke baad net area ya width kam */
+function weakBedrooms(res: ArchitecturalPlanResult): Array<{ name: string; w: number; h: number; net: number; room: any }> {
+  const rooms: any[] = res.rooms as any[];
+  const out: Array<{ name: string; w: number; h: number; net: number; room: any }> = [];
+  for (const r of rooms) {
+    const key = canonical(r.name);
+    if (!isBedroomProgKey(key) || r.isSubRoom) continue;
+    const master = key === 'MASTER BEDROOM';
+    const subs = rooms.filter((q) => q !== r && (q.isSubRoom || /ATTACHED|DRESSING|DUCT/.test(canonical(q.name))) &&
+      q.x + q.w / 2 > r.x && q.x + q.w / 2 < r.x + r.w && q.y + q.h / 2 > r.y && q.y + q.h / 2 < r.y + r.h);
+    const net = r.w * r.h - subs.reduce((acc, q) => acc + q.w * q.h, 0);
+    const minSide = Math.min(r.w, r.h);
+    const furnBad = res.furnitureChecks.some((f) => f.room === r.name && !f.ok);
+    if (net < (master ? 68 : 60) - 0.01 || minSide < (master ? 7.5 : 7) - 0.01 || furnBad) out.push({ name: r.name, w: r.w, h: r.h, net, room: r });
+  }
+  return out;
+}
+
+function generateUpperFloorAdaptive(request: ArchitecturalPlanRequest): ArchitecturalPlanResult {
+  const first = generateArchitecturalFloorPlanCore(request);
+  const prog0 = [...LAST_PROGRAM];
+  const progBedN = prog0.filter(isBedroomProgKey).length;
+  const attachedN = prog0.filter(isAttachedProgKey).length;
+  const bedCount = (res: ArchitecturalPlanResult) => (res.rooms as any[]).filter((r) => isBedroomProgKey(canonical(r.name)) && !r.isSubRoom).length;
+  const ok = (res: ArchitecturalPlanResult) => weakBedrooms(res).length === 0 && bedCount(res) >= progBedN;
+  if (ok(first)) return first;
+
+  const notes: string[] = [];
+  let cur = first;
+  let dropped = 0;
+  // STEP 1: attached toilet hatao (layout me attached all-or-nothing hota hai)
+  if (attachedN > 0) {
+    PROGRAM_DEGRADE = { dropAttached: attachedN, convert: [] };
+    try { cur = generateArchitecturalFloorPlanCore(request); } finally { PROGRAM_DEGRADE = null; }
+    dropped = attachedN;
+    notes.push(`Upper floor chhoti hai, bedroom me jagah kam thi: ${attachedN} ATTACHED TOILET hata diya gaya.`);
+    if (ok(cur)) return finishAdapt(cur, dropped, [], notes);
+  }
+
+  // STEP 2: bedroom me jagah ab bhi kam -> peeche wala bedroom OPEN HALL / DRAWING ROOM, jagah bahut kam ho to POOJA ROOM
+  const converted: Array<{ from: string; to: string }> = [];
+  const missingB = Math.max(0, progBedN - bedCount(cur));
+  let beds = bedCount(cur);
+  const weakRooms = weakBedrooms(cur).sort((a, b) => b.room.y - a.room.y);
+  for (const wk of weakRooms) {
+    if (beds <= 1) break;                                  // kam se kam 1 bedroom rakho
+    const r = wk.room; const gross = r.w * r.h; const minSide = Math.min(r.w, r.h);
+    const to = minSide >= 6 && gross >= 48 ? 'DRAWING ROOM' : (minSide >= 3.5 && gross >= 16 ? 'POOJA ROOM' : '');
+    if (!to) continue;
+    const from = r.name;
+    r.name = to; r.label = to; r.roomType = to === 'POOJA ROOM' ? 'pooja' : 'hall'; r.type = r.roomType;
+    r.privateZone = false; r.convertedFrom = from;
+    r.furniture = furnitureAssumptions(to, r.w, r.h);
+    converted.push({ from: 'BEDROOM', to });
+    notes.push(`${from} (${r.w.toFixed(1)}' x ${r.h.toFixed(1)}') bedroom ke layak nahi tha -> ${to === 'DRAWING ROOM' ? 'OPEN HALL / DRAWING ROOM' : 'POOJA ROOM'} me convert kiya gaya.`);
+    beds--;
+  }
+  // layout ne khud bedroom chhod diya (uski jagah balcony / open space) -> program se hatao, note do
+  for (let i = 0; i < missingB; i++) {
+    converted.push({ from: 'BEDROOM', to: '' });
+    notes.push('Ek BEDROOM ke liye floor par jagah nahi mili: wo jagah open space / balcony ke roop me rakhi gayi.');
+  }
+  if (!dropped && !converted.length) return first;
+  cur.furnitureChecks = (cur.rooms as any[]).map((r) => { const f = validateFurniture(r); return { room: r.name || 'ROOM', ok: f.ok, note: f.note }; });
+  return finishAdapt(cur, dropped, converted, notes);
+}
+
+function finishAdapt(res: ArchitecturalPlanResult, dropped: number, converted: Array<{ from: string; to: string }>, notes: string[]): ArchitecturalPlanResult {
+  res.adaptations = { droppedAttached: dropped, converted, notes };
+  // jo rooms jaan-boojh kar hataye / badle gaye, unke "REQUIRED ROOM MISSING" errors hatao
+  res.errors = (res.errors || []).filter((e) => !/(MISSING|missing).*(BEDROOM|ATTACHED)/.test(String(e)));
+  res.warnings = Array.from(new Set([...(res.warnings || []), ...notes]));
+  return res;
+}
+
 export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest): ArchitecturalPlanResult {
   const floorName = clean(request.floorName);
   const isGround = floorName.includes('GROUND');
+  const isTowerReq = floorName.includes('TOWER') || floorName.includes('MUMTY');
+  // v23: upper floor chhoti ho aur bedroom me jagah na bane -> attached toilet hatao, phir bedroom -> hall / pooja room
+  if (!isGround && !isTowerReq && !PROGRAM_DEGRADE && !STAIR_OVERRIDE) return generateUpperFloorAdaptive(request);
   // Sirf GROUND par selector chalta hai; upper / tower ground wali stair inherit karte hain.
   if (!isGround || STAIR_OVERRIDE) return generateArchitecturalFloorPlanCore(request);
 

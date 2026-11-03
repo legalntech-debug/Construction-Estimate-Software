@@ -7,10 +7,108 @@ import { QRCodeSVG } from "qrcode.react";
 import { supabase } from "@/lib/supabase";
 import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
 import { getItemRate } from "@/lib/pricing";
+import {
+  NAME_ADDRESS_CHANGE_LIMIT,
+  isRealRef,
+  isNameAddressChangeMajor,
+  isEstimateExpired,
+} from "@/lib/estimateRules";
 
 // Pricing item key for certificates in pricing_config (adjust if named differently)
 const CERTIFICATE_PRICING_ITEM = "certificate";
 const FALLBACK_FEE = 21;
+
+// localStorage key shared with the input form (/construction-certificate)
+const CERTIFICATE_STORAGE_KEY = "certificatePreview";
+const CERTIFICATE_FORM_ROUTE = "/construction-certificate";
+
+// Ref no format (same idea as the estimate preview):  LnT/26-27/JASVANT/U001/CT0001
+//   U001  = this user's own certificate count
+//   CT0001 = GLOBAL certificate counter (DB sequence, see certificate_ref_counter.sql)
+// The "CT" prefix keeps certificate refs different from estimate refs (C0001), because
+// mis_records.ref_no is unique across modules.
+const CERT_SERIES_PREFIX = "CT";
+
+// Same status value the estimate flow passes to its save RPC
+const CERT_SAVE_STATUS = "pending";
+
+type PaymentData = {
+  p_payment_status: string;
+  p_order_id: string | null;
+  p_payment_id: string | null;
+  p_user_payment: number;
+};
+
+// A saved certificate ref: a real ref (estimateRules) that is not a DRAFT placeholder or an old temporary "CERT-<timestamp>" id
+const isCertRef = (ref?: string | null): boolean => {
+  const r = String(ref || "").trim().toUpperCase();
+  return !!r && !r.startsWith("DRAFT") && !r.startsWith("CERT-") && isRealRef(ref);
+};
+
+/**
+ * Confirms against the database that a ref no really belongs to a PAID certificate.
+ * Local flags (React state / localStorage) can be edited by the user, so every action that releases
+ * a printout (print, PDF download, share, save of a paid record) is checked here first.
+ * Fails closed: a missing record or a network error counts as "not paid".
+ */
+async function verifyPaidOnServer(refNo?: string | null): Promise<boolean> {
+  if (!isCertRef(refNo)) return false;
+  try {
+    const { data: cert } = await supabase
+      .from("certificates")
+      .select("payment_status")
+      .eq("ref_no", refNo)
+      .maybeSingle();
+    if (cert && String(cert.payment_status || "").toLowerCase() === "paid") return true;
+
+    const { data: mis } = await supabase
+      .from("mis_records")
+      .select("platform_payment_status")
+      .eq("ref_no", refNo)
+      .maybeSingle();
+    return !!mis && String(mis.platform_payment_status || "").toLowerCase() === "paid";
+  } catch (err) {
+    console.error("[CERTIFICATE PRINT GUARD] Payment verification failed:", err);
+    return false;
+  }
+}
+
+/**
+ * New certificate ref no (only for a fresh record or a new-payment record).
+ * The global part comes from a database sequence, so it is the same series for every user
+ * (RLS-safe and atomic) - a count(*) query would only see the user's own rows.
+ */
+async function generateCertificateRef(userId: string, fullName?: string | null): Promise<string> {
+  const now = new Date();
+  const fy = (now.getMonth() + 1) >= 4
+    ? `${String(now.getFullYear()).slice(-2)}-${String(now.getFullYear() + 1).slice(-2)}`
+    : `${String(now.getFullYear() - 1).slice(-2)}-${String(now.getFullYear()).slice(-2)}`;
+  const firstName = (fullName || "GUEST").trim().split(/\s+/)[0].toUpperCase();
+
+  // A. the user's own certificate count (U001, U002 ...)
+  let userSeq = 1;
+  try {
+    const { count, error } = await supabase
+      .from("certificates")
+      .select("*", { count: "exact", head: true })
+      .eq("user_id", userId);
+    if (!error && count !== null) userSeq = count + 1;
+  } catch {}
+
+  // B. global certificate number (CT0001, CT0002 ...)
+  let globalPart: string;
+  try {
+    const { data, error } = await supabase.rpc("next_certificate_seq");
+    if (error || data === null || data === undefined) throw error || new Error("next_certificate_seq returned empty");
+    globalPart = `${CERT_SERIES_PREFIX}${String(Number(data)).padStart(4, "0")}`;
+  } catch (err) {
+    // Never fall back to a small number (could collide with an existing ref after the payment was taken)
+    console.error("[CERTIFICATE REF] sequence unavailable, using timestamp fallback:", err);
+    globalPart = `${CERT_SERIES_PREFIX}${String(Date.now()).slice(-8)}`;
+  }
+
+  return `LnT/${fy}/${firstName}/U${String(userSeq).padStart(3, "0")}/${globalPart}`;
+}
 
 export default function CertificatePreviewPage() {
   const router = useRouter();
@@ -29,7 +127,18 @@ export default function CertificatePreviewPage() {
   const [fee, setFee] = useState<number>(FALLBACK_FEE);
   const [pricingLoading, setPricingLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
+  // certificates.id of the saved record (reopen / reprint -> UPDATE the same record)
+  const [certificateId, setCertificateId] = useState<string | null>(null);
+  // name/address changed > limit or record older than 60 days -> brand new record + new ref no + new payment
+  const [needsNewPayment, setNeedsNewPayment] = useState(false);
+  const [newPaymentReason, setNewPaymentReason] = useState("");
+  const [originalRefNo, setOriginalRefNo] = useState<string | null>(null);
+  // payment taken but the save failed -> keep the details so the save can be retried (never charge twice)
+  const [pendingPayment, setPendingPayment] = useState<PaymentData | null>(null);
+  const isSavingRef = useRef(false);
   const paymentIdRef = useRef<string | null>(null);
+  const orderIdRef = useRef<string | null>(null);
+  const userPaymentRef = useRef<number | null>(null);
   const currentCaseType = estimate?.estimate_type || estimate?.case_type || "CONSTRUCTION CERTIFICATE";
   const userCategory = user?.category || "ENGINEER";
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
@@ -74,63 +183,252 @@ export default function CertificatePreviewPage() {
     return () => { alive = false; };
   }, [user?.state, user?.user_type, user?.category, estimate?.state_name]);
 
+  // ---------------------------------------------------------------
+  // LOAD the certificate from the input form and decide: paid reprint / new payment / draft.
+  // The decision comes from the DATABASE (not from localStorage flags):
+  //   - ref no exists + paid + name/address changed <= limit + younger than 60 days -> same record (reprint / update)
+  //   - changed more than the limit, or older than 60 days                          -> new record, new ref no, new payment
+  //   - no ref no / not paid                                                         -> draft, pay to unlock
+  // ---------------------------------------------------------------
   useEffect(() => {
-    const savedData = localStorage.getItem("certificatePreview");
-    if (savedData) {
-      try {
-        const parsed = JSON.parse(savedData);
-        setEstimate(parsed);
-        
-        // The input form sends the selected institution as `financial_institution`
-        const selectedBank = parsed.financial_institution || parsed.bank_name;
-        if (selectedBank) setBankName(selectedBank);
-        if (parsed.inspection_date) setInspectionDate(parsed.inspection_date);
-        if (parsed.completion_date) setCompletionDate(parsed.completion_date);
+    let alive = true;
 
-        // Check if matching record exists in local records with same key parameters
-        const existingEstimates = JSON.parse(localStorage.getItem("estimates_records") || "[]");
-        const matchedRecord = existingEstimates.find((item: any) => 
-          item.customer_name === parsed.customer_name &&
-          item.property_address === parsed.property_address &&
-          item.total_builtup_area === parsed.total_builtup_area &&
-          item.bank_name === (parsed.financial_institution || parsed.bank_name || bankName)
-        );
-
-        if (matchedRecord && (matchedRecord.isPaid || matchedRecord.platform_payment_status === "paid")) {
-          paymentIdRef.current = matchedRecord.razorpay_payment_id || null;
-          setIsPaid(true);
-          setIsDraft(false);
-          setCurrentRefNo(matchedRecord.ref_no);
-        } else if (parsed.isPaid === true) {
-          setIsPaid(true);
-          setIsDraft(false);
-          setCurrentRefNo(parsed.ref_no || generateRefNumber());
-        } else {
-          setIsPaid(false);
-          setIsDraft(true);
-          const userIdTag = user?.id ? `U${user.id}` : (user?.name ? user.name.replace(/\s+/g, '').toUpperCase() : "EXPERT");
-          setCurrentRefNo(`DRAFT-${userIdTag}-${Math.floor(1000 + Math.random() * 9000)}`);
-        }
-      } catch (e) {
-        console.error("Error parsing certificate data", e);
-      }
-    }
     const savedLogo = localStorage.getItem("customLogo");
     if (savedLogo) setLogoUrl(savedLogo);
-  }, [user]);
 
-  const generateRefNumber = () => {
-    const currentYear = new Date().getFullYear();
-    const financialYear = `${currentYear}-${(currentYear + 1).toString().slice(-2)}`;
-    const usernameTag = user?.name ? user.name.replace(/\s+/g, '').toUpperCase() : (user?.id ? `U${user.id}` : "EXPERT");
-    const randomSeq = `U${Math.floor(100 + Math.random() * 900)}`;
-    return `LnT/${financialYear}/${usernameTag}/CERTIFICATE/${randomSeq}`;
+    const savedData = localStorage.getItem(CERTIFICATE_STORAGE_KEY);
+    if (!savedData) return;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(savedData);
+    } catch (e) {
+      console.error("Error parsing certificate data", e);
+      return;
+    }
+
+    setEstimate(parsed);
+    // The input form sends the selected institution as `financial_institution`
+    const selectedBank = parsed.financial_institution || parsed.bank_name;
+    if (selectedBank) setBankName(selectedBank);
+    if (parsed.inspection_date) setInspectionDate(parsed.inspection_date);
+    if (parsed.completion_date) setCompletionDate(parsed.completion_date);
+
+    const showDraft = () => {
+      const userIdTag = user?.id ? `U${String(user.id).slice(0, 6)}` : (user?.name ? user.name.replace(/\s+/g, '').toUpperCase() : "EXPERT");
+      setIsPaid(false);
+      setIsDraft(true);
+      setCurrentRefNo(`DRAFT-${userIdTag}-${Math.floor(1000 + Math.random() * 9000)}`);
+    };
+
+    (async () => {
+      if (!isCertRef(parsed.ref_no)) {
+        showDraft();
+        return;
+      }
+      const refNo: string = parsed.ref_no;
+      try {
+        const { data: cert } = await supabase
+          .from("certificates")
+          .select("*")
+          .eq("ref_no", refNo)
+          .maybeSingle();
+
+        let paid = !!cert && String(cert.payment_status || "").toLowerCase() === "paid";
+        const { data: mis } = await supabase
+          .from("mis_records")
+          .select("*")
+          .eq("ref_no", refNo)
+          .maybeSingle();
+        if (!paid) paid = !!mis && String(mis.platform_payment_status || "").toLowerCase() === "paid";
+
+        if (!alive) return;
+        if (!paid) {
+          showDraft();
+          return;
+        }
+
+        // 15% rule + 60-day rule (same helpers as the estimate preview)
+        const changedTooMuch = !!cert && isNameAddressChangeMajor(
+          { customer_name: cert.customer_name, property_address: cert.property_address },
+          { customer_name: parsed.customer_name, property_address: parsed.property_address }
+        );
+        const expired = !!cert && isEstimateExpired(cert.created_at);
+
+        if (changedTooMuch || expired) {
+          setNeedsNewPayment(true);
+          setNewPaymentReason(expired ? "EXPIRED_60_DAYS" : "CHANGED");
+          setOriginalRefNo(refNo);
+          setCertificateId(null);
+          setEstimate((prev: any) => (prev ? { ...prev, id: null, ref_no: null } : prev));
+          showDraft();
+          return;
+        }
+
+        // Paid + same record -> keep its payment details so that a re-save never wipes them
+        orderIdRef.current = mis?.razorpay_order_id ?? null;
+        paymentIdRef.current = mis?.razorpay_payment_id ?? null;
+        const storedAmount = Number(mis?.amount_paid ?? mis?.user_payment ?? 0);
+        userPaymentRef.current = storedAmount > 0 ? storedAmount : null;
+
+        setCertificateId(cert?.id ?? parsed.id ?? null);
+        setIsPaid(true);
+        setIsDraft(false);
+        setCurrentRefNo(refNo);
+      } catch (err) {
+        console.error("[CERTIFICATE LOAD] payment status check failed:", err);
+        if (alive) showDraft(); // fail closed
+      }
+    })();
+
+    return () => { alive = false; };
+  }, [user?.id]);
+
+  // ---------------------------------------------------------------
+  // SAVE (create / update) through rpc_save_certificate
+  //   - fresh record or new payment -> new ref no (global sequence) + INSERT
+  //   - same ref no (reprint / minor change) -> UPDATE the existing record
+  //   - every detail of the form goes into `snapshot`; client / fee / areas are also mirrored into the
+  //     mis_records columns that exist
+  // ---------------------------------------------------------------
+  const handleSaveAndFinalize = async (paymentData?: PaymentData): Promise<boolean> => {
+    if (isSavingRef.current) return false;
+
+    const userId = user?.id;
+    if (!userId) { alert("User ID not found! Please login again."); return false; }
+
+    // A fresh payment or an admin is always authorized. A "paid" flag alone is NOT trusted (it can be edited in
+    // localStorage / React state): the ref no must exist in the database as a paid certificate.
+    let isAuthorized: boolean = userCategory === "ADMIN" || !!paymentData;
+    if (!isAuthorized && isPaid && !needsNewPayment) {
+      isAuthorized = await verifyPaidOnServer(currentRefNo);
+    }
+    if (!isAuthorized) {
+      alert(`Payment of ₹${fee}/- is required to save and print.`);
+      return false;
+    }
+
+    isSavingRef.current = true;
+    setIsSaving(true);
+    try {
+      let activeRefNo: string | null = !needsNewPayment && isCertRef(currentRefNo) ? currentRefNo : null;
+      let activeId: string | null = needsNewPayment ? null : certificateId;
+      const hadRefNoAtStart = !!activeRefNo;
+
+      // State has the ref no but not the id -> find the exact record
+      if (!activeId && activeRefNo) {
+        const { data: found } = await supabase
+          .from("certificates")
+          .select("id")
+          .eq("ref_no", activeRefNo)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (found) activeId = found.id;
+      }
+
+      // A new ref no is generated only for a fresh / new-payment record
+      if (!activeRefNo) {
+        activeRefNo = await generateCertificateRef(userId, user?.full_name || user?.name);
+      }
+
+      // Payment details: a fresh payment brings its own; a re-save keeps the stored ones
+      // (the RPC overwrites razorpay ids / amount in mis_records, so they must be passed again)
+      const orderId = paymentData?.p_order_id ?? orderIdRef.current ?? null;
+      const paymentId = paymentData?.p_payment_id ?? paymentIdRef.current ?? null;
+      const amount = Number(
+        paymentData?.p_user_payment ??
+        userPaymentRef.current ??
+        (hadRefNoAtStart || userCategory === "ADMIN" ? 0 : fee)
+      ) || 0;
+
+      const snapshot = {
+        ...(estimate || {}),
+        id: undefined,
+        ref_no: activeRefNo,
+        bank_name: bankName,
+        financial_institution: bankName,
+        inspection_date: inspectionDate,
+        completion_date: completionDate,
+        signature_details: signatureDetails,
+        user_payment: amount,
+        saved_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase.rpc("rpc_save_certificate", {
+        p_certificate_id: activeId,
+        p_user_id: userId,
+        p_customer_name: estimate?.customer_name || "GUEST",
+        p_property_address: estimate?.property_address || "",
+        p_ref_no: activeRefNo,
+        p_snapshot: snapshot,
+        p_status: CERT_SAVE_STATUS,
+        p_payment_status: paymentData?.p_payment_status || "paid",
+        p_order_id: orderId,
+        p_payment_id: paymentId,
+        p_user_payment: amount,
+        // details for mis_records (client, representative, fee, areas ...)
+        p_client_name: estimate?.client_name || null,
+        p_representative: estimate?.representative || null,
+        p_fee_standard: Number(estimate?.fee_amount) || null,
+        p_plot_area: Number(String(estimate?.plot_area ?? "").replace(/,/g, "")) || null,
+        p_total_builtup_area: Number(estimate?.total_builtup_area) || null,
+        p_floor_details: estimate?.floor_details && typeof estimate.floor_details === "object" ? estimate.floor_details : null,
+        p_bank_name: bankName || null,
+        p_case_type: currentCaseType,
+      });
+      if (error) throw error;
+
+      const result: any = Array.isArray(data) ? data[0] : data;
+      const savedId: string | null = result?.certificate_id ?? result?.id ?? null;
+      if (!result || !savedId) {
+        throw new Error("Certificate record could not be saved (no record returned). Please try again.");
+      }
+      const savedRef: string = result.ref_no || activeRefNo;
+
+      // Success
+      orderIdRef.current = orderId;
+      paymentIdRef.current = paymentId;
+      userPaymentRef.current = amount > 0 ? amount : userPaymentRef.current;
+      setCertificateId(savedId);
+      setCurrentRefNo(savedRef);
+      setEstimate((prev: any) => ({ ...(prev || {}), id: savedId, ref_no: savedRef }));
+      setIsPaid(true);
+      setIsDraft(false);
+      setNeedsNewPayment(false);
+      setOriginalRefNo(null);
+      setNewPaymentReason("");
+      setPendingPayment(null);
+
+      // Keep the saved data + ref no + id so that "Back to Input" returns with everything still filled in
+      try {
+        localStorage.setItem(
+          CERTIFICATE_STORAGE_KEY,
+          JSON.stringify({
+            ...(estimate || {}),
+            id: savedId,
+            ref_no: savedRef,
+            financial_institution: bankName,
+            bank_name: bankName,
+            inspection_date: inspectionDate,
+            completion_date: completionDate,
+            payment_status: "paid",
+            isPaid: true,
+          })
+        );
+      } catch {}
+      return true;
+    } catch (err: any) {
+      console.error("[CERTIFICATE SAVE ERROR]", err);
+      alert("Error: " + (err?.message || "Failed to save certificate"));
+      return false;
+    } finally {
+      isSavingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
   const handleRazorpayPayment = async () => {
     if (isBusy) return;
-    const finalRef = generateRefNumber();
-    setCurrentRefNo(finalRef);
 
     try {
       setIsBusy(true);
@@ -155,21 +453,24 @@ export default function CertificatePreviewPage() {
         name: `${user?.name || "Er. J. TOMAR"} Valuer Portal`,
         description: "Certificate Verification & Generation Fee",
         handler: async function (response: any) {
+          const paymentDetails: PaymentData = {
+            p_payment_status: "paid",
+            p_order_id: response.razorpay_order_id || order.id || null,
+            p_payment_id: response.razorpay_payment_id,
+            p_user_payment: fee,
+          };
           paymentIdRef.current = response.razorpay_payment_id;
-          setIsPaid(true);
-          setIsDraft(false);
+          setPendingPayment(paymentDetails); // cleared by a successful save; lets the user retry without paying again
 
-          // Record the gateway payment in estimates and mis_records (user_payment)
-          const saved = await saveRecordToMIS(finalRef, {
-            paymentId: response.razorpay_payment_id,
-            amount: fee,
-          });
+          // The ref no is generated here (after the payment), exactly like the estimate preview
+          const saved = await handleSaveAndFinalize(paymentDetails);
           setIsBusy(false);
-          alert(
-            saved
-              ? "Payment Successful! Certificate Generated & Saved to MIS and Estimates."
-              : "Payment received, but the record could not be fully saved. Please contact support with your payment ID: " + response.razorpay_payment_id
-          );
+          if (saved) {
+            alert("Payment Successful! Certificate Generated & Saved to MIS.");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          } else {
+            alert("Payment received, but the record could not be saved. Press 'RETRY SAVE' (do not pay again). Payment ID: " + response.razorpay_payment_id);
+          }
         },
         modal: { ondismiss: () => setIsBusy(false) },
         prefill: {
@@ -178,7 +479,6 @@ export default function CertificatePreviewPage() {
           contact: user?.phone || "7987561396",
         },
         notes: {
-          ref_no: finalRef,
           case_type: "Construction Certificate",
         },
         theme: {
@@ -195,90 +495,13 @@ export default function CertificatePreviewPage() {
     }
   };
 
-  /**
-   * Upserts the certificate into `estimates` and writes `user_payment` to both
-   * `estimates` and `mis_records`. When `payment` is omitted (re-print of an
-   * already paid record) the stored payment columns are left untouched.
-   */
-  const saveRecordToMIS = async (
-    refNo: string,
-    payment?: { paymentId: string; amount: number }
-  ): Promise<boolean> => {
-    const floorDetails = estimate?.floor_details || {};
-    const currentCaseType = estimate?.estimate_type || estimate?.case_type || "CONSTRUCTION CERTIFICATE";
-    const currentUserId = user?.id || null;
-
-    const estimateRecordPayload: Record<string, any> = {
-      ref_no: refNo,
-      customer_name: estimate?.customer_name,
-      property_address: estimate?.property_address,
-      bank_name: bankName,
-      total_builtup_area: estimate?.total_builtup_area,
-      client_name: estimate?.client_name || estimate?.customer_name,
-      representative: estimate?.representative || user?.name || "Er. Jasvant Chouhan",
-      floor_details: floorDetails,
-      platform_payment_status: "paid",
-      payment_status: "paid",
-      status: "finalized",
-      estimate_type: currentCaseType,
-      user_id: currentUserId,
-      property_type: estimate?.property_type || "HOUSE",
-      plot_area: estimate?.plot_area || null,
-      fee_standard: estimate?.fee || estimate?.fee_amount || null,
-      rate_per_sqft: estimate?.rate_per_sqft || 0
-    };
-
-    if (payment) {
-      estimateRecordPayload.razorpay_payment_id = payment.paymentId;
-      estimateRecordPayload.user_payment = payment.amount;
+  // Verify on the server, then save the latest edits (same ref no -> UPDATE) before anything is released
+  const releaseGuard = async (): Promise<boolean> => {
+    if (userCategory !== "ADMIN") {
+      const verified = await verifyPaidOnServer(currentRefNo);
+      if (!verified) { alert("🔒 Server verification failed."); return false; }
     }
-
-    // Save locally for immediate UI reactivity
-    const existingEstimates = JSON.parse(localStorage.getItem("estimates_records") || "[]");
-    const previous = existingEstimates.find((item: any) => item.ref_no === refNo);
-    const filteredEstimates = existingEstimates.filter((item: any) => item.ref_no !== refNo);
-    localStorage.setItem(
-      "estimates_records",
-      JSON.stringify([{ ...(previous || {}), ...estimateRecordPayload, isPaid: true }, ...filteredEstimates])
-    );
-
-    try {
-      const { error: estError } = await supabase
-        .from("estimates")
-        .upsert([estimateRecordPayload], { onConflict: "ref_no" });
-
-      if (estError) {
-        console.error("Supabase estimates upsert error:", estError.message);
-        return false;
-      }
-
-      // Explicitly mirror the payment into mis_records so the gateway entry is never lost,
-      // regardless of what the sync trigger copies.
-      if (payment) {
-        const { data: misRows, error: misError } = await supabase
-          .from("mis_records")
-          .update({
-            user_payment: payment.amount,
-            payment_status: "paid",
-            platform_payment_status: "paid",
-          })
-          .eq("ref_no", refNo)
-          .select("id");
-
-        if (misError) {
-          console.error("Supabase mis_records update error:", misError.message);
-          return false;
-        }
-        if (!misRows || misRows.length === 0) {
-          console.error("mis_records row not found for ref_no:", refNo);
-          return false;
-        }
-      }
-      return true;
-    } catch (error) {
-      console.error("Error syncing record to database tables:", error);
-      return false;
-    }
+    return handleSaveAndFinalize();
   };
 
   const handleSaveAndPrint = async () => {
@@ -286,11 +509,7 @@ export default function CertificatePreviewPage() {
       handleRazorpayPayment();
       return;
     }
-
-    setIsSaving(true);
-    // Re-save without touching the stored payment columns
-    await saveRecordToMIS(currentRefNo);
-    setIsSaving(false);
+    if (!(await releaseGuard())) return;
     window.print();
   };
 
@@ -349,6 +568,7 @@ export default function CertificatePreviewPage() {
     if (isBusy) return;
     try {
       setIsBusy(true);
+      if (!(await releaseGuard())) return;
       triggerDownload(await buildPdfBlob());
     } catch (err: any) {
       alert("PDF download failed: " + (err?.message || ""));
@@ -361,6 +581,7 @@ export default function CertificatePreviewPage() {
     if (isBusy) return;
     try {
       setIsBusy(true);
+      if (!(await releaseGuard())) return;
       const blob = await buildPdfBlob();
       const file = new File([blob], pdfFileName, { type: "application/pdf" });
       const nav: any = navigator;
@@ -382,7 +603,7 @@ export default function CertificatePreviewPage() {
       <div className="p-10 text-center font-sans">
         <p className="text-gray-600 font-bold mb-4">No certificate data found.</p>
         <button 
-          onClick={() => router.push("/estimate")}
+          onClick={() => router.push(CERTIFICATE_FORM_ROUTE)}
           className="bg-blue-600 text-white px-6 py-2 rounded font-bold hover:bg-blue-700 transition"
         >
           Go Back
@@ -664,6 +885,14 @@ export default function CertificatePreviewPage() {
 
       </div>
 
+      {needsNewPayment && !isPaid && (
+        <p className="print:hidden max-w-4xl mx-auto mt-6 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded p-3">
+          {newPaymentReason === "EXPIRED_60_DAYS"
+            ? `⚠️ This certificate is older than 60 days, so it is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`
+            : `⚠️ Customer name or property address changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%, so this is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`}
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center justify-start gap-4 mt-10 mb-12 print:hidden border-t border-slate-200 pt-6 font-sans max-w-4xl mx-auto">
         {isPaid ? (
           <>
@@ -689,6 +918,17 @@ export default function CertificatePreviewPage() {
               SHARE
             </button>
           </>
+        ) : pendingPayment ? (
+          <button
+            onClick={async () => {
+              const ok = await handleSaveAndFinalize(pendingPayment);
+              if (ok) alert("Certificate saved.");
+            }}
+            disabled={isSaving}
+            className="bg-orange-600 text-white px-8 py-3 rounded shadow-md hover:bg-orange-700 transition font-bold disabled:opacity-60"
+          >
+            {isSaving ? "SAVING..." : "RETRY SAVE (PAYMENT ALREADY RECEIVED)"}
+          </button>
         ) : (
           <button
             onClick={handleRazorpayPayment}
@@ -701,8 +941,8 @@ export default function CertificatePreviewPage() {
 
         <button
           onClick={() => {
-            localStorage.removeItem("certificatePreview");
-            router.push("/estimate");
+            // Keep the data (with ref no / id) so the input form comes back filled in - same as the estimate preview
+            router.push(CERTIFICATE_FORM_ROUTE);
           }}
           className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold"
         >

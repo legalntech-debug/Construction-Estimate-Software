@@ -70,6 +70,8 @@ export interface SectionContext {
   floors: FloorCtx[]; main: FloorCtx[]; tower?: FloorCtx;
   towerBox?: { x: number; y: number; w: number; h: number };   // inner frame of tower floor
   outerW: number; outerL: number;
+  /** v22: roof slab / parapet ka extent = TOP floor + max 3 ft projection (pehle poora plot/max floor tha) */
+  roofW: number; roofL: number;
   plinthFt: number; parapetFt: number; towerHeightFt: number;
 }
 
@@ -157,10 +159,18 @@ export function buildSectionContext(
   const towerInfo: any = tower ? lookup(floorData, tower.name) || {} : {};
   const parapetFt = num(anyInfo.parapetHeightFeet, PARAPET_FT);
   const towerHeightFt = num(towerInfo.towerHeightFeet, TOWER_FT);
+  const maxOuterW = Math.max(baseOuterW, ...main.map((f) => f.outerW));
+  const maxOuterL = Math.max(baseOuterL, ...main.map((f) => f.outerL));
+  const topMain = main[main.length - 1];
+  const ROOF_PROJ_FT = 3;
+  const tW = Number(towerInfo.roofWidth), tL = Number(towerInfo.roofLength);
+  const roofW = tW > 0 ? tW : topMain ? topMain.outerW + Math.min(ROOF_PROJ_FT, Math.max(0, maxOuterW - topMain.outerW)) : maxOuterW;
+  const roofL = tL > 0 ? tL : topMain ? topMain.outerL + Math.min(ROOF_PROJ_FT, Math.max(0, maxOuterL - topMain.outerL)) : maxOuterL;
   return {
     floors, main, tower, towerBox,
-    outerW: Math.max(baseOuterW, ...main.map((f) => f.outerW)),
-    outerL: Math.max(baseOuterL, ...main.map((f) => f.outerL)),
+    outerW: maxOuterW,
+    outerL: maxOuterL,
+    roofW: Math.min(roofW, maxOuterW), roofL: Math.min(roofL, maxOuterL),
     plinthFt, parapetFt, towerHeightFt,
   };
 }
@@ -242,6 +252,8 @@ export interface SectionFloor {
 export interface SectionModel {
   cut: SectionCutDef; title: string; lengthV: number; positionOuterFt: number; nudged: boolean; flip: boolean;
   floors: SectionFloor[]; tower?: { v0: number; v1: number; relation: "CUT" | "BEYOND"; heightFt: number };
+  /** v22: roof slab/parapet length along v (0..roofLen) */
+  roofLen: number;
 }
 
 // room extents along (v = along drawing, u = across cut line)
@@ -280,6 +292,73 @@ function openingsAtU(ctx: SectionContext, axis: CutAxis, u: number): number {
   return n;
 }
 
+/** v24: stair ke kitne treads / landings is cut me dikhte hain (cut ya cut ke peeche = BEYOND). 1.0 = poori stair section me aati hai */
+export function stairCoverageAt(st: StairCtx, f: FloorCtx, ffl: number, axis: CutAxis, u: number, lookNeg: boolean): { cov: number; cut: number } {
+  const vertical = axis === "VERTICAL";
+  const { els } = stairElements(st, ffl, f.heightFt + f.slabFt);
+  if (!els.length) return { cov: 1, cut: 0 };
+  let cut = 0, bey = 0;
+  els.forEach((e) => {
+    const a = vertical ? e.x0 : e.y0, b = vertical ? e.x1 : e.y1;
+    if (u >= a - 1e-9 && u < b - 1e-9) cut++;
+    else if (lookNeg ? b <= u + 1e-9 : a >= u - 1e-9) bey++;
+  });
+  return { cov: (cut + bey) / els.length, cut };
+}
+
+/** v24: weighted openings - door 3, window 1, exterior (front / rear) wall ka door +2 */
+function openingScoreAt(ctx: SectionContext, axis: CutAxis, u: number): { score: number; rooms: number } {
+  const vertical = axis === "VERTICAL";
+  const cutWalls = vertical ? ["TOP", "BOTTOM"] : ["LEFT", "RIGHT"];
+  let score = 0; const hitRooms = new Set<string>();
+  ctx.main.forEach((f, fi) => f.rooms.forEach((r: any) => {
+    if (isStairRoom(r)) return;
+    const e = ext(r, axis);
+    if (!(u > e.u0 + 0.01 && u < e.u1 - 0.01)) return;
+    hitRooms.add(fi + ":" + r.name);
+    // building ke sabse bahar ke rooms (irregular me bhi) - inhi ki bahari wall exterior hai
+    const vMin = Math.min(...f.rooms.map((q: any) => ext(q, axis).v0)), vMax = Math.max(...f.rooms.map((q: any) => ext(q, axis).v1));
+    [...(r.doors || []).map((o: any) => [o, 3]), ...(r.windows || []).map((o: any) => [o, 1])].forEach(([o, w]: any) => {
+      if (!cutWalls.includes(o.wall)) return;
+      const sp = span(o, vertical ? r.w : r.h);
+      const a0 = e.u0 + sp.off;
+      if (u >= a0 - 0.05 && u <= a0 + sp.w + 0.05) {
+        const exterior = (o.wall === cutWalls[0] && e.v0 < vMin + 0.6) || (o.wall === cutWalls[1] && e.v1 > vMax - 0.6);
+        score += w + (w === 3 && exterior ? 30 : 0);   // entry gate / main door (bahar ki wall) - section wahin se guzre
+      }
+    });
+  }));
+  return { score, rooms: hitRooms.size };
+}
+
+/**
+ * v24: AUTO section position - sab shapes (rectangle / irregular) ke liye ek hi rule:
+ *   1) stair poori section me aaye (cut + beyond), 2) door (khaaskar front door) / window wall me aaye, 3) zyada rooms kate.
+ * Purana heuristic (legacyU) sirf tie-break ke liye.
+ */
+function optimizeAutoU(ctx: SectionContext, cut: SectionCutDef & { axis: CutAxis }, legacyU: number): number {
+  const vertical = cut.axis === "VERTICAL";
+  const lookNeg = cut.look === "LEFT" || cut.look === "UP";
+  const lim = (vertical ? ctx.outerW : ctx.outerL) - 2 * WALL_T;
+  const lv = buildLevels(ctx);
+  const edges: number[] = [];
+  ctx.main.forEach((f) => f.rooms.forEach((r: any) => { const e = ext(r, cut.axis); edges.push(e.u0, e.u1); }));
+  let bestU = legacyU, bestScore = -Infinity;
+  for (let u = 0.4; u <= lim - 0.4 + 1e-6; u += 0.2) {
+    let sc = 0;
+    ctx.main.forEach((f, fi) => f.stairs.forEach((st) => {
+      const c = stairCoverageAt(st, f, lv.floors[fi].ffl, cut.axis, u, lookNeg);
+      sc += 40 * c.cov + (c.cut > 0 ? 4 : 0);
+    }));
+    const o = openingScoreAt(ctx, cut.axis, u);
+    sc += o.score + 0.2 * o.rooms;
+    if (edges.some((b) => Math.abs(u - b) < 0.25)) sc -= 3;        // wall ke upar mat baitho
+    sc -= 0.01 * Math.abs(u - legacyU);
+    if (sc > bestScore + 1e-9) { bestScore = sc; bestU = u; }
+  }
+  return bestU;
+}
+
 export function resolveCutPositionFt(cutIn: SectionCutDef, ctx: SectionContext) {
   const cut = resolveCut(cutIn, ctx);
   const vertical = cut.axis === "VERTICAL";
@@ -311,6 +390,7 @@ export function resolveCutPositionFt(cutIn: SectionCutDef, ctx: SectionContext) 
         posInner = U(0, fw + before + (d[k] || 0.9) / 2);
       }
     } else posInner = (vertical ? ctx.outerW : ctx.outerL) / 2 - WALL_T;
+    posInner = optimizeAutoU(ctx, cut as any, posInner);     // v24: stair + door + rooms max cover
   } else posInner = Number(cut.positionFt) - WALL_T;
 
   const lim = (vertical ? ctx.outerW : ctx.outerL) - 2 * WALL_T;
@@ -575,6 +655,7 @@ export function buildSectionModel(ctx: SectionContext, cutIn: SectionCutDef): Se
 
   return {
     cut, title: `SECTION ${cut.id}-${cut.id}`, lengthV, positionOuterFt: pos.posOuter, nudged: pos.nudged, flip, floors, tower,
+    roofLen: Math.min(lengthV, vertical ? ctx.roofL : ctx.roofW),
   };
 }
 
@@ -587,6 +668,8 @@ export interface ElevFloor {
 export interface ElevationModel {
   side: ElevationSide; title: string; lengthA: number; floors: ElevFloor[];
   tower?: { a0: number; a1: number; setbackFt: number };
+  /** v22: roof slab / parapet span on this facade (top floor + projection) */
+  roof: { a0: number; a1: number };
 }
 
 export function buildElevationModel(ctx: SectionContext, side: ElevationSide): ElevationModel {
@@ -645,7 +728,9 @@ export function buildElevationModel(ctx: SectionContext, side: ElevationSide): E
     tower = { a0, a1, setbackFt: Math.max(0, setback) };
   }
   const title = side === "FRONT" ? "FRONT ELEVATION" : side === "REAR" ? "REAR ELEVATION" : side === "LEFT" ? "LEFT SIDE ELEVATION" : "RIGHT SIDE ELEVATION";
-  return { side, title, lengthA, floors, tower };
+  const roofA = Math.min(lengthA, horizontalFacade ? ctx.roofW : ctx.roofL);
+  const [ra0, ra1] = toA(mirror ? lengthA - roofA : 0, mirror ? lengthA : roofA);
+  return { side, title, lengthA, floors, tower, roof: { a0: ra0, a1: ra1 } };
 }
 
 /* ---------------- layout helpers ---------------- */

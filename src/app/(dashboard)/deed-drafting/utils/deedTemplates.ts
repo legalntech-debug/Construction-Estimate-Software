@@ -258,7 +258,7 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
   const installmentsHtml = formData.installments && formData.installments.length > 0 
     ? formData.installments.map((inst: any) => `
         <p style="margin-left: 20px; margin-bottom: 8px;">
-          • रुपये <b>${inst.amount || "0"}/-</b> (अक्षरी रुपये <b>${inst.amountWords || "................................................................................................"}</b> मात्र) माध्यम <b>${inst.mode || "RTGS / NEFT"}</b> (विवरण / Ref No: <b>${inst.date || "N/A"}</b>) के द्वारा प्रथमपक्ष / विक्रेता ने द्वितीयपक्ष / क्रेता पक्ष से प्राप्त किये हैं।
+          • रुपये <b>${String(inst.amount || "0").toUpperCase()}/-</b> (अक्षरी रुपये <b>${String(inst.amountWords || "................................................................................................").toUpperCase()}</b> मात्र) माध्यम <b>${String(inst.mode || "RTGS / NEFT").toUpperCase()}</b> (विवरण / Ref No: <b>${String(inst.date || "N/A").toUpperCase()}</b>) के द्वारा प्रथमपक्ष / विक्रेता ने द्वितीयपक्ष / क्रेता पक्ष से प्राप्त किये हैं।
         </p>
       `).join("")
     : `
@@ -266,6 +266,18 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
           • रुपये ........................................................../- (अक्षरी रुपये .................................................................................................. मात्र) के बैंक/चेक/नकद माध्यम से प्रथमपक्ष / विक्रेता ने द्वितीयपक्ष / क्रेतापक्ष से प्राप्त किये है
         </p>
       `;
+
+  // Section 4 fields (Parent Document + Total Consideration): deed me sab CAPITAL me aayega.
+  // NOTE: "PARENT DOCUMENT DETAILS" jaisa label deed me nahi likhna hai, wo sirf form me user ko samjhane ke liye hai.
+  const parentDocText = (formData.parentDocument || "").toString().trim().toUpperCase();
+  const parentDocHtml = parentDocText
+    ? `<p>यह कि <b>${parentDocText}${/[।.]$/.test(parentDocText) ? "" : "।"}</b></p>`
+    : "";
+
+  const considerationText = (formData.considerationAmount || "").toString().trim().toUpperCase();
+  const considerationIntroHtml = considerationText
+    ? `<p>यह कि उक्त संपत्ति का कुल विक्रय प्रतिफल रुपये <b>${considerationText}/-</b> तय हुआ है, जिसके भुगतान का विवरण निम्नानुसार है :</p>`
+    : "";
 
   // डीड प्रकार के आधार पर परिचय और एक्शन टेक्स्ट तय करना
   let deedContextTitle = "विक्रय निष्पादित कर देने वाले";
@@ -398,6 +410,7 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
         
         <p style="text-align: center; font-weight: bold; margin-top: 20px;">!! संपत्ति का वर्णन एवं विवरण !!</p>
         <p>${propertyDescription}</p>
+        ${parentDocHtml}
 
         <div class="boundaries-box">
           <p style="text-align: center; font-weight: bold; margin-bottom: 12px;">!! सदर संपत्ति की चतुःसीमा निम्नानुसार है !!</p>
@@ -411,6 +424,7 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
 
         <p><b>1.</b> यह कि सदर संपत्ति का मूर्तिमात आधिपत्य आप क्रेता को मौका पर ले जाकर आज दिनांक को साक्षीगण की उपस्थिति में आप क्रेतापक्ष को मालिक नाते सौंप दिया गया है, तथा आप क्रेतापक्ष ने इस पर अपना आधिपत्य कर लिया है अब आप क्रेतापक्ष इसका उपयोग एवं उपभोग आपके इच्छा अनुसार करना व करते जाना है |</p>
         
+        ${considerationIntroHtml}
         ${installmentsHtml}
 
         <p><b>2.</b> यह कि सदर सम्पत्ति के लिये विक्रतापक्ष के स्वामित्व बाबद हक, अधिकार स्वत्व, आगमन आदि इस लेख में विक्रेतापक्ष व उनके उत्तराधिकारियों में निहित है वे समस्त हक, अधिकार, स्वत्व, आगम आदि इस लेख के द्वारा आप क्रेतापक्ष में वेष्ठित हो गये हैं, अब आप क्रेतापक्ष सदर सम्पत्ति का स्वेच्छानुसार उपयोग एवं उपभोग व अन्तरण आदि कर सकेंगे। इसमें क्रेतापक्ष या उनके वारिसान की किसी भी प्रकार आपत्ति नहीं रहेगी।</p>

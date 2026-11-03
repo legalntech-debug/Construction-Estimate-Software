@@ -14,6 +14,7 @@ import BoundaryLabels from "../components/BoundaryLabels";
 import RoadRenderer from "../components/RoadRenderer";
 import { DEFAULT_FLOOR_PLANNING_SETTINGS, FloorData, FloorPlanningSettings as FloorPlanningSettingsType, FloorRoom, PlanningMode, PlotDimensions, PlotShape } from "../engine/planningTypes";
 import { calculateSetbacks } from "../engine/setbackRules";
+import { completeQuadSides, quadFromDims, polygonArea, buildPlotShapeFit, rectForArea } from "../engine/plotShapeFit";
 import { generateCompleteConstructionPlan } from "../engine/planGenerator";
 import { generateCadVectorBlueprint } from "../engine/cad/cadRenderer";
 import { supabase } from "@/lib/supabase";
@@ -294,7 +295,20 @@ export default function ConstructionPlanInput() {
 
   const frontWidthFt = Number(dimDetails.A?.ft ?? plotDimensions.A ?? 0) + Number(dimDetails.A?.in ?? 0) / 12;
   const depthFt = Number(dimDetails.C?.ft ?? plotDimensions.C ?? 0) + Number(dimDetails.C?.in ?? 0) / 12;
-  const plotArea = frontWidthFt * depthFt;
+  // v26: irregular / trapezoid plot -> chaaro sides (3 di ho to 4th auto) se polygon ka ASLI area (pehle A x C tha)
+  const sideFtOf = (k: "A" | "B" | "C" | "D") => Number((dimDetails as any)[k]?.ft ?? (plotDimensions as any)[k] ?? 0) + Number((dimDetails as any)[k]?.in ?? 0) / 12;
+  const isQuadPlot = ["IRREGULAR", "TRAPEZOIDAL"].includes(String(plotShape).toUpperCase());
+  const hasPlotAngle = Object.values(plotShapeParams.angles || {}).some((v) => Number(v));
+  let plotArea = frontWidthFt * depthFt;
+  if (isQuadPlot && !hasPlotAngle) {
+    try {
+      const qs = completeQuadSides(sideFtOf("A"), sideFtOf("B"), sideFtOf("C"), sideFtOf("D"));
+      if (qs.A > 0 && qs.B > 0 && qs.C > 0 && qs.D > 0) {
+        const polyA = Math.abs(polygonArea(quadFromDims(qs.A, qs.B, qs.C, qs.D, ((plotShapeParams.slant || {}) as any).B || "MID", null)));
+        if (polyA > 1) plotArea = Number(polyA.toFixed(2));
+      }
+    } catch (e) { /* purana A x C area */ }
+  }
 
   const [floorData, setFloorData] = useState<Record<string, FloorData>>({
     "GROUND FLOOR": { 
@@ -309,7 +323,7 @@ export default function ConstructionPlanInput() {
 
     const currentWidth = frontWidthFt;
     const currentLength = depthFt;
-    const calculatedArea = Number((currentWidth * currentLength).toFixed(2));
+    const calculatedArea = Number((isQuadPlot ? plotArea : currentWidth * currentLength).toFixed(2));
 
     setFloorData(prev => {
       const updated = { ...prev };
@@ -344,7 +358,7 @@ export default function ConstructionPlanInput() {
       });
       return updated;
     });
-  }, [frontWidthFt, depthFt, selectedFloors]);
+  }, [frontWidthFt, depthFt, selectedFloors, plotArea, isQuadPlot]);
 
   const floorBuiltUpAreas = React.useMemo(() => {
     const map: Record<string, number> = {};
@@ -379,15 +393,38 @@ export default function ConstructionPlanInput() {
     fetchData();
   }, []);
 
-  const updateFloorAreaDirect = (floor: string, areaVal: number) => {
-    setFloorData(prev => ({
-      ...prev,
-      [floor]: { ...(prev[floor] || { width: 0, length: 0 }), area: areaVal, userDims: true } as any
-    }));
+  // v26: irregular plot ke andar ka max rectangle (core) - user ka specific area isi me RECTANGULAR banta hai
+  const irregularCoreOuter = (): { w: number; l: number } | null => {
+    if (!isQuadPlot || hasPlotAngle) return null;
+    try {
+      const qs = completeQuadSides(sideFtOf("A"), sideFtOf("B"), sideFtOf("C"), sideFtOf("D"));
+      if (!(qs.A > 0 && qs.B > 0 && qs.C > 0 && qs.D > 0)) return null;
+      const fit = buildPlotShapeFit({ dims: { A: qs.A, B: qs.B, C: qs.C, D: qs.D }, shape: String(plotShape), slantB: ((plotShapeParams.slant || {}) as any).B || "MID", angles: null, setbacks: { front: 0, rear: 0, left: 0, right: 0 }, wall: 4 / 12 });
+      return fit ? { w: fit.core.w + 2 * fit.wall, l: fit.core.h + 2 * fit.wall } : null;
+    } catch (e) { return null; }
   };
 
-  const updateFloorDimensions = (floor: string, width: number, length: number) => {
-    const area = Number((width * length).toFixed(2));
+  const updateFloorAreaDirect = (floor: string, areaVal: number) => {
+    const isTowerF = floor.toUpperCase().includes("TOWER") || floor.toUpperCase().includes("MUMTY");
+    const core = !isTowerF ? irregularCoreOuter() : null;
+    setFloorData(prev => {
+      const base: any = prev[floor] || { width: 0, length: 0 };
+      // irregular plot: specific area -> rectangular dimensions (core ke andar)
+      if (core && areaVal > 0 && areaVal < plotArea * 0.97) {
+        // user ne width/length khud di thi (area = w x l) -> wahi rakho, warna area se rectangular dims nikalo
+        if (Number(base.width) > 0 && Number(base.length) > 0 && Math.abs(Number(base.width) * Number(base.length) - areaVal) < 0.5) {
+          return { ...prev, [floor]: { ...base, area: areaVal, userDims: true, userRect: true } as any };
+        }
+        const d = rectForArea(areaVal, core.w, core.l);
+        return { ...prev, [floor]: { ...base, width: d.w, length: d.l, area: areaVal, userDims: true, userRect: true } as any };
+      }
+      return { ...prev, [floor]: { ...base, area: areaVal, userDims: true, userRect: false } as any };
+    });
+  };
+
+  const updateFloorDimensions = (floor: string, width: number, length: number, opts?: { auto?: boolean; area?: number }) => {
+    const area = opts?.area && opts.area > 0 ? Number(opts.area.toFixed(2)) : Number((width * length).toFixed(2));
+    const isTowerF = floor.toUpperCase().includes("TOWER") || floor.toUpperCase().includes("MUMTY");
     setFloorData(prev => ({
       ...prev,
       [floor]: {
@@ -396,6 +433,8 @@ export default function ConstructionPlanInput() {
         length,
         area: area > 0 ? area : (prev[floor]?.area || 0),
         userDims: true,
+        // user ne irregular plot par chhoti rectangular dims di -> floor rectangular banegi (auto sync me nahi)
+        userRect: !opts?.auto && isQuadPlot && !isTowerF && area < plotArea * 0.97,
       } as any
     }));
   };
@@ -413,11 +452,11 @@ export default function ConstructionPlanInput() {
       const netWidth = Math.max(0, frontWidthFt - (rules.leftSetback + rules.rightSetback));
       const netLength = Math.max(0, depthFt - (rules.frontSetback + rules.rearSetback));
       if (netWidth > 0 && netLength > 0) {
-        updateFloorDimensions("GROUND FLOOR", netWidth, netLength);
+        updateFloorDimensions("GROUND FLOOR", netWidth, netLength, { auto: true });
       }
     } else if (coverageType === "100_PERCENT") {
       if (frontWidthFt > 0 && depthFt > 0) {
-        updateFloorDimensions("GROUND FLOOR", frontWidthFt, depthFt);
+        updateFloorDimensions("GROUND FLOOR", frontWidthFt, depthFt, { auto: true, area: isQuadPlot ? plotArea : undefined });   // irregular: GF area = polygon area (A x C nahi)
       }
     }
   }, [
@@ -769,13 +808,16 @@ export default function ConstructionPlanInput() {
         return Number(detail.ft || 0) + Number(detail.in || 0) / 12;
       };
 
-      const safeA = getDim('A');
       const shapeUpper = String(plotShape || "RECTANGLE").toUpperCase();
       const isSimpleRectShape = shapeUpper === "RECTANGLE" || shapeUpper === "RECTANGULAR" || shapeUpper === "SQUARE";
-      const safeC = getDim('C');
+      // v26: irregular / trapezoid -> 3 sides se 4th auto (CAD / engine jaisa), polygon area
+      const isQuadShapeGen = shapeUpper === "IRREGULAR" || shapeUpper === "TRAPEZOIDAL";
+      const qsGen = isQuadShapeGen ? completeQuadSides(getDim('A'), getDim('B'), getDim('C'), getDim('D')) : null;
+      const safeA = qsGen && qsGen.A > 0 ? qsGen.A : getDim('A');
+      const safeC = qsGen && qsGen.C > 0 ? qsGen.C : getDim('C');
       // Rectangle / Square me B = A, D = C hamesha (stale B/D shape bigad dete the)
-      const safeB = isSimpleRectShape ? safeA : (getDim('B') || safeA);
-      const safeD = isSimpleRectShape ? safeC : (getDim('D') || safeC);
+      const safeB = isSimpleRectShape ? safeA : (qsGen && qsGen.B > 0 ? qsGen.B : (getDim('B') || safeA));
+      const safeD = isSimpleRectShape ? safeC : (qsGen && qsGen.D > 0 ? qsGen.D : (getDim('D') || safeC));
 
       const safePlotDimensions: PlotDimensions = {
         ...plotDimensions,
@@ -787,7 +829,7 @@ export default function ConstructionPlanInput() {
         F: Number(plotDimensions.F) || 0,
         width: safeA,
         length: safeC,
-        area: safeA * safeC,
+        area: isQuadShapeGen && plotArea > 0 ? plotArea : safeA * safeC,   // v26: irregular = polygon area
       };
 
       const safePlotArea = safePlotDimensions.area > 0

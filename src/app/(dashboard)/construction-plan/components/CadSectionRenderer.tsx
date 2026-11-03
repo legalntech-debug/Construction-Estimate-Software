@@ -158,14 +158,15 @@ export default function CadSectionRenderer({
     return out;
   };
 
+  const roofLen = Math.min(len, model.roofLen ?? len);   // v22: roof/parapet = top floor + projection
   const towerTopZ = levels.towerTop ?? levels.roofSlabTop;
   // parapet wall STOPS at the stair-tower walls (it never runs through the tower)
   const parapetSegs: [number, number][] = (() => {
-    if (!model.tower) return [[0, len]];
-    const t0 = Math.max(0, model.tower.v0), t1 = Math.min(len, model.tower.v1);
+    if (!model.tower) return [[0, roofLen]];
+    const t0 = Math.max(0, model.tower.v0), t1 = Math.min(roofLen, model.tower.v1);
     const segs: [number, number][] = [];
     if (t0 > 0.01) segs.push([0, t0]);
-    if (t1 < len - 0.01) segs.push([t1, len]);
+    if (t1 < roofLen - 0.01) segs.push([t1, roofLen]);
     return segs;
   })();
   const titleY = Y(-plinth) + (hasBasement ? basementFt * scale : 0) + 12 * scale;
@@ -270,7 +271,7 @@ export default function CadSectionRenderer({
           <rect {...R(a0 - 0.1, b0 + 0.1, levels.parapetTop - 0.25, levels.parapetTop)} fill="#ffffff" stroke={INK} strokeWidth="0.7" {...sw} />
         </g>
       ))}
-      {[[0, 0.5], [len - 0.5, len]].map(([a0, b0], i) => (
+      {[[0, 0.5], [roofLen - 0.5, roofLen]].map(([a0, b0], i) => (
         <rect key={`pp-${i}`} {...R(a0, b0, levels.roofSlabTop, levels.parapetTop)} fill={INK} stroke={INK} strokeWidth="0.9" {...sw} />
       ))}
 

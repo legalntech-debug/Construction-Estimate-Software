@@ -8,6 +8,7 @@ import { getRoadOrientation } from "../engine/roadOrientation";
 import CadFloorElevationRenderer from "./CadFloorElevationRenderer";
 import CadToolbarSection from "./CadToolbarSection";
 import CadSidebarDimensions from "./CadSidebarDimensions";
+import { completeQuadSides, quadFromDims } from "../engine/plotShapeFit";
 import { SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS } from "../engine/sectionEngine";
 
 export interface CadObject {
@@ -500,6 +501,10 @@ export default function CadModalView({
   let dimB = isSimpleRect ? dimA : (Number(plotDims?.B) || dimA);
   let dimC = Number(plotDims?.C) || 50;
   let dimD = isSimpleRect ? dimC : (Number(plotDims?.D) || dimC);
+  // v23: irregular plot -> 3 sides di ho to 4th side auto calculate (sidebar me "AUTO" dikhta hai)
+  const quadSides = isSimpleRect ? null : completeQuadSides(Number(plotDims?.A) || 0, Number(plotDims?.B) || 0, Number(plotDims?.C) || 0, Number(plotDims?.D) || 0);
+  const autoSide = quadSides?.auto || null;
+  if (quadSides && quadSides.auto) { dimA = quadSides.A; dimB = quadSides.B; dimC = quadSides.C; dimD = quadSides.D; }
 
   const normalizedFloorData = Object.entries(floorData || {}).reduce((acc, [floorKey, fData]) => {
     if (!fData) return acc;
@@ -546,6 +551,16 @@ export default function CadModalView({
   let pBottomRight = { x: bottomWidth / 2, y: heightLeft / 2 };
   let pTopLeft = { x: -bottomWidth / 2 + shiftXLeft, y: -heightLeft / 2 };
   let pTopRight = { x: bottomWidth / 2 + shiftXRight, y: -heightRight / 2 };
+
+  // v23: DEG nahi diya -> chaaro sides ki ASLI length (front/back/left/right) wala polygon (engine ke saath same: quadFromDims)
+  const hasSideAngle = !isSimpleRect && !!(sideAngles.A || sideAngles.B || sideAngles.C || sideAngles.D);
+  if (!isSimpleRect && !hasSideAngle) {
+    const q = quadFromDims(dimA, dimB, dimC, dimD, slantB as any, null);   // [TL, TR, BR, BL], feet, y neeche
+    const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const toPt = (p: { x: number; y: number }) => ({ x: (p.x - cx) * scale, y: (p.y - cy) * scale });
+    pTopLeft = toPt(q[0]); pTopRight = toPt(q[1]); pBottomRight = toPt(q[2]); pBottomLeft = toPt(q[3]);
+  }
 
   const angleA = isSimpleRect ? 0 : ((sideAngles.A || 0) * Math.PI) / 180;
   const angleB = isSimpleRect ? 0 : ((sideAngles.B || 0) * Math.PI) / 180;
@@ -1155,6 +1170,8 @@ export default function CadModalView({
               actualLenD={actualLenD}
               dimA={dimA}
               dimC={dimC}
+              autoSide={autoSide}
+              autoSideValue={autoSide ? (quadSides as any)[autoSide] : undefined}
               calculatedArea={calculatedArea}
               plotArea={plotArea}
               measurementUnit={measurementUnit}

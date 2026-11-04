@@ -46,15 +46,32 @@ export default function ReopenOldCase() {
           .order('created_at', { ascending: false });
         if (!srvError) serviceData = srv || [];
       } else {
-        const { data: mis, error: misError } = await supabase
-          .from('mis_records')
-          .select(`
-            *,
-            estimates!inner(user_id)
-          `)
-          .eq('estimates.user_id', user.id)
-          .order('created_date', { ascending: false });
-        if (!misError) misData = mis || [];
+        // ✅ No embedded join: mis_records <-> estimates has no foreign key any more (fk_mis_estimates was
+        //    dropped so certificate refs can live in mis_records), so `estimates!inner(user_id)` fails.
+        //    A user's MIS rows = rows with their user_id + rows whose ref_no belongs to one of their estimates.
+        const { data: myEstimates } = await supabase
+          .from('estimates')
+          .select('ref_no')
+          .eq('user_id', user.id);
+        const myRefs = (myEstimates || []).map((e: any) => e.ref_no).filter(Boolean) as string[];
+
+        const queries: PromiseLike<{ data: any[] | null; error: any }>[] = [
+          supabase.from('mis_records').select('*').eq('user_id', user.id),
+        ];
+        // chunked so the URL of the .in() filter stays short
+        for (let i = 0; i < myRefs.length; i += 100) {
+          queries.push(
+            supabase.from('mis_records').select('*').in('ref_no', myRefs.slice(i, i + 100))
+          );
+        }
+        const results = await Promise.all(queries);
+
+        const byRef = new Map<string, any>();
+        results.forEach((r) => {
+          if (r.error) console.error('[REOPEN] mis_records fetch error:', r.error);
+          (r.data || []).forEach((row: any) => byRef.set(row.ref_no, row));
+        });
+        misData = Array.from(byRef.values());
 
         const { data: srv, error: srvError } = await supabase
           .from('service_records')
@@ -144,6 +161,31 @@ export default function ReopenOldCase() {
         localStorage.setItem("deedDraftData", JSON.stringify(fallbackData));
       }
       router.push("/deed-drafting");
+      return;
+    }
+
+    // ============================================================
+    // 1b. Construction Certificate reopen -> back to the certificate input form
+    //     (without this a certificate row would fall through to /estimate below)
+    // ============================================================
+    if (caseTypeUpper.includes("CERTIFICATE")) {
+      const certData = {
+        ref_no: record.ref_no,
+        id: null, // mis_records.id is not the certificates uuid; the preview finds the record by ref_no
+        customer_name: record.customer_name,
+        client_name: record.client_name,
+        representative: record.representative,
+        property_address: record.property_address || "",
+        plot_area: record.plot_area || "",
+        financial_institution: record.bank_name || undefined,
+        floor_details: typeof record.floor_details === 'string' ? JSON.parse(record.floor_details || '{}') : record.floor_details,
+        total_builtup_area: record.total_builtup_area,
+        fee_amount: record.fee_standard,
+        certificate_type: "CONSTRUCTION CERTIFICATE",
+      };
+      localStorage.removeItem("certificateData");
+      localStorage.setItem("certificatePreview", JSON.stringify(certData));
+      router.push("/construction-certificate");
       return;
     }
 

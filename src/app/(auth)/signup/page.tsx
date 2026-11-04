@@ -193,52 +193,50 @@ function SignupContent() {
       return;
     }
 
-    const { error: authError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-    });
-
-    if (authError) {
-      setError(authError.message);
-      setLoading(false);
-      return;
-    }
-
-    const user = (await supabase.auth.getUser()).data.user;
-    if (!user) {
-      setError('User session not found');
-      setLoading(false);
-      return;
-    }
-
     const generatedUserId = 'LNT-' + Math.floor(100000 + Math.random() * 900000);
 
     // ✅ Store Aadhaar as raw digits (no spaces) in the database
     const aadhaarForDb = form.aadhaarNo.replace(/\s/g, '');
 
-    const { error: profileError } = await supabase.from('profiles').insert([
-      {
-        id: user.id,
-        full_name: form.fullName,
-        mobile: form.mobile,
-        email: form.email.toLowerCase(),
-        aadhaar_no: aadhaarForDb || null,
-        user_type: form.userType,
-        plan_type: 'BASIC PLAN',
-        firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : null,
-        city: form.city,
-        state: form.state.trim().toUpperCase(),
-        user_code: generatedUserId,
-        partner_id: form.partnerId || null,
-        status: 'active',
-        approval_status: 'APPROVED',
-        terms_accepted: true,
-        terms_accepted_at: new Date().toISOString(),
+    // ✅ The profile row is now created by the DB trigger handle_new_user (SECURITY DEFINER) from this
+    //    metadata, in the same transaction as the auth user. The old separate profiles.insert() is removed:
+    //    the trigger had already inserted the row, so that insert always hit a duplicate primary key.
+    const { data: signUpData, error: authError } = await supabase.auth.signUp({
+      email: form.email.trim(),
+      password: form.password,
+      options: {
+        data: {
+          full_name: form.fullName,
+          mobile: form.mobile,
+          aadhaar_no: aadhaarForDb || '',
+          user_type: form.userType,
+          plan_type: 'BASIC PLAN',
+          firm_name: form.userType !== 'INDIVIDUAL' ? form.firmName : '',
+          city: form.city,
+          state: form.state.trim().toUpperCase(),
+          user_code: generatedUserId,
+          partner_id: form.partnerId || '',
+          terms_accepted: 'true',
+          terms_accepted_at: new Date().toISOString(),
+        },
       },
-    ]);
+    });
 
-    if (profileError) {
-      setError(profileError.message);
+    if (authError) {
+      // Supabase returns this generic text when the profiles insert inside the trigger fails
+      // (most often a duplicate mobile / email / Aadhaar, see the unique indexes on profiles).
+      const isTriggerFail = /database error saving new user/i.test(authError.message);
+      setError(
+        isTriggerFail
+          ? 'Registration failed: this Mobile, Email or Aadhaar may already be registered. Please check and try again.'
+          : authError.message
+      );
+      setLoading(false);
+      return;
+    }
+
+    if (!signUpData?.user) {
+      setError('User could not be created. Please try again.');
       setLoading(false);
       return;
     }

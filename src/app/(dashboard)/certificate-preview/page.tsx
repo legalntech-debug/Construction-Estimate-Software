@@ -14,20 +14,17 @@ import {
   isEstimateExpired,
 } from "@/lib/estimateRules";
 
-// Pricing item key for certificates in pricing_config (adjust if named differently)
-const CERTIFICATE_PRICING_ITEM = "certificate";
+// Pricing item key for certificates in pricing_config (column case_type). The completion certificate
+// uses "completionCertificate"; this page is the CONSTRUCTION certificate.
+const CERTIFICATE_PRICING_ITEM = "constructionCertificate";
 const FALLBACK_FEE = 21;
 
 // localStorage key shared with the input form (/construction-certificate)
 const CERTIFICATE_STORAGE_KEY = "certificatePreview";
 const CERTIFICATE_FORM_ROUTE = "/construction-certificate";
 
-// Ref no format (same idea as the estimate preview):  LnT/26-27/JASVANT/U001/CT0001
-//   U001  = this user's own certificate count
-//   CT0001 = GLOBAL certificate counter (DB sequence, see certificate_ref_counter.sql)
-// The "CT" prefix keeps certificate refs different from estimate refs (C0001), because
-// mis_records.ref_no is unique across modules.
-const CERT_SERIES_PREFIX = "CT";
+// The ref no is created by rpc_save_estimate (same series as the estimates: LnT/26-27/NAME/U001/C0001).
+// For a NEW record the RPC ignores any ref sent by the page, so none is generated here.
 
 // Same status value the estimate flow passes to its save RPC
 const CERT_SAVE_STATUS = "pending";
@@ -39,11 +36,80 @@ type PaymentData = {
   p_user_payment: number;
 };
 
+// ---------------------------------------------------------------------------
+// WALLET GATE - same rule as the estimate preview. Runs only when a NEW payment is about to start
+// (Pay to unlock). Reprints / same-ref updates of an already paid certificate never reach it.
+// ---------------------------------------------------------------------------
+const MIN_RECHARGE = 100; // Platform minimum recharge amount (INR)
+const WALLET_RECHARGE_ROUTE = "/wallet-ledger";
+
+type WalletBlock = { charge: number; balance: number; state: string };
+
+// Flat shape on purpose: discriminated-union narrowing does not work when "strict" is disabled in tsconfig.
+type WalletGateResult = { allowed: boolean; block?: WalletBlock; message?: string };
+
+/**
+ * Verifies that the logged-in user's wallet balance covers the certificate charge from the pricing table.
+ * Admin, CEO, premium and advanced accounts are exempt. Fails closed: if the balance cannot be verified,
+ * the user is not allowed to continue to the payment.
+ */
+async function verifyWalletForNewPayment(args: {
+  userId?: string | null;
+  fallbackState: string;
+  charge: number;
+}): Promise<WalletGateResult> {
+  const { userId, fallbackState, charge } = args;
+
+  if (!userId) {
+    return { allowed: false, message: "Session expired. Please log in again to continue." };
+  }
+
+  try {
+    // Always read the balance fresh from the database (the cached profile may be stale after a recharge)
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("role, plan_type, wallet_balance, state")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error || !profile) {
+      console.error("[CERTIFICATE WALLET GATE] Profile fetch failed:", error);
+      return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+    }
+
+    const role = String(profile.role || "").toLowerCase();
+    const plan = String(profile.plan_type || "").toLowerCase();
+    const { data: authData } = await supabase.auth.getUser();
+    const isOwnerAccount = authData?.user?.email === "legalntech@gmail.com";
+    if (role === "admin" || role === "ceo" || plan.includes("premium") || plan.includes("advanced") || isOwnerAccount) {
+      return { allowed: true };
+    }
+
+    const balance = Number(profile.wallet_balance ?? 0);
+    const state = String(profile.state || fallbackState || "").toUpperCase().trim();
+
+    console.log("[CERTIFICATE WALLET GATE]", { userId, state, balance, charge });
+
+    if (!charge || charge <= 0 || balance >= charge) return { allowed: true };
+
+    return { allowed: false, block: { charge, balance, state } };
+  } catch (err) {
+    console.error("[CERTIFICATE WALLET GATE] Unexpected error:", err);
+    return { allowed: false, message: "Unable to verify wallet balance. Please try again." };
+  }
+}
+
 // A saved certificate ref: a real ref (estimateRules) that is not a DRAFT placeholder or an old temporary "CERT-<timestamp>" id
 const isCertRef = (ref?: string | null): boolean => {
   const r = String(ref || "").trim().toUpperCase();
   return !!r && !r.startsWith("DRAFT") && !r.startsWith("CERT-") && isRealRef(ref);
 };
+
+// Same paid test as the estimate preview (an estimates row is paid by any of these three columns)
+const isPaidRecord = (r: any): boolean =>
+  String(r?.platform_payment_status || "").toLowerCase() === "paid" ||
+  String(r?.payment_status || "").toLowerCase() === "paid" ||
+  String(r?.status || "").toLowerCase() === "paid";
 
 /**
  * Confirms against the database that a ref no really belongs to a PAID certificate.
@@ -54,12 +120,13 @@ const isCertRef = (ref?: string | null): boolean => {
 async function verifyPaidOnServer(refNo?: string | null): Promise<boolean> {
   if (!isCertRef(refNo)) return false;
   try {
-    const { data: cert } = await supabase
-      .from("certificates")
-      .select("payment_status")
+    // Certificates are stored in `estimates` (+ mis_records), exactly like estimates
+    const { data: est } = await supabase
+      .from("estimates")
+      .select("*")
       .eq("ref_no", refNo)
       .maybeSingle();
-    if (cert && String(cert.payment_status || "").toLowerCase() === "paid") return true;
+    if (est && isPaidRecord(est)) return true;
 
     const { data: mis } = await supabase
       .from("mis_records")
@@ -71,43 +138,6 @@ async function verifyPaidOnServer(refNo?: string | null): Promise<boolean> {
     console.error("[CERTIFICATE PRINT GUARD] Payment verification failed:", err);
     return false;
   }
-}
-
-/**
- * New certificate ref no (only for a fresh record or a new-payment record).
- * The global part comes from a database sequence, so it is the same series for every user
- * (RLS-safe and atomic) - a count(*) query would only see the user's own rows.
- */
-async function generateCertificateRef(userId: string, fullName?: string | null): Promise<string> {
-  const now = new Date();
-  const fy = (now.getMonth() + 1) >= 4
-    ? `${String(now.getFullYear()).slice(-2)}-${String(now.getFullYear() + 1).slice(-2)}`
-    : `${String(now.getFullYear() - 1).slice(-2)}-${String(now.getFullYear()).slice(-2)}`;
-  const firstName = (fullName || "GUEST").trim().split(/\s+/)[0].toUpperCase();
-
-  // A. the user's own certificate count (U001, U002 ...)
-  let userSeq = 1;
-  try {
-    const { count, error } = await supabase
-      .from("certificates")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", userId);
-    if (!error && count !== null) userSeq = count + 1;
-  } catch {}
-
-  // B. global certificate number (CT0001, CT0002 ...)
-  let globalPart: string;
-  try {
-    const { data, error } = await supabase.rpc("next_certificate_seq");
-    if (error || data === null || data === undefined) throw error || new Error("next_certificate_seq returned empty");
-    globalPart = `${CERT_SERIES_PREFIX}${String(Number(data)).padStart(4, "0")}`;
-  } catch (err) {
-    // Never fall back to a small number (could collide with an existing ref after the payment was taken)
-    console.error("[CERTIFICATE REF] sequence unavailable, using timestamp fallback:", err);
-    globalPart = `${CERT_SERIES_PREFIX}${String(Date.now()).slice(-8)}`;
-  }
-
-  return `LnT/${fy}/${firstName}/U${String(userSeq).padStart(3, "0")}/${globalPart}`;
 }
 
 export default function CertificatePreviewPage() {
@@ -124,8 +154,20 @@ export default function CertificatePreviewPage() {
   const [signatureDetails, setSignatureDetails] = useState("");
   const [currentRefNo, setCurrentRefNo] = useState("");
   const [isDraft, setIsDraft] = useState(true);
+  // `fee` = the amount actually charged. `pricingDisplay` carries the offer details (MRP, % off, savings)
+  // from pricing_config, exactly like the estimate preview, so a rate / offer change in pricing shows here.
   const [fee, setFee] = useState<number>(FALLBACK_FEE);
+  const [pricingDisplay, setPricingDisplay] = useState({
+    mrp: FALLBACK_FEE,
+    price: FALLBACK_FEE,
+    discountEnabled: false,
+    discountPercent: 0,
+    savings: 0,
+    isFromDB: false,
+  });
   const [pricingLoading, setPricingLoading] = useState(true);
+  const [walletBlock, setWalletBlock] = useState<WalletBlock | null>(null);
+  const [walletChecking, setWalletChecking] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   // certificates.id of the saved record (reopen / reprint -> UPDATE the same record)
   const [certificateId, setCertificateId] = useState<string | null>(null);
@@ -163,18 +205,42 @@ export default function CertificatePreviewPage() {
 
     (async () => {
       setPricingLoading(true);
+      // Fallback (no DB row): hardcoded pricing.ts rate, no offer shown
+      const applyFallback = () => {
+        const fallbackPrice = getItemRate(targetState, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE;
+        setFee(fallbackPrice);
+        setPricingDisplay({
+          mrp: fallbackPrice,
+          price: fallbackPrice,
+          discountEnabled: false,
+          discountPercent: 0,
+          savings: 0,
+          isFromDB: false,
+        });
+      };
+
       try {
         const row = await fetchPricingRow(CERTIFICATE_PRICING_ITEM, targetState, pricingCategory);
         const display = getDisplayPricing(row);
         if (!alive) return;
-        setFee(
-          display.isFromDB && display.price > 0
-            ? display.price
-            : getItemRate(targetState, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE
-        );
+        if (display.isFromDB && display.price > 0) {
+          setFee(display.price);
+          setPricingDisplay({
+            mrp: display.mrp,
+            price: display.price,
+            discountEnabled: display.discountEnabled,
+            discountPercent: display.discountPercent,
+            savings: display.savings,
+            isFromDB: true,
+          });
+          console.log(`💰 [CERTIFICATE DB PRICING] ${targetState} = ₹${display.price}`);
+        } else {
+          applyFallback();
+          console.log(`⚠️ [CERTIFICATE FALLBACK PRICING] ${targetState}`);
+        }
       } catch (err) {
         console.error("[CERTIFICATE PRICING ERROR]", err);
-        if (alive) setFee(getItemRate(targetState, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE);
+        if (alive) applyFallback();
       } finally {
         if (alive) setPricingLoading(false);
       }
@@ -228,13 +294,14 @@ export default function CertificatePreviewPage() {
       }
       const refNo: string = parsed.ref_no;
       try {
+        // `cert` = the saved record in the estimates table (certificates are stored there like estimates)
         const { data: cert } = await supabase
-          .from("certificates")
+          .from("estimates")
           .select("*")
           .eq("ref_no", refNo)
           .maybeSingle();
 
-        let paid = !!cert && String(cert.payment_status || "").toLowerCase() === "paid";
+        let paid = !!cert && isPaidRecord(cert);
         const { data: mis } = await supabase
           .from("mis_records")
           .select("*")
@@ -285,7 +352,7 @@ export default function CertificatePreviewPage() {
   }, [user?.id]);
 
   // ---------------------------------------------------------------
-  // SAVE (create / update) through rpc_save_certificate
+  // SAVE (create / update) through rpc_save_estimate (certificates live in estimates + mis_records)
   //   - fresh record or new payment -> new ref no (global sequence) + INSERT
   //   - same ref no (reprint / minor change) -> UPDATE the existing record
   //   - every detail of the form goes into `snapshot`; client / fee / areas are also mirrored into the
@@ -318,7 +385,7 @@ export default function CertificatePreviewPage() {
       // State has the ref no but not the id -> find the exact record
       if (!activeId && activeRefNo) {
         const { data: found } = await supabase
-          .from("certificates")
+          .from("estimates")
           .select("id")
           .eq("ref_no", activeRefNo)
           .eq("user_id", userId)
@@ -326,10 +393,7 @@ export default function CertificatePreviewPage() {
         if (found) activeId = found.id;
       }
 
-      // A new ref no is generated only for a fresh / new-payment record
-      if (!activeRefNo) {
-        activeRefNo = await generateCertificateRef(userId, user?.full_name || user?.name);
-      }
+      // A fresh / new-payment record has no ref no yet: rpc_save_estimate generates it (and returns it below)
 
       // Payment details: a fresh payment brings its own; a re-save keeps the stored ones
       // (the RPC overwrites razorpay ids / amount in mis_records, so they must be passed again)
@@ -344,7 +408,7 @@ export default function CertificatePreviewPage() {
       const snapshot = {
         ...(estimate || {}),
         id: undefined,
-        ref_no: activeRefNo,
+        ref_no: activeRefNo || undefined,
         bank_name: bankName,
         financial_institution: bankName,
         inspection_date: inspectionDate,
@@ -354,36 +418,52 @@ export default function CertificatePreviewPage() {
         saved_at: new Date().toISOString(),
       };
 
-      const { data, error } = await supabase.rpc("rpc_save_certificate", {
-        p_certificate_id: activeId,
+      // Saved through the SAME rpc as the estimates (rpc_save_estimate): the row goes to `estimates` and is
+      // mirrored to mis_records, so ledger / revenue / MIS / reopen work without any change.
+      // The certificate type is carried by p_estimate_type; bank, dates etc. are kept in the snapshot.
+      const { data, error } = await supabase.rpc("rpc_save_estimate", {
+        p_estimate_id: activeId,
         p_user_id: userId,
         p_customer_name: estimate?.customer_name || "GUEST",
+        p_snapshot: {
+          ...snapshot,
+          totalArea: Number(estimate?.total_builtup_area || 0),
+          grandTotal: 0,
+          property_address: estimate?.property_address || "",
+          date: new Date().toISOString(),
+        },
+        p_fee_standard: Number(estimate?.fee_amount) || 0,
+        p_estimate_type: currentCaseType,
+        p_plan_type: "BASIC",
+        p_rate_per_sqft: 0,
+        p_floor_details: estimate?.floor_details && typeof estimate.floor_details === "object" ? estimate.floor_details : {},
+        p_client_name: estimate?.client_name || "",
+        p_representative: estimate?.representative || "",
+        p_plot_area: Number(String(estimate?.plot_area ?? "").replace(/,/g, "")) || 0,
         p_property_address: estimate?.property_address || "",
+        p_total_builtup_area: Number(estimate?.total_builtup_area) || 0,
+        p_total_construction_cost: 0,
         p_ref_no: activeRefNo,
-        p_snapshot: snapshot,
         p_status: CERT_SAVE_STATUS,
         p_payment_status: paymentData?.p_payment_status || "paid",
         p_order_id: orderId,
         p_payment_id: paymentId,
         p_user_payment: amount,
-        // details for mis_records (client, representative, fee, areas ...)
-        p_client_name: estimate?.client_name || null,
-        p_representative: estimate?.representative || null,
-        p_fee_standard: Number(estimate?.fee_amount) || null,
-        p_plot_area: Number(String(estimate?.plot_area ?? "").replace(/,/g, "")) || null,
-        p_total_builtup_area: Number(estimate?.total_builtup_area) || null,
-        p_floor_details: estimate?.floor_details && typeof estimate.floor_details === "object" ? estimate.floor_details : null,
-        p_bank_name: bankName || null,
-        p_case_type: currentCaseType,
       });
       if (error) throw error;
 
       const result: any = Array.isArray(data) ? data[0] : data;
-      const savedId: string | null = result?.certificate_id ?? result?.id ?? null;
+      const savedId: string | null = result?.estimate_id ?? result?.id ?? null;
       if (!result || !savedId) {
         throw new Error("Certificate record could not be saved (no record returned). Please try again.");
       }
       const savedRef: string = result.ref_no || activeRefNo;
+
+      // Best effort: the estimate rpc has no bank parameter, so store the bank on the MIS row (used by Reopen).
+      // A failure here (e.g. RLS) never blocks the certificate.
+      try {
+        await supabase.from("mis_records").update({ bank_name: bankName || null }).eq("ref_no", savedRef);
+      } catch {}
 
       // Success
       orderIdRef.current = orderId;
@@ -428,7 +508,26 @@ export default function CertificatePreviewPage() {
   };
 
   const handleRazorpayPayment = async () => {
-    if (isBusy) return;
+    if (isBusy || walletChecking) return;
+
+    // WALLET GATE (same as the estimate preview): the balance must cover the pricing-table charge BEFORE the
+    // payment starts. Insufficient balance -> recharge prompt; the certificate stays in localStorage.
+    setWalletChecking(true);
+    setWalletBlock(null);
+    try {
+      const gate = await verifyWalletForNewPayment({
+        userId: user?.id,
+        fallbackState: user?.state || estimate?.state_name || "MADHYA PRADESH",
+        charge: fee,
+      });
+      if (!gate.allowed) {
+        if (gate.block) setWalletBlock(gate.block);
+        else alert(gate.message || "Unable to verify wallet balance. Please try again.");
+        return;
+      }
+    } finally {
+      setWalletChecking(false);
+    }
 
     try {
       setIsBusy(true);
@@ -533,6 +632,35 @@ export default function CertificatePreviewPage() {
       useCORS: true,
       // Skip on-screen only controls (class "print:hidden")
       ignoreElements: (node: Element) => node.classList?.contains("print:hidden"),
+      // html2canvas draws <input> text clipped / not at all (bank name cut at the bottom, the letterhead line
+      // missing). In the cloned DOM every text input is swapped for a plain span with the same value + styling,
+      // so the PDF shows exactly what the page shows. The live page is not touched.
+      onclone: (clonedDoc: Document) => {
+        clonedDoc.querySelectorAll("input[type='text'], input:not([type])").forEach((node) => {
+          const input = node as HTMLInputElement;
+          const cs = clonedDoc.defaultView?.getComputedStyle(input);
+          const span = clonedDoc.createElement("span");
+          span.textContent = input.value || "";
+          span.style.display = input.classList.contains("w-full") ? "block" : "inline-block";
+          if (cs) {
+            span.style.width = cs.width;
+            span.style.minHeight = cs.height;
+            span.style.font = cs.font;
+            span.style.fontWeight = cs.fontWeight;
+            span.style.textAlign = cs.textAlign;
+            span.style.textTransform = cs.textTransform;
+            span.style.letterSpacing = cs.letterSpacing;
+            span.style.color = cs.color;
+            span.style.borderBottom = cs.borderBottom;
+            span.style.padding = cs.padding;
+            span.style.margin = cs.margin;
+            span.style.boxSizing = "border-box";
+            span.style.lineHeight = "1.5";
+            span.style.overflow = "visible";
+          }
+          input.parentNode?.replaceChild(span, input);
+        });
+      },
     });
 
     const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
@@ -885,12 +1013,119 @@ export default function CertificatePreviewPage() {
 
       </div>
 
+      {/* Insufficient wallet balance -> recharge prompt (same as the estimate preview) */}
+      {walletBlock && (() => {
+        const shortfall = Math.max(0, walletBlock.charge - walletBlock.balance);
+        const rechargeAmount = Math.max(MIN_RECHARGE, Math.ceil(shortfall));
+        return (
+          <div className="print:hidden fixed inset-0 z-[100000] flex items-center justify-center bg-black/60 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="rounded-full bg-amber-100 p-2.5 text-xl">⚠️</div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Insufficient Wallet Balance</h2>
+                  <p className="text-xs text-slate-500">
+                    Your wallet must cover the service charge before the payment can start.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mb-4 space-y-2 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">🎯 Service Charge</span>
+                  <span className="font-semibold text-gray-800">₹{walletBlock.charge}</span>
+                </div>
+                <div className="flex justify-between border-t border-blue-200 pt-2">
+                  <span className="text-gray-600">💼 Your Balance</span>
+                  <span className="font-semibold text-gray-800">₹{walletBlock.balance.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t border-blue-200 pt-2">
+                  <span className="font-semibold text-gray-700">⚠️ Shortfall</span>
+                  <span className="font-bold text-red-600">₹{shortfall.toFixed(2)}</span>
+                </div>
+                {walletBlock.state && (
+                  <div className="flex justify-between pt-1">
+                    <span className="text-xs text-gray-500">State</span>
+                    <span className="text-xs font-semibold text-gray-700">{walletBlock.state}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs leading-relaxed text-emerald-800">
+                Recharge at least <span className="font-bold">₹{rechargeAmount}</span> to continue.
+                Your certificate is kept, so you can return to this preview after recharging and pay again.
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWalletBlock(null)}
+                  className="flex-1 cursor-pointer rounded-lg border border-slate-300 py-2.5 font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`${WALLET_RECHARGE_ROUTE}?recharge=1&from=${encodeURIComponent("Certificate")}`)}
+                  className="flex-1 cursor-pointer rounded-lg bg-blue-600 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                >
+                  Recharge Now →
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {needsNewPayment && !isPaid && (
         <p className="print:hidden max-w-4xl mx-auto mt-6 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded p-3">
           {newPaymentReason === "EXPIRED_60_DAYS"
             ? `⚠️ This certificate is older than 60 days, so it is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`
             : `⚠️ Customer name or property address changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%, so this is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`}
         </p>
+      )}
+
+      {/* Offer banner - dynamic from pricing_config (rate, MRP, % off), same as the estimate preview */}
+      {!isPaid && userCategory !== "ADMIN" && (
+        <div className="print:hidden max-w-4xl mx-auto mt-10 -mb-6 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-100 border-2 border-dashed border-amber-400 rounded-xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4 font-sans">
+          <div className="flex items-center gap-3">
+            <span className="bg-red-600 text-white text-[11px] font-extrabold px-2.5 py-1 rounded shadow uppercase tracking-wider animate-pulse">
+              ⚡ LIMITED TIME DEAL
+            </span>
+            <div>
+              <h4 className="text-sm font-extrabold text-slate-900 uppercase">
+                Construction Completion Certificate & Verified Report
+              </h4>
+              <p className="text-xs text-slate-600 font-medium">
+                Includes Instant PDF Download, Digital Sealing & Verification QR Code.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 bg-white px-4 py-2 rounded-lg border border-amber-200 shadow-inner">
+            <div className="text-right">
+              {pricingLoading ? (
+                <span className="text-xs text-slate-500 font-bold">Loading price...</span>
+              ) : (
+                <>
+                  {pricingDisplay.discountEnabled && pricingDisplay.discountPercent > 0 && (
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="text-xs text-gray-400 line-through font-semibold">
+                        ₹ {pricingDisplay.mrp}/-
+                      </span>
+                      <span className="bg-green-100 text-green-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                        {pricingDisplay.discountPercent}% OFF
+                      </span>
+                    </div>
+                  )}
+                  <div className="text-lg font-black text-emerald-600 leading-tight">
+                    ₹ {pricingDisplay.price} <span className="text-xs font-bold text-slate-700">Only</span>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center justify-start gap-4 mt-10 mb-12 print:hidden border-t border-slate-200 pt-6 font-sans max-w-4xl mx-auto">
@@ -932,10 +1167,14 @@ export default function CertificatePreviewPage() {
         ) : (
           <button
             onClick={handleRazorpayPayment}
-            disabled={pricingLoading || isBusy}
-            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold animate-pulse disabled:opacity-60"
+            disabled={pricingLoading || isBusy || walletChecking}
+            className="bg-green-600 text-white px-8 py-3 rounded shadow-md hover:bg-green-700 transition font-bold animate-pulse disabled:opacity-60 disabled:animate-none"
           >
-            {pricingLoading ? "LOADING PRICE..." : `PAY TO REMOVE DRAFT & UNLOCK (₹${fee})`}
+            {pricingLoading
+              ? "LOADING PRICE..."
+              : walletChecking
+              ? "CHECKING WALLET..."
+              : `PAY TO REMOVE DRAFT & UNLOCK (₹${fee})`}
           </button>
         )}
 

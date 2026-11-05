@@ -24,6 +24,7 @@ export const PREVIEW_LOCATION_BOUND_KEYS = [
   "route_view",
   "satellite_view",
   "plot_angle_override",
+  "plot_polygon",
 ];
 export const EMPTY_BOUNDARIES: Boundaries = { east: "", west: "", north: "", south: "" };
 

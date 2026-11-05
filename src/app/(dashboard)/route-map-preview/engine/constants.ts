@@ -8,6 +8,9 @@ export const STORAGE_KEY = "routeMapPreview";
 // sessionStorage flag read by the input form to restore its fields after "Back to Input"
 export const RETURN_TO_FORM_FLAG = "routeMapReturnToForm";
 // sessionStorage key prefix for the optional khasra / cadastral inset image (kept out of localStorage because of its size)
+// sessionStorage key prefix for the site photos shown beside the satellite view, and how many fit on the sheet
+export const PHOTO_STORAGE_PREFIX = "routeMapPhotos:";
+export const MAX_PHOTOS = 2;
 export const INSET_STORAGE_PREFIX = "routeMapInset:";
 export const ROUTE_MAP_TYPE = "ROUTE MAP";
 
@@ -36,9 +39,12 @@ export const ROAD_PATTERN = /ROAD|RASTA|SADAK|MARG|STREET|GALI/i;
 export const FEET_TO_METERS = 0.3048;
 export const GREEN_HATCH_ID = "rm-hatch-green";
 
-// Default size of a newly added landmark box (feet)
-export const DEFAULT_LANDMARK_WIDTH_FT = 40;
-export const DEFAULT_LANDMARK_HEIGHT_FT = 30;
+// Shorter name of the plot, used when the full name does not fit into the outline at the current zoom
+export const PLOT_LABEL_SHORT = "SITE";
+
+// Default size of a newly added landmark box (feet) when no building outline is found under the click
+export const DEFAULT_LANDMARK_WIDTH_FT = 80;
+export const DEFAULT_LANDMARK_HEIGHT_FT = 60;
 // Radius around a click that is searched for a road when the user picks the main road by hand
 export const PICK_ROAD_TOLERANCE_M = 60;
 // Radius of the extra data load around the map centre ("LOAD MAP DATA HERE")

@@ -6,7 +6,7 @@ import { averageOf, findRoadSide, formatFeetInches, measureText, wrapByWidth } f
 // ---------------------------------------------------------------------------
 // PlotSketch: engineering style plot drawing.
 //  - the drawing is turned in quarter steps so that the road side is always at the bottom; the NORTH / EAST /
-//    SOUTH / WEST labels follow the rotation
+//    SOUTH / WEST words (optional, off by default) follow the rotation
 //  - every side with a length gets a dimension line with arrow heads and extension lines
 //  - boundary texts are wrapped by measured width and the margins are sized from the wrapped text, so no text,
 //    dimension or label overlaps another one; the view box grows to fit
@@ -32,6 +32,9 @@ const arrowHead = (tip: [number, number], toward: [number, number]) => {
 export default function PlotSketch({ boundaries, dims }: { boundaries: Boundaries; dims: Boundaries }) {
   const FONT = 11;
   const WORD = 14;
+  // The sketch shows only the four boundary texts around the plot; set to true to print NORTH / EAST / SOUTH / WEST as well
+  const SHOW_DIRECTION_WORDS = false;
+  const wordSpace = SHOW_DIRECTION_WORDS ? WORD : 0;
   const DIM_FONT = 10;
   const GAP = 13;
   const ROAD_W = 16;
@@ -75,12 +78,12 @@ export default function PlotSketch({ boundaries, dims }: { boundaries: Boundarie
     let lines = wrapByWidth(text, horizontal ? horizontalMax : verticalMax, FONT);
     if (lines.length === 0) lines = [""];
     const n = lines.length;
-    const blockLen = Math.max(...lines.map((l) => measureText(l, FONT)), measureText(side.toUpperCase(), WORD));
+    const blockLen = Math.max(...lines.map((l) => measureText(l, FONT)), SHOW_DIRECTION_WORDS ? measureText(side.toUpperCase(), WORD) : 0);
     const roadW = road ? ROAD_W : 0;
     // Distance from the plot edge to the nearest text baseline reference
     const offset0 = roadW + (hasDim ? DIM_ZONE : 0) + TEXT_GAP;
-    // Total space needed outside the plot edge for road + dimension + text lines + direction word
-    const margin = offset0 + (n - 1) * GAP + FONT + 3 + WORD + 4;
+    // Total space needed outside the plot edge for road + dimension + text lines (+ direction word when shown)
+    const margin = offset0 + (n - 1) * GAP + FONT + 3 + wordSpace + 4;
     return { word: side.toUpperCase(), lines, n, road, roadW, dim, hasDim, blockLen, offset0, margin };
   });
 
@@ -198,7 +201,7 @@ export default function PlotSketch({ boundaries, dims }: { boundaries: Boundarie
         {s.lines.map((t, i) => (
           <text key={i} transform={tf(lineOut(i))} textAnchor="middle" fontSize={FONT} fontWeight="700">{t}</text>
         ))}
-        <text transform={tf(wordOut)} textAnchor="middle" fontSize={WORD} fontWeight="800">{s.word}</text>
+        {SHOW_DIRECTION_WORDS && <text transform={tf(wordOut)} textAnchor="middle" fontSize={WORD} fontWeight="800">{s.word}</text>}
       </g>
     );
   };

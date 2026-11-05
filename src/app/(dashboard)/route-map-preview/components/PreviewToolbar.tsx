@@ -36,6 +36,25 @@ interface PreviewToolbarProps {
   onUpdateLandmark: (id: string, patch: Partial<Landmark>) => void;
   onRemoveLandmark: (id: string) => void;
 
+  // Plot outline: built from the side lengths (auto) or moved / drawn / fitted by hand (manual)
+  plotMode: "auto" | "manual";
+  plotInfo: string;
+  plotMessage: string;
+  plotEditMode: boolean;
+  onTogglePlotEdit: () => void;
+  plotDrawMode: boolean;
+  plotDraftCount: number;
+  onTogglePlotDraw: () => void;
+  onFinishPlotDraw: () => void;
+  onFitBuilding: () => void;
+  onResetPlotShape: () => void;
+
+  // Site photos printed beside the satellite view
+  photoCount: number;
+  maxPhotos: number;
+  onPhotoUpload: (file?: File) => void;
+  onPhotoRemove: () => void;
+
   hasInset: boolean;
   onInsetUpload: (file?: File) => void;
   onInsetRemove: () => void;
@@ -75,6 +94,37 @@ export default function PreviewToolbar(p: PreviewToolbarProps) {
           Topo map: roads, names and places from OpenStreetMap, houses from Google / Microsoft building footprints. It is
           drawn automatically; where a house or road is still missing, add it as a landmark or draw the route by hand.
         </span>
+      </div>
+
+      <div className={rowClass}>
+        <span className="font-bold text-xs sm:text-sm">PLOT OUTLINE:</span>
+        <span className="text-xs sm:text-sm font-bold">{p.plotMode === "auto" ? "AUTO (FROM SIDE LENGTHS)" : "MANUAL"}</span>
+        <button onClick={p.onTogglePlotEdit} className={p.plotEditMode ? activeBtn : toolBtn}>
+          {p.plotEditMode ? "✔ DONE EDITING" : "✥ MOVE / EDIT PLOT"}
+        </button>
+        <button onClick={p.onFitBuilding} className={toolBtn}>🏠 FIT TO BUILDING</button>
+        <button onClick={p.onTogglePlotDraw} className={p.plotDrawMode ? activeBtn : toolBtn}>
+          {p.plotDrawMode ? "✖ CANCEL DRAWING" : "✏️ DRAW PLOT BY HAND"}
+        </button>
+        {p.plotDrawMode && (
+          <button onClick={p.onFinishPlotDraw} disabled={p.plotDraftCount < 3} className={`${toolBtn} disabled:opacity-40`}>
+            ✔ FINISH ({p.plotDraftCount} POINTS)
+          </button>
+        )}
+        <button onClick={p.onResetPlotShape} disabled={p.plotMode === "auto"} className={`${toolBtn} disabled:opacity-40`}>↺ BACK TO AUTO</button>
+        {p.plotInfo && <span className="text-xs sm:text-sm font-bold">{p.plotInfo}</span>}
+        {p.plotMessage && <span className="text-[11px] sm:text-xs font-bold text-blue-800">{p.plotMessage}</span>}
+        {p.plotEditMode && (
+          <span className="basis-full text-[11px] sm:text-xs text-blue-800 normal-case">
+            Drag the ✥ handle to move the whole plot (if the coordinate is a little off), drag a square corner to reshape it, click a
+            round mid point to add a corner, double click a corner to delete it. Works with mouse and touch.
+          </span>
+        )}
+        {p.plotDrawMode && (
+          <span className="basis-full text-[11px] sm:text-xs text-blue-800 normal-case">
+            Click the corners of the plot one by one on the route map. Click the first (green) point again, or press Finish, to close it.
+          </span>
+        )}
       </div>
 
       <div className={rowClass}>
@@ -134,33 +184,56 @@ export default function PreviewToolbar(p: PreviewToolbarProps) {
         </button>
         {p.landmarkMode && (
           <span className="text-[11px] sm:text-xs text-blue-800 normal-case">
-            Click on the route map where the landmark stands, then type its name.
+            Click on the building in the route map; its real shape is taken automatically. Then type the name.
           </span>
         )}
         {p.landmarks.map((lm) => (
           <div key={lm.id} className="flex items-center gap-1 border border-black bg-white px-2 py-1 text-xs">
             <span className="font-bold">{lm.name}</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              value={lm.width_ft || ""}
-              onChange={(e) => p.onUpdateLandmark(lm.id, { width_ft: toNumber(e.target.value) })}
-              className="w-12 border border-black p-0.5 text-center"
-              title="Width (ft, east-west)"
-            />
-            ×
-            <input
-              type="text"
-              inputMode="decimal"
-              value={lm.height_ft || ""}
-              onChange={(e) => p.onUpdateLandmark(lm.id, { height_ft: toNumber(e.target.value) })}
-              className="w-12 border border-black p-0.5 text-center"
-              title="Height (ft, north-south)"
-            />
-            FT
+            {lm.ring ? (
+              <span className="text-[10px] text-gray-600">BUILDING SHAPE</span>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={lm.width_ft || ""}
+                  onChange={(e) => p.onUpdateLandmark(lm.id, { width_ft: toNumber(e.target.value) })}
+                  className="w-12 border border-black p-0.5 text-center"
+                  title="Width (ft, east-west)"
+                />
+                ×
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={lm.height_ft || ""}
+                  onChange={(e) => p.onUpdateLandmark(lm.id, { height_ft: toNumber(e.target.value) })}
+                  className="w-12 border border-black p-0.5 text-center"
+                  title="Height (ft, north-south)"
+                />
+                FT
+              </>
+            )}
             <button onClick={() => p.onRemoveLandmark(lm.id)} className="px-1 font-bold hover:text-red-600" title="Remove landmark">✕</button>
           </div>
         ))}
+      </div>
+
+      <div className={rowClass}>
+        <span className="font-bold text-xs sm:text-sm">SITE PHOTOS (BESIDE SATELLITE VIEW):</span>
+        <label className={`${toolBtn} cursor-pointer ${p.photoCount >= p.maxPhotos ? "opacity-40 pointer-events-none" : ""}`}>
+          📷 ADD PHOTO ({p.photoCount}/{p.maxPhotos})
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              p.onPhotoUpload(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {p.photoCount > 0 && <button onClick={p.onPhotoRemove} className={toolBtn}>REMOVE LAST</button>}
       </div>
 
       <div className={rowClass}>

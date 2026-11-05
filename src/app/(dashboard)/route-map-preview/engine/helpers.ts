@@ -107,18 +107,6 @@ export const averageOf = (a: string, b: string) => {
   return nums.length ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
 };
 
-// Real-world plot size (feet) used for the box on the route map. Side lengths come from the optional inputs;
-// whatever is missing is derived from the plot area (a square when nothing else is known).
-export const getPlotSizeFt = (dims: Boundaries, plotArea: string) => {
-  const area = parseFloat(String(plotArea).replace(/,/g, "")) || 0;
-  const widthFt = averageOf(dims.north, dims.south);
-  const heightFt = averageOf(dims.east, dims.west);
-  const side = area > 0 ? Math.sqrt(area) : 30;
-  const w = widthFt || (heightFt && area > 0 ? area / heightFt : side);
-  const h = heightFt || (widthFt && area > 0 ? area / widthFt : side);
-  return { widthFt: w, heightFt: h };
-};
-
 export const mainRoadText = (s: MainRoadSummary) => {
   const name = (s.name || `${s.highway} road`).toUpperCase();
   return s.on_main_road

@@ -13,6 +13,8 @@ export interface Landmark {
   lng: number;
   width_ft: number;
   height_ft: number;
+  // Outline of the real building when the landmark was placed on one (width / height are used otherwise)
+  ring?: LatLng[];
 }
 
 // Result of the main road search that is saved with the record
@@ -41,6 +43,8 @@ export interface RouteMapData {
   main_road_override?: number;
   main_road_summary?: MainRoadSummary;
   landmarks?: Landmark[];
+  // Plot outline drawn, moved or fitted to a building by hand. Without it the outline is built from the side lengths.
+  plot_polygon?: LatLng[];
   base_map?: BaseMode;
   // Plot angle (degrees, clockwise) chosen by hand; the angle is detected from the nearest road when this is empty
   plot_angle_override?: number;

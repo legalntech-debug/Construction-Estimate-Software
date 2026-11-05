@@ -5,29 +5,39 @@
 //   topo   vector topo map (roads with names, places, POIs, house footprints) drawn by MapLibre GL inside Leaflet
 //   lines  road lines, buildings and colonies drawn from OpenStreetMap (Overpass) data
 //   tiles  raster OpenStreetMap street map
-// The plot box, landmarks, main road highlight and route are Leaflet overlays on top of every base layer.
+// The plot outline, landmarks, main road highlight and route are Leaflet overlays on top of every base layer.
+// The plot outline can be moved, reshaped and drawn by hand (edit / draw mode); names and boundary texts follow it.
 import { useEffect, useRef, useState } from "react";
-import { bearingDeg, ringCentroid, routeLengthMeters } from "../engine/routeMapGeo";
+import { bearingDeg, haversineMeters, pointInRing, ringCentroid, routeLengthMeters } from "../engine/routeMapGeo";
 import type { LatLng, MapFeatures } from "../engine/routeMapGeo";
-import type { BaseMode, Boundaries, Landmark, MapViewState } from "../engine/types";
+import type { BaseMode, Boundaries, MapViewState } from "../engine/types";
 import {
-  BUILDING_FILL, FEET_TO_METERS, GREEN_HATCH_ID, LABEL_YELLOW, OSM_ATTRIBUTION,
-  ROUTE_COLOR, SATELLITE_TILES, STREET_TILES,
+  BUILDING_FILL, GREEN_HATCH_ID, LABEL_YELLOW, OSM_ATTRIBUTION, PLOT_LABEL_SHORT, ROUTE_COLOR, SATELLITE_TILES, STREET_TILES,
 } from "../engine/constants";
 import {
-  TEXT_HALO_BLACK, TEXT_HALO_WHITE, addHtmlMarker, ensureHatchPattern, loadLeaflet, mapLabelHtml, offsetLatLng,
-  rectAround, rotateOffset, roadWeight, routeMidPoint, toLL,
+  TEXT_HALO_BLACK, TEXT_HALO_WHITE, addHtmlMarker, ensureHatchPattern, loadLeaflet, mapLabelHtml, roadWeight,
+  routeMidPoint, toLL,
 } from "../engine/leafletSupport";
 import { escapeHtml, measureText, wrapByWidth } from "../engine/helpers";
 import { createTopoLayer } from "../engine/topoStyle";
+import { ringCenter, simplifyRing } from "../engine/plotShape";
+import { edgeFacing, fitLabelInRing, pxCentroid, placeBoundaryLabels } from "../engine/labelLayout";
+import type { LabelRect, PxPoint } from "../engine/labelLayout";
 
-// Boundary labels around the plot box are shown from this zoom level on
+// Boundary labels around the plot are shown from this zoom level on
 const BOUNDARY_LABEL_MIN_ZOOM = 16;
 const BOUNDARY_LABEL_FONT = 8;
 const BOUNDARY_LABEL_MAX_WIDTH = 92;
 const BOUNDARY_LABEL_LINE_HEIGHT = 9.5;
-// The red dot that marks the site is shown up to this zoom level (the box itself is too small to see)
+// The red dot that marks the site is shown up to this zoom level (the outline itself is too small to see)
 const SITE_DOT_MAX_ZOOM = 16;
+// Names inside the plot / landmark outlines grow with the zoom up to this size and disappear below the minimum
+const NAME_MAX_FONT = 28;
+const NAME_MIN_FONT = 5;
+// Distance (pixels) within which a click on the first point closes the polygon that is being drawn
+const CLOSE_POLYGON_PX = 14;
+// Footprints found within this distance (pixels) of the site are offered when the site is not exactly on a building
+const FOOTPRINT_SEARCH_PX = 8;
 
 export interface TopoData {
   features: MapFeatures;
@@ -40,6 +50,18 @@ export interface TopoData {
   onPick: (p: LatLng) => void;
 }
 
+export interface LandmarkShape {
+  id: string;
+  name: string;
+  ring: LatLng[];
+}
+
+// Functions the page can call on the route map
+export interface MapApi {
+  // Outline of the building (house footprint of the topo map) under a point, or null when there is none
+  footprintAt: (p: LatLng) => LatLng[] | null;
+}
+
 interface LeafletMapProps {
   site: LatLng;
   tile: "satellite" | "street";
@@ -47,10 +69,17 @@ interface LeafletMapProps {
   defaultZoom: number;
   initialView?: MapViewState | null;
   markerKind: "pin" | "none";
-  // Real-size plot box (street map only). angleDeg turns the box clockwise to follow the street.
-  // boundaries: the four boundary texts, printed around the box.
-  plot?: { widthFt: number; heightFt: number; label: string; boundaries?: Boundaries; angleDeg: number };
-  landmarks?: { items: Landmark[]; adding: boolean; onAdd: (p: LatLng) => void };
+  // Plot outline (street map only) with its name and the four boundary texts
+  plot?: {
+    ring: LatLng[];
+    label: string;
+    boundaries?: Boundaries;
+    // Handles to move the plot, drag its corners, add / delete corners
+    edit?: { active: boolean; onChange: (ring: LatLng[]) => void };
+    // Click corner by corner to draw the outline by hand; a click on the first point closes it
+    draw?: { active: boolean; draft: LatLng[]; onAddPoint: (p: LatLng) => void; onFinish: () => void };
+  };
+  landmarks?: { items: LandmarkShape[]; adding: boolean; onAdd: (p: LatLng) => void };
   topo?: TopoData;
   // Message shown on the map while data loads or when it is unavailable (screen only)
   statusChip?: string;
@@ -62,16 +91,29 @@ interface LeafletMapProps {
     drawing: boolean;
     onAddPoint: (p: LatLng) => void;
   };
+  apiRef?: { current: MapApi | null };
 }
 
-type Rect = { x: number; y: number; w: number; h: number };
-const rectsOverlap = (a: Rect, b: Rect) => Math.abs(a.x - b.x) < (a.w + b.w) / 2 + 1 && Math.abs(a.y - b.y) < (a.h + b.h) / 2 + 1;
+// Square / circular handles of the plot editor (screen only: "no-print" hides them when printing)
+const handleHtml = (kind: "vertex" | "mid" | "move") => {
+  if (kind === "vertex") {
+    return `<div style="width:16px;height:16px;margin:-8px 0 0 -8px;background:#fff;border:2px solid #1d4ed8;box-sizing:border-box;cursor:move"></div>`;
+  }
+  if (kind === "mid") {
+    return `<div style="width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:rgba(29,78,216,0.35);border:1.5px solid #1d4ed8;box-sizing:border-box;cursor:copy" title="Add a corner"></div>`;
+  }
+  return `<div style="width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:#1d4ed8;color:#fff;font:700 18px/30px Arial,sans-serif;text-align:center;cursor:move;box-shadow:0 0 0 2px #fff" title="Drag to move the plot">✥</div>`;
+};
+
+const geoJsonRing = (coords: number[][]): LatLng[] => coords.map(([lng, lat]) => ({ lat, lng }));
 
 export default function LeafletMap({
-  site, tile, base = "topo", defaultZoom, initialView, markerKind, plot, landmarks, topo, statusChip, onTopoFailed, onViewChange, route,
+  site, tile, base = "topo", defaultZoom, initialView, markerKind, plot, landmarks, topo, statusChip, onTopoFailed,
+  onViewChange, route, apiRef,
 }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
+  const pinRef = useRef<any>(null);
   const routeLayerRef = useRef<any>(null);
   const shapesLayerRef = useRef<any>(null);
   const overlayLayerRef = useRef<any>(null);
@@ -87,11 +129,13 @@ export default function LeafletMap({
   const routeRef = useRef(route);
   const landmarksRef = useRef(landmarks);
   const topoRef = useRef(topo);
+  const plotRef = useRef(plot);
   onViewChangeRef.current = onViewChange;
   onTopoFailedRef.current = onTopoFailed;
   routeRef.current = route;
   landmarksRef.current = landmarks;
   topoRef.current = topo;
+  plotRef.current = plot;
 
   // Map creation
   useEffect(() => {
@@ -108,11 +152,13 @@ export default function LeafletMap({
           maxZoom: 19,
           zoomControl: false,
           attributionControl: true,
+          // A double click on a corner of the plot deletes it; it must not zoom the map
+          doubleClickZoom: false,
         });
         L.control.zoom({ position: "bottomright" }).addTo(map);
         map.attributionControl.setPrefix(false);
 
-        // Stacking order: areas < buildings < roads < plot / landmark boxes < route line (default overlay pane)
+        // Stacking order: areas < buildings < roads < plot / landmark outlines < route line (default overlay pane)
         map.createPane("rmAreas").style.zIndex = "330";
         map.createPane("rmBuildings").style.zIndex = "340";
         map.createPane("rmRoads").style.zIndex = "350";
@@ -127,7 +173,7 @@ export default function LeafletMap({
 
         if (markerKind === "pin") {
           const pinHtml = `<svg width="26" height="36" viewBox="0 0 26 36" style="display:block;transform:translate(-13px,-34px)"><path d="M13 1C6.4 1 1 6.2 1 12.7 1 21.5 13 35 13 35s12-13.5 12-22.3C25 6.2 19.6 1 13 1z" fill="#e11d1d" stroke="#7f1d1d" stroke-width="1.5"/><circle cx="13" cy="12.5" r="4.5" fill="#fff"/></svg>`;
-          addHtmlMarker(L, map, site, pinHtml);
+          pinRef.current = addHtmlMarker(L, map, site, pinHtml);
         }
 
         shapesLayerRef.current = L.layerGroup().addTo(map);
@@ -145,6 +191,21 @@ export default function LeafletMap({
           if (lm?.adding) lm.onAdd(p);
           const tp = topoRef.current;
           if (tp?.picking) tp.onPick(p);
+
+          // Drawing the plot outline: a click on the first point closes the polygon
+          const draw = plotRef.current?.draw;
+          if (draw?.active) {
+            const first = draw.draft[0];
+            if (first && draw.draft.length >= 3) {
+              const a = map.latLngToContainerPoint([first.lat, first.lng]);
+              const b = map.latLngToContainerPoint(e.latlng);
+              if (Math.hypot(a.x - b.x, a.y - b.y) <= CLOSE_POLYGON_PX) {
+                draw.onFinish();
+                return;
+              }
+            }
+            draw.onAddPoint(p);
+          }
         });
 
         // With a saved route but no saved view, frame the whole route together with the site
@@ -165,6 +226,7 @@ export default function LeafletMap({
         mapRef.current.remove();
         mapRef.current = null;
       }
+      pinRef.current = null;
       routeLayerRef.current = null;
       shapesLayerRef.current = null;
       overlayLayerRef.current = null;
@@ -175,6 +237,49 @@ export default function LeafletMap({
     // The map is intentionally created once per mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The site pin follows the property when its position is adjusted
+  useEffect(() => {
+    pinRef.current?.setLatLng([site.lat, site.lng]);
+  }, [ready, site.lat, site.lng]);
+
+  // Functions for the page: the building outline under a point (from the rendered house footprints)
+  useEffect(() => {
+    if (!apiRef) return;
+    apiRef.current = {
+      footprintAt: (p: LatLng) => {
+        const gl = glLayerRef.current?.getMaplibreMap?.();
+        if (!gl) return null;
+        const layers = ["buildings-ml", "buildings-osm"].filter((id) => gl.getLayer(id));
+        if (layers.length === 0) return null;
+
+        const pt = gl.project([p.lng, p.lat]);
+        let features = gl.queryRenderedFeatures([pt.x, pt.y], { layers });
+        if (features.length === 0) {
+          const r = FOOTPRINT_SEARCH_PX;
+          features = gl.queryRenderedFeatures([[pt.x - r, pt.y - r], [pt.x + r, pt.y + r]], { layers });
+        }
+
+        const rings: LatLng[][] = [];
+        features.forEach((f: any) => {
+          const g = f.geometry;
+          if (g?.type === "Polygon") rings.push(geoJsonRing(g.coordinates[0]));
+          else if (g?.type === "MultiPolygon") g.coordinates.forEach((poly: number[][][]) => rings.push(geoJsonRing(poly[0])));
+        });
+        if (rings.length === 0) return null;
+
+        // The outline that contains the point, otherwise the nearest one
+        const inside = rings.find((r) => pointInRing(p, r));
+        const best =
+          inside ||
+          rings.reduce((a, b) => (haversineMeters(p, ringCenter(a)) <= haversineMeters(p, ringCenter(b)) ? a : b));
+        return simplifyRing(best, 0.3);
+      },
+    };
+    return () => {
+      apiRef.current = null;
+    };
+  }, [apiRef]);
 
   // Street map base layer: vector topo map, road lines or raster tiles
   useEffect(() => {
@@ -256,14 +361,13 @@ export default function LeafletMap({
       });
       const colony = features.areas.find((a) => a.id === colonyId);
       if (colony?.name) {
-        const c = ringCentroid(colony.ring);
         const html = mapLabelHtml(colony.name.toUpperCase(), {
           shift: "translate(-50%,-50%)",
           font: "800 11px/1.2 Arial,sans-serif",
           halo: TEXT_HALO_WHITE,
           extraStyle: "letter-spacing:1px",
         });
-        addHtmlMarker(L, layer, c, html);
+        addHtmlMarker(L, layer, ringCentroid(colony.ring), html);
       }
 
       // Built houses
@@ -300,8 +404,8 @@ export default function LeafletMap({
     }
   }, [ready, base, topo?.features, topo?.mainWayIds, topo?.colonyId, topo?.mainRoadLabel]);
 
-  // Plot box, landmark boxes and the boundary texts around the plot. All boxes are geographic polygons, so they scale
-  // with the map exactly like the real ground, and they are turned to follow the street.
+  // Plot and landmark outlines, their names, the boundary texts around the plot and the plot editor handles.
+  // Outlines are geographic polygons, so they scale with the map exactly like the real ground.
   useEffect(() => {
     const L = window.L;
     const map = mapRef.current;
@@ -310,101 +414,179 @@ export default function LeafletMap({
 
     layer.clearLayers();
 
-    const angle = plot?.angleDeg ?? 0;
+    const plotRing = plot && plot.ring.length >= 3 ? plot.ring : null;
+    // labels: names to try, longest first (the first one that fits into the outline at the current zoom is shown)
+    const items: { ring: LatLng[]; labels: string[]; outline: string; isPlot: boolean }[] = [];
+    if (plotRing && plot) items.push({ ring: plotRing, labels: [plot.label, PLOT_LABEL_SHORT], outline: "#e11d1d", isPlot: true });
+    (landmarks?.items || []).forEach((lm) => lm.ring.length >= 3 && items.push({ ring: lm.ring, labels: [lm.name], outline: "#000", isPlot: false }));
 
-    // "above": name sits over the top edge (landmarks); "center": name sits inside the box (proposed site)
-    const addBox = (center: LatLng, widthFt: number, heightFt: number, label: string, outline: string, labelAt: "above" | "center") => {
-      const poly = L.polygon(rectAround(center, widthFt, heightFt, angle), {
-        color: outline,
+    // Outlines with green hatching
+    const polygons: any[] = items.map((it) => {
+      const poly = L.polygon(it.ring.map(toLL), {
+        color: it.outline,
         weight: 1.6,
         fillOpacity: 1,
         interactive: false,
         pane: "rmShapes",
       }).addTo(layer);
-
       const el: SVGElement | undefined = poly.getElement();
       if (el) {
         ensureHatchPattern(el.ownerSVGElement);
         el.setAttribute("fill", `url(#${GREEN_HATCH_ID})`);
       }
+      return poly;
+    });
 
-      // Name: yellow text with a dark outline (stays readable on white and on satellite)
-      let anchor: LatLng = center;
-      if (labelAt === "above") {
-        const [e, n] = rotateOffset(0, (heightFt * FEET_TO_METERS) / 2, angle);
-        anchor = offsetLatLng(center, e, n);
-      }
-      const labelHtml = mapLabelHtml(label, {
-        shift: labelAt === "above" ? "translate(-50%,-110%)" : "translate(-50%,-50%)",
-        font: "800 10px/1.2 Arial,sans-serif",
-        color: LABEL_YELLOW,
-        halo: TEXT_HALO_BLACK,
+    // Polygon that is being drawn by hand
+    const draft = plot?.draw?.active ? plot.draw.draft : [];
+    if (draft.length > 0) {
+      if (draft.length >= 2) L.polyline(draft.map(toLL), { color: "#e11d1d", weight: 2, dashArray: "6 4", interactive: false, pane: "rmShapes" }).addTo(layer);
+      draft.forEach((p, i) =>
+        L.circleMarker([p.lat, p.lng], {
+          radius: i === 0 ? 7 : 4,
+          color: i === 0 ? "#16a34a" : "#e11d1d",
+          fillColor: "#fff",
+          fillOpacity: 1,
+          weight: 2,
+          interactive: false,
+          className: "no-print",
+        }).addTo(layer)
+      );
+    }
+
+    // Plot editor: drag the whole plot (centre handle), drag a corner, click a mid point to add a corner,
+    // double click a corner to delete it. Works with mouse and touch.
+    if (plot?.edit?.active && plotRing) {
+      const ring = plotRing;
+      const onChange = plot.edit.onChange;
+      const plotPoly = polygons[0];
+      const handleIcon = (kind: "vertex" | "mid" | "move") =>
+        L.divIcon({ className: "no-print", html: handleHtml(kind), iconSize: [0, 0] });
+      const toPlain = (m: any): LatLng => ({ lat: m.getLatLng().lat, lng: m.getLatLng().lng });
+
+      const vertexMarkers = ring.map((p, i) => {
+        const m = L.marker([p.lat, p.lng], { draggable: true, icon: handleIcon("vertex"), zIndexOffset: 1000 }).addTo(layer);
+        m.on("drag", () => plotPoly.setLatLngs(vertexMarkers.map((x: any) => x.getLatLng())));
+        m.on("dragend", () => onChange(vertexMarkers.map(toPlain)));
+        m.on("dblclick", (e: any) => {
+          L.DomEvent.stop(e);
+          if (ring.length > 3) onChange(ring.filter((_, j) => j !== i));
+        });
+        return m;
       });
-      addHtmlMarker(L, layer, anchor, labelHtml);
-    };
 
-    if (plot) addBox(site, plot.widthFt, plot.heightFt, plot.label, "#e11d1d", "center");
-    (landmarks?.items || []).forEach((lm) =>
-      addBox({ lat: lm.lat, lng: lm.lng }, Math.max(lm.width_ft, 1), Math.max(lm.height_ft, 1), lm.name, "#000", "above")
-    );
+      ring.forEach((p, i) => {
+        const q = ring[(i + 1) % ring.length];
+        const mid = { lat: (p.lat + q.lat) / 2, lng: (p.lng + q.lng) / 2 };
+        L.marker([mid.lat, mid.lng], { icon: handleIcon("mid"), zIndexOffset: 900 })
+          .addTo(layer)
+          .on("click", (e: any) => {
+            L.DomEvent.stop(e);
+            onChange([...ring.slice(0, i + 1), mid, ...ring.slice(i + 1)]);
+          });
+      });
 
-    if (!plot) return;
+      const c = ringCenter(ring);
+      let start: { lat: number; lng: number } | null = null;
+      const mover = L.marker([c.lat, c.lng], { draggable: true, icon: handleIcon("move"), zIndexOffset: 1100 }).addTo(layer);
+      mover.on("dragstart", () => {
+        start = mover.getLatLng();
+      });
+      mover.on("drag", () => {
+        if (!start) return;
+        const now = mover.getLatLng();
+        const dLat = now.lat - start.lat;
+        const dLng = now.lng - start.lng;
+        plotPoly.setLatLngs(ring.map((p) => [p.lat + dLat, p.lng + dLng]));
+        vertexMarkers.forEach((m: any, i: number) => m.setLatLng([ring[i].lat + dLat, ring[i].lng + dLng]));
+      });
+      mover.on("dragend", () => {
+        if (!start) return;
+        const now = mover.getLatLng();
+        const dLat = now.lat - start.lat;
+        const dLng = now.lng - start.lng;
+        onChange(ring.map((p) => ({ lat: p.lat + dLat, lng: p.lng + dLng })));
+      });
+    }
 
-    // Boundary texts: every text sits outside "its" edge of the (turned) plot box. Texts wrap inside a narrow column and
-    // are pushed outwards until no text touches another text or the plot name, so nothing overlaps at any zoom level.
+    // Names and boundary texts depend on the zoom (pixel sizes), so they are rebuilt after every zoom
+    const nameGroup = L.layerGroup().addTo(layer);
     const boundaryGroup = L.layerGroup().addTo(layer);
-    const buildBoundaryLabels = () => {
+
+    const toPx = (ring: LatLng[]): PxPoint[] =>
+      ring.map((p) => {
+        const pt = map.latLngToLayerPoint([p.lat, p.lng]);
+        return { x: pt.x, y: pt.y };
+      });
+
+    const rebuildLabels = () => {
+      nameGroup.clearLayers();
       boundaryGroup.clearLayers();
-      const boundaries = plot.boundaries;
-      const zoom = map.getZoom();
-      if (!boundaries || zoom < BOUNDARY_LABEL_MIN_ZOOM) return;
+      const obstacles: LabelRect[] = [];
+      const plotCentre = plotRing ? pxCentroid(toPx(plotRing)) : null;
 
-      const metersPerPixel = (156543.03392 * Math.cos((site.lat * Math.PI) / 180)) / Math.pow(2, zoom);
-      const feetToPx = FEET_TO_METERS / metersPerPixel;
-      const halfW = (plot.widthFt * feetToPx) / 2;
-      const halfH = (plot.heightFt * feetToPx) / 2;
-      const rot = (plot.angleDeg * Math.PI) / 180;
-      const cos = Math.cos(rot);
-      const sin = Math.sin(rot);
+      // Names stay inside their outline: the font follows the size of the outline on screen
+      items.forEach((it) => {
+        const px = toPx(it.ring);
+        let label = it.labels[0];
+        let fit = null as ReturnType<typeof fitLabelInRing>;
+        for (const candidate of it.labels) {
+          fit = fitLabelInRing(px, measureText(candidate, 100) / 100, { maxFont: NAME_MAX_FONT, minFont: NAME_MIN_FONT });
+          label = candidate;
+          if (fit) break;
+        }
+        if (!fit) return;
+        const anchor = map.layerPointToLatLng([fit.x, fit.y]);
+        const html = mapLabelHtml(label, {
+          shift: `translate(-50%,-50%) rotate(${fit.angleDeg.toFixed(1)}deg)`,
+          font: `800 ${fit.fontPx.toFixed(1)}px/1 Arial,sans-serif`,
+          color: LABEL_YELLOW,
+          halo: TEXT_HALO_BLACK,
+        });
+        addHtmlMarker(L, nameGroup, { lat: anchor.lat, lng: anchor.lng }, html);
+        if (it.isPlot) {
+          const w = (measureText(label, 100) / 100) * fit.fontPx;
+          obstacles.push({ x: fit.x, y: fit.y, w: Math.max(w, fit.fontPx) + 2, h: Math.max(w, fit.fontPx) * 0.6 + 2 });
+        }
+      });
 
-      // Outward normals of the four edges on screen (x right, y down) after the clockwise turn
-      const sides = ([
-        { key: "north" as const, nx: 0, ny: -1, half: halfH },
-        { key: "south" as const, nx: 0, ny: 1, half: halfH },
-        { key: "east" as const, nx: 1, ny: 0, half: halfW },
-        { key: "west" as const, nx: -1, ny: 0, half: halfW },
-      ]).map((s) => ({ ...s, ux: s.nx * cos - s.ny * sin, uy: s.nx * sin + s.ny * cos }));
+      // Boundary texts: one text outside each side of the plot, pushed outwards until nothing overlaps
+      const boundaries = plot?.boundaries;
+      if (!plotRing || !boundaries || !plotCentre || map.getZoom() < BOUNDARY_LABEL_MIN_ZOOM) return;
+      const centre = plotCentre;
+      const px = toPx(plotRing);
+      const dirs = {
+        north: { x: 0, y: -1 },
+        east: { x: 1, y: 0 },
+        south: { x: 0, y: 1 },
+        west: { x: -1, y: 0 },
+      } as const;
 
-      // The plot name in the middle of the box is an obstacle too
-      const placed: Rect[] = [{ x: 0, y: 0, w: measureText(plot.label, 10) + 6, h: 13 }];
-
-      sides.forEach((s) => {
-        const text = (boundaries[s.key] || "").trim();
-        if (!text) return;
+      const requests = (Object.keys(dirs) as (keyof typeof dirs)[]).flatMap((key) => {
+        const text = (boundaries[key] || "").trim();
+        const edge = edgeFacing(px, dirs[key]);
+        if (!text || !edge) return [];
         const lines = wrapByWidth(text, BOUNDARY_LABEL_MAX_WIDTH, BOUNDARY_LABEL_FONT, 4);
         const w = Math.max(...lines.map((l) => measureText(l, BOUNDARY_LABEL_FONT))) + 4;
         const h = lines.length * BOUNDARY_LABEL_LINE_HEIGHT + 3;
-        const reach = Math.abs(s.ux) * (w / 2) + Math.abs(s.uy) * (h / 2);
+        return [{ key, edge, w, h, lines }];
+      });
+      const placed = placeBoundaryLabels(requests, obstacles);
 
-        let dist = 3;
-        let rect: Rect = { x: 0, y: 0, w, h };
-        for (let i = 0; i < 80; i++) {
-          rect = { x: s.ux * (s.half + dist + reach), y: s.uy * (s.half + dist + reach), w, h };
-          if (!placed.some((p) => rectsOverlap(rect, p))) break;
-          dist += 3;
-        }
-        placed.push(rect);
-
+      const anchor = map.layerPointToLatLng([centre.x, centre.y]);
+      requests.forEach((r) => {
+        const rect = placed[r.key];
         const html =
-          `<div style="position:absolute;left:0;top:0;transform:translate(${(rect.x - w / 2).toFixed(1)}px,${(rect.y - h / 2).toFixed(1)}px);` +
-          `width:${Math.ceil(w)}px;text-align:center;white-space:nowrap;font:700 ${BOUNDARY_LABEL_FONT}px/${BOUNDARY_LABEL_LINE_HEIGHT}px Arial,sans-serif;` +
-          `color:#000;${TEXT_HALO_WHITE}">${lines.map(escapeHtml).join("<br>")}</div>`;
-        addHtmlMarker(L, boundaryGroup, site, html);
+          `<div style="position:absolute;left:0;top:0;transform:translate(${(rect.x - centre.x - rect.w / 2).toFixed(1)}px,${(rect.y - centre.y - rect.h / 2).toFixed(1)}px);` +
+          `width:${Math.ceil(rect.w)}px;text-align:center;white-space:nowrap;font:700 ${BOUNDARY_LABEL_FONT}px/${BOUNDARY_LABEL_LINE_HEIGHT}px Arial,sans-serif;` +
+          `color:#000;${TEXT_HALO_WHITE}">${r.lines.map(escapeHtml).join("<br>")}</div>`;
+        addHtmlMarker(L, boundaryGroup, { lat: anchor.lat, lng: anchor.lng }, html);
       });
     };
 
-    // When zoomed far out the plot box is only a few pixels wide, so a red dot marks the site
-    const dot = L.circleMarker([site.lat, site.lng], {
+    // When zoomed far out the plot is only a few pixels wide, so a red dot marks the site
+    const dotAt = plotRing ? ringCenter(plotRing) : site;
+    const dot = L.circleMarker([dotAt.lat, dotAt.lng], {
       radius: 4,
       color: "#7f1d1d",
       weight: 1,
@@ -413,19 +595,19 @@ export default function LeafletMap({
       interactive: false,
     });
     const syncZoomItems = () => {
-      if (map.getZoom() <= SITE_DOT_MAX_ZOOM) {
+      if (plotRing && map.getZoom() <= SITE_DOT_MAX_ZOOM) {
         if (!layer.hasLayer(dot)) layer.addLayer(dot);
       } else {
         layer.removeLayer(dot);
       }
-      buildBoundaryLabels();
+      rebuildLabels();
     };
     syncZoomItems();
     map.on("zoomend", syncZoomItems);
     return () => {
       map.off("zoomend", syncZoomItems);
     };
-  }, [ready, site.lat, site.lng, plot?.widthFt, plot?.heightFt, plot?.label, plot?.boundaries, plot?.angleDeg, landmarks?.items]);
+  }, [ready, site.lat, site.lng, plot?.ring, plot?.label, plot?.boundaries, plot?.edit?.active, plot?.draw?.active, plot?.draw?.draft, landmarks?.items]);
 
   // Route polyline, end arrow and distance label
   useEffect(() => {
@@ -469,8 +651,8 @@ export default function LeafletMap({
     }
   }, [ready, route?.points, route?.drawing]);
 
-  // Cursor feedback while drawing / adding landmarks / picking the main road
-  const picking = !!route?.drawing || !!landmarks?.adding || !!topo?.picking;
+  // Cursor feedback while drawing / adding landmarks / picking the main road / drawing the plot
+  const picking = !!route?.drawing || !!landmarks?.adding || !!topo?.picking || !!plot?.draw?.active;
   useEffect(() => {
     if (!ready || !mapRef.current) return;
     mapRef.current.getContainer().style.cursor = picking ? "crosshair" : "";

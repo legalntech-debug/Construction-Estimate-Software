@@ -2,28 +2,23 @@
 // Route Map / Location Plan - preview and print page.
 //
 // Folder layout:
-//   page.tsx                    page state, data loading and the A4 sheet
-//   routeMapGeo.ts              engine: OpenStreetMap loading, main road search, routing (no DOM access)
-//   types.ts / constants.ts     shared types and constants
-//   helpers.ts                  formatting, text measuring, sizing
-//   leafletSupport.ts           Leaflet loader and drawing helpers
-//   components/LeafletMap.tsx   satellite view and topography / route view
-//   components/PlotSketch.tsx   engineering style plot drawing with dimensions
+//   page.tsx                       page state and the A4 sheet
+//   hooks/useMapFeatures.ts        loads the OpenStreetMap data around the property
+//   engine/routeMapGeo.ts          OpenStreetMap loading, main road search, routing (no DOM access)
+//   engine/plotShape.ts            plot outline from the side lengths, rings, areas (no DOM access)
+//   engine/labelLayout.ts          names inside outlines and boundary texts without overlap (no DOM access)
+//   engine/topoStyle.ts            vector topo map style (OpenFreeMap + house footprints)
+//   engine/types.ts / constants.ts / helpers.ts / leafletSupport.ts
+//   components/LeafletMap.tsx      satellite view and topo / route view, plot editor
+//   components/PlotSketch.tsx      engineering style plot drawing with dimensions
 //   components/PreviewToolbar.tsx  screen-only controls
+//   components/PhotoPanel.tsx      site photos beside the satellite view
+//   components/NorthArrow.tsx      north symbol
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import {
-  EMPTY_FEATURES,
-  analyzeMainRoad,
-  findContainingArea,
-  loadAround,
-  nearestRoadWay,
-  plotRotationDeg,
-  routeLengthMeters,
-} from "./engine/routeMapGeo";
-import type { LoadOptions, LoadOutcome, LoadPart } from "./engine/routeMapGeo";
-import type { LatLng, MainRoadResult, MapFeatures } from "./engine/routeMapGeo";
-import type { BaseMode, Landmark, MainRoadSummary, MapViewState, RouteMapData } from "./engine/types";
+import { analyzeMainRoad, findContainingArea, nearestRoadWay, plotRotationDeg, pointInRing, routeLengthMeters } from "./engine/routeMapGeo";
+import type { LatLng, MainRoadResult } from "./engine/routeMapGeo";
+import type { Landmark, MainRoadSummary, MapViewState, RouteMapData } from "./engine/types";
 import {
   CYAN,
   DEFAULT_LANDMARK_HEIGHT_FT,
@@ -32,52 +27,41 @@ import {
   EMPTY_DIMS,
   EMPTY_LANDMARKS,
   EMPTY_POINTS,
-  EXTRA_LOAD_BUILDING_RADIUS_M,
-  EXTRA_LOAD_ROAD_RADIUS_M,
   INSET_STORAGE_PREFIX,
+  MAX_PHOTOS,
+  PHOTO_STORAGE_PREFIX,
   PICK_ROAD_TOLERANCE_M,
   RETURN_TO_FORM_FLAG,
   ROUTE_MAP_TYPE,
   SIGNATORY_NAME,
   STORAGE_KEY,
 } from "./engine/constants";
-import { compressImageFile, findRoadSide, formatCoordinate, formatSignatureDate, getPlotSizeFt, mainRoadText, newId } from "./engine/helpers";
+import { compressImageFile, findRoadSide, formatCoordinate, formatSignatureDate, mainRoadText, newId } from "./engine/helpers";
+import { plotSidesFt, quadRing, rectAround, ringAreaSqFt, ringCenter, simplifyRing } from "./engine/plotShape";
+import { useMapFeatures } from "./hooks/useMapFeatures";
 import LeafletMap from "./components/LeafletMap";
-import type { TopoData } from "./components/LeafletMap";
+import type { LandmarkShape, MapApi, TopoData } from "./components/LeafletMap";
 import NorthArrow from "./components/NorthArrow";
+import PhotoPanel from "./components/PhotoPanel";
 import PlotSketch from "./components/PlotSketch";
 import PreviewToolbar from "./components/PreviewToolbar";
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// Only one click mode is active at a time
+type EditMode = "none" | "route" | "landmark" | "pickRoad" | "plotEdit" | "plotDraw";
 
-// Which data a base map needs: the topo map only needs the roads (for the main road search); the road lines mode
-// draws roads, buildings and colonies itself.
-const partsFor = (mode: BaseMode): LoadPart[] => (mode === "lines" ? ["roads", "buildings", "areas"] : ["roads"]);
-
-// Message for the toolbar and the map after a load finished
-const finishMessage = (outcome: LoadOutcome) => {
-  if (!outcome.ok) return `MAP DATA UNAVAILABLE (${outcome.error || "NO RESPONSE"}) - RELOAD OR USE STREET MAP`;
-  if (outcome.features.roads.length === 0) return "NO ROAD DATA HERE - USE STREET MAP OR DRAW THE ROUTE";
-  return outcome.warning || "";
-};
+// Plot outlines whose area differs from the entered plot area by more than this share get a warning
+const AREA_WARNING_SHARE = 0.1;
 
 export default function RouteMapPreviewPage() {
   const router = useRouter();
 
   const [data, setData] = useState<RouteMapData | null>(null);
-  const [drawMode, setDrawMode] = useState(false);
-  const [landmarkMode, setLandmarkMode] = useState(false);
-  const [pickMode, setPickMode] = useState(false);
+  const [editMode, setEditMode] = useState<EditMode>("none");
+  const [plotDraft, setPlotDraft] = useState<LatLng[]>([]);
+  const [plotMessage, setPlotMessage] = useState("");
   const [insetImage, setInsetImage] = useState<string | null>(null);
-
-  // Roads, buildings and colonies around the property (OpenStreetMap), loaded once per property
-  const [features, setFeatures] = useState<MapFeatures>(EMPTY_FEATURES);
-  const [mapStatus, setMapStatus] = useState<{ busy: boolean; message: string }>({ busy: false, message: "" });
-  const loadedSiteRef = useRef("");
-  // True once buildings and colonies were downloaded as well (needed by the road lines mode only)
-  const fullDataLoadedRef = useRef(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const mapApiRef = useRef<MapApi | null>(null);
 
   // Load the record handed over by the input form
   useEffect(() => {
@@ -98,13 +82,15 @@ export default function RouteMapPreviewPage() {
 
       const savedInset = sessionStorage.getItem(INSET_STORAGE_PREFIX + (parsed.ref_no || ""));
       if (savedInset) setInsetImage(savedInset);
+      const savedPhotos = sessionStorage.getItem(PHOTO_STORAGE_PREFIX + (parsed.ref_no || ""));
+      if (savedPhotos) setPhotos(JSON.parse(savedPhotos));
     } catch (e) {
       console.error("Failed to load route map data:", e);
       router.replace("/route-map");
     }
   }, [router]);
 
-  // Persist every change made on this page (route, landmarks, side dimensions, map views) next to the form data
+  // Persist every change made on this page (route, landmarks, plot outline, map views) next to the form data
   useEffect(() => {
     if (!data) return;
     try {
@@ -128,92 +114,45 @@ export default function RouteMapPreviewPage() {
     setData((prev) => (prev ? { ...prev, ...patch } : prev));
   }, []);
 
+  // Coordinate entered on the form
   const siteLat = data ? parseFloat(data.latitude) : NaN;
   const siteLng = data ? parseFloat(data.longitude) : NaN;
   const siteValid = !isNaN(siteLat) && !isNaN(siteLng);
-  const baseMode: BaseMode = data?.base_map || "topo";
+  const enteredSite = useMemo<LatLng | null>(() => (siteValid ? { lat: siteLat, lng: siteLng } : null), [siteValid, siteLat, siteLng]);
+  const baseMode = data?.base_map || "topo";
 
-  // Runs a data load. Roads are drawn as soon as they arrive; the toolbar message follows the progress.
-  const runLoad = useCallback(async (center: LatLng, existing: MapFeatures, options: LoadOptions) => {
-    setMapStatus({ busy: true, message: "LOADING…" });
-    const outcome = await loadAround(
-      center,
-      existing,
-      (merged, message) => {
-        setFeatures(merged);
-        setMapStatus({ busy: true, message });
-      },
-      options
-    );
-    setFeatures(outcome.features);
-    setMapStatus({ busy: false, message: finishMessage(outcome) });
-    return outcome;
-  }, []);
+  // OpenStreetMap data around the entered coordinate (roads for the main road search, buildings for the lines mode)
+  const { features, status: mapStatus, setMessage, reload: handleReloadData, loadHere } = useMapFeatures(enteredSite, baseMode);
 
-  // Initial load around the property
-  const loadSite = useCallback(
-    async (s: LatLng, skipCache: boolean) => {
-      const parts = partsFor(baseMode);
-      const outcome = await runLoad(s, EMPTY_FEATURES, { findMainRoad: true, skipCache, parts });
-      fullDataLoadedRef.current = parts.includes("buildings") && outcome.ok;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runLoad]
-  );
+  // Plot outline: built from the side lengths and the area (not forced to 90 degree corners) and turned to follow the
+  // street, unless it was moved, drawn or fitted to a building by hand
+  const sideDims = useMemo(() => ({ ...EMPTY_DIMS, ...(data?.side_dims || {}) }), [data?.side_dims]);
+  const { sides, areaSqFt } = useMemo(() => plotSidesFt(sideDims, data?.plot_area ?? ""), [sideDims, data?.plot_area]);
+  const manualRing = data?.plot_polygon && data.plot_polygon.length >= 3 ? data.plot_polygon : null;
 
-  useEffect(() => {
-    if (!siteValid) return;
-    const key = `${siteLat},${siteLng}`;
-    if (loadedSiteRef.current === key) return;
-    loadedSiteRef.current = key;
-    loadSite({ lat: siteLat, lng: siteLng }, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [siteValid, siteLat, siteLng, loadSite]);
-
-  // Switching to the road lines mode needs buildings and colonies, which the topo map does not download
-  useEffect(() => {
-    if (!siteValid || baseMode !== "lines" || fullDataLoadedRef.current || !loadedSiteRef.current) return;
-    fullDataLoadedRef.current = true;
-    runLoad({ lat: siteLat, lng: siteLng }, features, { parts: ["buildings", "areas"] });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseMode, siteValid]);
-
-  const handleReloadData = () => {
-    if (!siteValid) return;
-    setFeatures(EMPTY_FEATURES);
-    loadSite({ lat: siteLat, lng: siteLng }, true);
-  };
-
-  // Extra load around the current map centre (when the user pans away from the property)
-  const handleLoadHere = () => {
-    const view = data?.route_view;
-    if (!view) return;
-    runLoad({ lat: view.lat, lng: view.lng }, features, {
-      skipCache: true,
-      parts: partsFor(baseMode),
-      roadRadiusM: EXTRA_LOAD_ROAD_RADIUS_M,
-      buildingRadiusM: EXTRA_LOAD_BUILDING_RADIUS_M,
-    });
-  };
-
-  // Main road search over the loaded road network
-  const analysis = useMemo<MainRoadResult | null>(() => {
-    if (!siteValid || features.roads.length === 0) return null;
-    return analyzeMainRoad({ lat: siteLat, lng: siteLng }, features.roads, { forceWayId: data?.main_road_override });
-  }, [siteValid, siteLat, siteLng, features.roads, data?.main_road_override]);
-
-  // Colony (residential area) that contains the property
-  const colony = useMemo(
-    () => (siteValid ? findContainingArea({ lat: siteLat, lng: siteLng }, features.areas) : null),
-    [siteValid, siteLat, siteLng, features.areas]
-  );
+  // Position of the property: the entered coordinate, or the centre of the plot when it was adjusted by hand
+  const site = useMemo<LatLng | null>(() => (manualRing ? ringCenter(manualRing) : enteredSite), [manualRing, enteredSite]);
 
   // Angle of the plot: detected from the nearest road and the road side of the plot, or typed in by hand
   const autoPlotAngle = useMemo(
-    () => (siteValid ? plotRotationDeg({ lat: siteLat, lng: siteLng }, features.roads, data ? findRoadSide(data.boundaries) : null) : 0),
-    [siteValid, siteLat, siteLng, features.roads, data?.boundaries] // eslint-disable-line react-hooks/exhaustive-deps
+    () => (site ? plotRotationDeg(site, features.roads, data ? findRoadSide(data.boundaries) : null) : 0),
+    [site, features.roads, data?.boundaries] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const plotAngle = data?.plot_angle_override ?? autoPlotAngle;
+
+  const plotRing = useMemo<LatLng[]>(
+    () => manualRing ?? (site ? quadRing(site, sides, areaSqFt, plotAngle) : []),
+    [manualRing, site, sides, areaSqFt, plotAngle]
+  );
+
+  // Main road search over the loaded road network
+  const analysis = useMemo<MainRoadResult | null>(() => {
+    if (!site || features.roads.length === 0) return null;
+    return analyzeMainRoad(site, features.roads, { forceWayId: data?.main_road_override });
+  }, [site, features.roads, data?.main_road_override]);
+
+  // Colony (residential area) that contains the property
+  const colony = useMemo(() => (site ? findContainingArea(site, features.areas) : null), [site, features.areas]);
 
   const mainWayIds = useMemo(() => new Set<number>(analysis?.wayIds ?? []), [analysis]);
 
@@ -223,6 +162,20 @@ export default function RouteMapPreviewPage() {
         ? { position: analysis.junction, text: (analysis.name ? `${analysis.name} (MAIN ROAD)` : "MAIN ROAD").toUpperCase() }
         : null,
     [analysis]
+  );
+
+  // Landmarks as outlines: the real building shape when known, otherwise a box turned like the plot
+  const landmarkShapes = useMemo<LandmarkShape[]>(
+    () =>
+      (data?.landmarks || EMPTY_LANDMARKS).map((lm) => ({
+        id: lm.id,
+        name: lm.name,
+        ring:
+          lm.ring && lm.ring.length >= 3
+            ? lm.ring
+            : rectAround({ lat: lm.lat, lng: lm.lng }, Math.max(lm.width_ft, 1), Math.max(lm.height_ft, 1), plotAngle),
+      })),
+    [data?.landmarks, plotAngle]
   );
 
   // Keep the saved summary and the automatic route in step with the analysis. A route drawn by hand is never replaced.
@@ -256,19 +209,31 @@ export default function RouteMapPreviewPage() {
     setData((prev) => (prev ? { ...prev, route_points: [...(prev.route_points || []), p], route_source: "manual" } : prev));
   }, []);
 
-  const handleAddLandmark = useCallback((p: LatLng) => {
-    const name = window.prompt("Landmark name (e.g. HOUSE OF RAM SWAROOP):");
-    if (!name || !name.trim()) return;
-    const landmark: Landmark = {
-      id: newId(),
-      name: name.trim().toUpperCase(),
-      lat: p.lat,
-      lng: p.lng,
-      width_ft: DEFAULT_LANDMARK_WIDTH_FT,
-      height_ft: DEFAULT_LANDMARK_HEIGHT_FT,
-    };
-    setData((prev) => (prev ? { ...prev, landmarks: [...(prev.landmarks || []), landmark] } : prev));
-  }, []);
+  // A landmark takes the real outline of the building that was clicked (house footprint of the topo map, or an
+  // OpenStreetMap building); without a building it becomes a box of the default size
+  const handleAddLandmark = useCallback(
+    (p: LatLng) => {
+      const name = window.prompt("Landmark name (e.g. HOUSE OF RAM SWAROOP):");
+      if (!name || !name.trim()) return;
+      let ring: LatLng[] | null = mapApiRef.current?.footprintAt(p) ?? null;
+      if (!ring) {
+        const building = features.buildings.find((b) => pointInRing(p, b.ring));
+        if (building) ring = simplifyRing(building.ring, 0.3);
+      }
+      const centre = ring ? ringCenter(ring) : p;
+      const landmark: Landmark = {
+        id: newId(),
+        name: name.trim().toUpperCase(),
+        lat: centre.lat,
+        lng: centre.lng,
+        width_ft: DEFAULT_LANDMARK_WIDTH_FT,
+        height_ft: DEFAULT_LANDMARK_HEIGHT_FT,
+        ...(ring ? { ring } : {}),
+      };
+      setData((prev) => (prev ? { ...prev, landmarks: [...(prev.landmarks || []), landmark] } : prev));
+    },
+    [features.buildings]
+  );
 
   // The user clicked a road to mark it as the main road
   const handlePickMainRoad = useCallback(
@@ -279,7 +244,7 @@ export default function RouteMapPreviewPage() {
         return;
       }
       setData((prev) => (prev ? { ...prev, main_road_override: hit.way.id, route_source: "auto" } : prev));
-      setPickMode(false);
+      setEditMode("none");
     },
     [features.roads]
   );
@@ -297,9 +262,9 @@ export default function RouteMapPreviewPage() {
     (reason: string) => {
       console.warn("Topo map unavailable:", reason);
       updateData({ base_map: "lines" });
-      setMapStatus({ busy: false, message: "TOPO MAP UNAVAILABLE - USING ROAD LINES" });
+      setMessage("TOPO MAP UNAVAILABLE - USING ROAD LINES");
     },
-    [updateData]
+    [updateData, setMessage]
   );
 
   // Back to the automatic main road and route
@@ -312,22 +277,55 @@ export default function RouteMapPreviewPage() {
     });
   };
 
-  // Only one click mode is active at a time
-  const toggleDrawMode = () => {
-    setDrawMode((v) => !v);
-    setLandmarkMode(false);
-    setPickMode(false);
+  // ---- Plot outline ----
+
+  const commitPlotRing = useCallback(
+    (ring: LatLng[]) => {
+      updateData({ plot_polygon: ring });
+      setPlotMessage("");
+    },
+    [updateData]
+  );
+
+  const addPlotDraftPoint = useCallback((p: LatLng) => setPlotDraft((prev) => [...prev, p]), []);
+
+  const finishPlotDraw = useCallback(() => {
+    if (plotDraft.length < 3) return;
+    updateData({ plot_polygon: plotDraft });
+    setPlotDraft([]);
+    setEditMode("plotEdit");
+    setPlotMessage("PLOT DRAWN - DRAG THE CORNERS TO FINE TUNE");
+  }, [plotDraft, updateData]);
+
+  // Takes the outline of the building under the property as the plot outline
+  const handleFitBuilding = () => {
+    if (baseMode !== "topo") {
+      setPlotMessage("SWITCH TO THE TOPO MAP FIRST - IT HAS THE HOUSE FOOTPRINTS");
+      return;
+    }
+    const ring = site ? mapApiRef.current?.footprintAt(site) : null;
+    if (!ring) {
+      setPlotMessage("NO BUILDING UNDER THE SITE - MOVE THE PLOT, OR DRAW IT BY HAND");
+      return;
+    }
+    updateData({ plot_polygon: ring });
+    setPlotMessage(`PLOT SET TO THE BUILDING SHAPE (${Math.round(ringAreaSqFt(ring))} SQ. FT)`);
   };
-  const toggleLandmarkMode = () => {
-    setLandmarkMode((v) => !v);
-    setDrawMode(false);
-    setPickMode(false);
+
+  const handleResetPlotShape = () => {
+    updateData({ plot_polygon: undefined });
+    setPlotMessage("");
   };
-  const togglePickMode = () => {
-    setPickMode((v) => !v);
-    setDrawMode(false);
-    setLandmarkMode(false);
+
+  // ---- Click modes (one at a time) ----
+
+  const setMode = (next: EditMode) => {
+    setEditMode(next);
+    if (next !== "plotDraw") setPlotDraft([]);
   };
+  const toggleMode = (mode: EditMode) => setMode(editMode === mode ? "none" : mode);
+
+  // ---- Images ----
 
   const handleInsetUpload = async (file?: File) => {
     if (!file || !data) return;
@@ -351,6 +349,24 @@ export default function RouteMapPreviewPage() {
     } catch {}
   };
 
+  const savePhotos = (next: string[]) => {
+    setPhotos(next);
+    try {
+      sessionStorage.setItem(PHOTO_STORAGE_PREFIX + (data?.ref_no || ""), JSON.stringify(next));
+    } catch {
+      // Storage quota exceeded: the photos still work for this session
+    }
+  };
+
+  const handlePhotoUpload = async (file?: File) => {
+    if (!file || photos.length >= MAX_PHOTOS) return;
+    try {
+      savePhotos([...photos, await compressImageFile(file, 1000)]);
+    } catch (e) {
+      alert("Could not read the selected photo. Please try another file.");
+    }
+  };
+
   const handleBackToInput = () => {
     try {
       sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1");
@@ -362,7 +378,7 @@ export default function RouteMapPreviewPage() {
     return <div className="p-8 text-center font-bold uppercase">LOADING ROUTE MAP...</div>;
   }
 
-  if (!siteValid) {
+  if (!site || !enteredSite) {
     return (
       <div className="p-8 text-center font-bold uppercase">
         INVALID GEO COORDINATES.{" "}
@@ -371,20 +387,26 @@ export default function RouteMapPreviewPage() {
     );
   }
 
-  const site: LatLng = { lat: siteLat, lng: siteLng };
   const routePoints = data.route_points || EMPTY_POINTS;
   const landmarkItems = data.landmarks || EMPTY_LANDMARKS;
   const routeMeters = Math.round(routeLengthMeters(routePoints));
-  const sideDims = { ...EMPTY_DIMS, ...(data.side_dims || {}) };
-  const plotSize = getPlotSizeFt(sideDims, data.plot_area);
   const summary = data.main_road_summary;
+
+  // Coordinate printed on the sheet: the entered one, or the centre of the plot when the plot was adjusted by hand
+  const printedLat = manualRing ? String(site.lat) : data.latitude;
+  const printedLng = manualRing ? String(site.lng) : data.longitude;
+
+  const shapeArea = Math.round(ringAreaSqFt(plotRing));
+  const enteredArea = Math.round(areaSqFt);
+  const areaDiffers = enteredArea > 0 && Math.abs(shapeArea - enteredArea) / enteredArea > AREA_WARNING_SHARE;
+  const plotInfo = `SHAPE AREA ${shapeArea} SQ. FT (ENTERED ${enteredArea})${areaDiffers ? " - DIFFERENT, CHECK THE OUTLINE" : ""}`;
 
   const topo: TopoData = {
     features,
     mainWayIds,
     colonyId: colony?.id ?? null,
     mainRoadLabel,
-    picking: pickMode,
+    picking: editMode === "pickRoad",
     onPick: handlePickMainRoad,
   };
 
@@ -413,26 +435,41 @@ export default function RouteMapPreviewPage() {
         mapMessage={mapStatus.message}
         canLoadHere={!!data.route_view}
         onReloadData={handleReloadData}
-        onLoadHere={handleLoadHere}
+        onLoadHere={() => loadHere(data.route_view)}
         plotAngle={plotAngle}
         angleIsAuto={data.plot_angle_override === undefined}
         onAngleChange={(value) => updateData({ plot_angle_override: value })}
         mainRoadText={summary ? mainRoadText(summary) : null}
-        pickMode={pickMode}
-        onTogglePick={togglePickMode}
+        pickMode={editMode === "pickRoad"}
+        onTogglePick={() => toggleMode("pickRoad")}
         onAutoRoute={handleAutoRoute}
-        drawMode={drawMode}
-        onToggleDraw={toggleDrawMode}
+        drawMode={editMode === "route"}
+        onToggleDraw={() => toggleMode("route")}
         routePointCount={routePoints.length}
         routeMeters={routeMeters}
         routeSource={data.route_source}
         onUndoPoint={handleUndoPoint}
         onClearRoute={handleClearRoute}
-        landmarkMode={landmarkMode}
-        onToggleLandmark={toggleLandmarkMode}
+        landmarkMode={editMode === "landmark"}
+        onToggleLandmark={() => toggleMode("landmark")}
         landmarks={landmarkItems}
         onUpdateLandmark={updateLandmark}
         onRemoveLandmark={removeLandmark}
+        plotMode={manualRing ? "manual" : "auto"}
+        plotInfo={plotInfo}
+        plotMessage={plotMessage}
+        plotEditMode={editMode === "plotEdit"}
+        onTogglePlotEdit={() => toggleMode("plotEdit")}
+        plotDrawMode={editMode === "plotDraw"}
+        plotDraftCount={plotDraft.length}
+        onTogglePlotDraw={() => toggleMode("plotDraw")}
+        onFinishPlotDraw={finishPlotDraw}
+        onFitBuilding={handleFitBuilding}
+        onResetPlotShape={handleResetPlotShape}
+        photoCount={photos.length}
+        maxPhotos={MAX_PHOTOS}
+        onPhotoUpload={handlePhotoUpload}
+        onPhotoRemove={() => savePhotos(photos.slice(0, -1))}
         hasInset={!!insetImage}
         onInsetUpload={handleInsetUpload}
         onInsetRemove={handleInsetRemove}
@@ -459,16 +496,21 @@ export default function RouteMapPreviewPage() {
           <div style={{ display: "flex", width: "100%", height: "100%", border: "0.3mm solid #000", boxSizing: "border-box" }}>
             {/* LEFT COLUMN */}
             <div style={{ width: "71%", display: "flex", flexDirection: "column", borderRight: "0.3mm solid #000" }}>
-              {/* Satellite view */}
-              <div style={{ height: "38%", position: "relative", borderBottom: "0.3mm solid #000" }}>
-                <LeafletMap
-                  site={site}
-                  tile="satellite"
-                  defaultZoom={17}
-                  initialView={data.satellite_view}
-                  markerKind="pin"
-                  onViewChange={handleSatelliteViewChange}
-                />
+              {/* Satellite view with the site photos beside it */}
+              <div style={{ height: "38%", display: "flex", borderBottom: "0.3mm solid #000" }}>
+                <div style={{ position: "relative", flex: "0 0 66%" }}>
+                  <LeafletMap
+                    site={site}
+                    tile="satellite"
+                    defaultZoom={17}
+                    initialView={data.satellite_view}
+                    markerKind="pin"
+                    onViewChange={handleSatelliteViewChange}
+                  />
+                </div>
+                <div style={{ flex: 1, minWidth: 0, borderLeft: "0.3mm solid #000", overflow: "hidden" }}>
+                  <PhotoPanel photos={photos} />
+                </div>
               </div>
 
               {/* Route map */}
@@ -480,19 +522,26 @@ export default function RouteMapPreviewPage() {
                   defaultZoom={17}
                   initialView={data.route_view}
                   markerKind="none"
-                  plot={{ widthFt: plotSize.widthFt, heightFt: plotSize.heightFt, label: "PROPOSED SITE", boundaries: data.boundaries, angleDeg: plotAngle }}
-                  landmarks={{ items: landmarkItems, adding: landmarkMode, onAdd: handleAddLandmark }}
+                  plot={{
+                    ring: plotRing,
+                    label: "PROPOSED SITE",
+                    boundaries: data.boundaries,
+                    edit: { active: editMode === "plotEdit", onChange: commitPlotRing },
+                    draw: { active: editMode === "plotDraw", draft: plotDraft, onAddPoint: addPlotDraftPoint, onFinish: finishPlotDraw },
+                  }}
+                  landmarks={{ items: landmarkShapes, adding: editMode === "landmark", onAdd: handleAddLandmark }}
+                  apiRef={mapApiRef}
                   topo={topo}
                   statusChip={mapStatus.message}
                   onTopoFailed={handleTopoFailed}
                   onViewChange={handleRouteViewChange}
-                  route={{ points: routePoints, drawing: drawMode, onAddPoint: handleAddRoutePoint }}
+                  route={{ points: routePoints, drawing: editMode === "route", onAddPoint: handleAddRoutePoint }}
                 />
 
                 {/* Coordinates and main road */}
                 <div style={{ position: "absolute", top: "2mm", left: "3mm", zIndex: 1200, pointerEvents: "none", maxWidth: "44%" }}>
                   <div style={{ background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: "13pt", color: CYAN, display: "inline-block" }}>
-                    LAT &amp; LONG : {formatCoordinate(data.latitude)}, {formatCoordinate(data.longitude)}
+                    LAT &amp; LONG : {formatCoordinate(printedLat)}, {formatCoordinate(printedLng)}
                   </div>
                   {summary && (
                     <div style={{ marginTop: "1mm", background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: "7.5pt", display: "inline-block", lineHeight: 1.25 }}>

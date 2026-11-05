@@ -1,7 +1,7 @@
 // Leaflet helpers shared by the map components: CDN loader, real-size boxes, hatch pattern, road weights.
-import { METERS_PER_DEGREE_LAT, haversineMeters, routeLengthMeters, toRad } from "./routeMapGeo";
+import { haversineMeters, routeLengthMeters } from "./routeMapGeo";
 import type { LatLng } from "./routeMapGeo";
-import { FEET_TO_METERS, GREEN_HATCH_ID, HATCH_GREEN, LEAFLET_VERSION } from "./constants";
+import { GREEN_HATCH_ID, HATCH_GREEN, LEAFLET_VERSION } from "./constants";
 import { escapeHtml } from "./helpers";
 
 let leafletPromise: Promise<any> | null = null;
@@ -55,30 +55,6 @@ export const routeMidPoint = (pts: LatLng[]): LatLng => {
   return pts[pts.length - 1];
 };
 
-// Moves a point by metres towards east / north (flat approximation, fine for a few hundred metres)
-export const offsetLatLng = (c: LatLng, eastM: number, northM: number): LatLng => ({
-  lat: c.lat + northM / METERS_PER_DEGREE_LAT,
-  lng: c.lng + eastM / (METERS_PER_DEGREE_LAT * Math.cos(toRad(c.lat))),
-});
-
-// Rotates an (east, north) offset clockwise by angleDeg
-export const rotateOffset = (eastM: number, northM: number, angleDeg: number): [number, number] => {
-  const a = toRad(angleDeg);
-  return [eastM * Math.cos(a) + northM * Math.sin(a), -eastM * Math.sin(a) + northM * Math.cos(a)];
-};
-
-// Corner coordinates (NW, NE, SE, SW before rotation) of a rectangle of real-world size centred on a point and turned
-// clockwise by angleDeg. Because the corners are geographic coordinates, the box keeps its true size and shape on the
-// map at every zoom level.
-export const rectAround = (c: LatLng, widthFt: number, heightFt: number, angleDeg = 0): [number, number][] => {
-  const hw = (widthFt * FEET_TO_METERS) / 2;
-  const hh = (heightFt * FEET_TO_METERS) / 2;
-  return ([[-hw, hh], [hw, hh], [hw, -hh], [-hw, -hh]] as [number, number][]).map(([e, n]) => {
-    const [re, rn] = rotateOffset(e, n, angleDeg);
-    const p = offsetLatLng(c, re, rn);
-    return [p.lat, p.lng] as [number, number];
-  });
-};
 
 // Adds the green hatch pattern to the SVG of a Leaflet renderer (once per SVG)
 export const ensureHatchPattern = (svg: SVGSVGElement | null | undefined) => {

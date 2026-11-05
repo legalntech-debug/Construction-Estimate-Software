@@ -29,6 +29,39 @@ const CERTIFICATE_FORM_ROUTE = "/construction-certificate";
 // Same status value the estimate flow passes to its save RPC
 const CERT_SAVE_STATUS = "pending";
 
+// sessionStorage flag shared with the input forms: "the user is going back to the form, keep the data"
+const RETURN_TO_FORM_FLAG = "estimateReturnToForm";
+
+// Owner account (always treated as admin, same as the wallet gate)
+const OWNER_EMAIL = "legalntech@gmail.com";
+
+// ---------------------------------------------------------------------------
+// CHANGE DETECTION (same idea as makeSnapshot in the estimate preview)
+// A stable fingerprint of everything the certificate shows. If the fingerprint of the screen equals the
+// fingerprint of the saved record, nothing is written to the database (print / PDF / share only).
+// ---------------------------------------------------------------------------
+const makeCertSnapshot = (e: any, extra?: { bank?: string; inspection?: string; completion?: string }): string => {
+  const norm = (v: any) => String(v ?? "").trim().toUpperCase();
+  const fd = e?.floor_details && typeof e.floor_details === "object" ? e.floor_details : {};
+  const floors: Record<string, number> = {};
+  Object.keys(fd).sort().forEach((k) => {
+    const a = Number(fd[k]?.area || 0);
+    if (a > 0) floors[k] = a;
+  });
+  return JSON.stringify({
+    n: norm(e?.customer_name),
+    a: norm(e?.property_address),
+    p: Number(String(e?.plot_area ?? "").replace(/,/g, "")) || 0,
+    b: Number(e?.total_builtup_area || 0),
+    f: floors,
+    c: norm(e?.client_name),
+    rp: norm(e?.representative),
+    bk: norm(extra?.bank),
+    i: norm(extra?.inspection),
+    d: norm(extra?.completion),
+  });
+};
+
 type PaymentData = {
   p_payment_status: string;
   p_order_id: string | null;
@@ -182,7 +215,28 @@ export default function CertificatePreviewPage() {
   const orderIdRef = useRef<string | null>(null);
   const userPaymentRef = useRef<number | null>(null);
   const currentCaseType = estimate?.estimate_type || estimate?.case_type || "CONSTRUCTION CERTIFICATE";
-  const userCategory = user?.category || "ENGINEER";
+
+  // ADMIN CHECK - decided from the database profile (role / user_type) and the owner e-mail, never from a
+  // client-side label. `adminChecked` stays false until the profile has been read, so nothing that depends
+  // on "admin or not" (load decision, save, print guard) runs on a guess.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
+  // Owner (user_id) of the record on screen; differs from the logged-in user when an admin reopens someone's file
+  const [recordOwnerId, setRecordOwnerId] = useState<string | null>(null);
+  const userCategory = isAdmin ? "ADMIN" : String(user?.category || "ENGINEER").toUpperCase();
+  const isAdminReopen = isAdmin && !!recordOwnerId && recordOwnerId !== user?.id;
+
+  // Print guard (same as the estimate preview): browser print is blocked unless this is true
+  const [printAuthorized, setPrintAuthorized] = useState(false);
+  const printAuthorizedRef = useRef(false);
+  const allowPrintRef = useRef(false);
+  // Fingerprint of the record as saved in the database (baseline for "unchanged -> do not touch the database")
+  const initialSnapRef = useRef<string | null>(null);
+  // Saved record row (kept so an admin update can preserve payment fields / status / type exactly)
+  const savedRowRef = useRef<any>(null);
+  const goingToFormRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const [validationReason, setValidationReason] = useState("");
   const [useCustomLetterhead, setUseCustomLetterhead] = useState(false);
   const [customHeaderTitle, setCustomHeaderTitle] = useState("");
   const [customSubtitle, setCustomSubtitle] = useState("");
@@ -196,6 +250,42 @@ export default function CertificatePreviewPage() {
     script.async = true;
     document.body.appendChild(script);
   }, []);
+
+  // Admin detection from the database (profiles.role / profiles.user_type) + owner e-mail
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) {
+      setIsAdmin(false);
+      setAdminChecked(true);
+      return;
+    }
+    setAdminChecked(false);
+    (async () => {
+      let admin = false;
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role, user_type")
+          .eq("id", user.id)
+          .maybeSingle();
+        const role = String(profile?.role || "").toLowerCase();
+        const type = String(profile?.user_type || "").toUpperCase();
+        admin = role === "admin" || role === "ceo" || type === "ADMIN";
+        if (!admin) {
+          const email = user?.email || (await supabase.auth.getUser())?.data?.user?.email;
+          admin = String(email || "").toLowerCase() === OWNER_EMAIL;
+        }
+      } catch (err) {
+        console.error("[CERTIFICATE ADMIN CHECK] failed:", err);
+        admin = false; // fail closed: not admin
+      }
+      if (alive) {
+        setIsAdmin(admin);
+        setAdminChecked(true);
+      }
+    })();
+    return () => { alive = false; };
+  }, [user?.id]);
 
   // Resolve the certificate fee from the pricing table (state + user category)
   useEffect(() => {
@@ -262,6 +352,9 @@ export default function CertificatePreviewPage() {
     const savedLogo = localStorage.getItem("customLogo");
     if (savedLogo) setLogoUrl(savedLogo);
 
+    // Wait for the admin check: the load decision (new payment rules vs admin reopen) depends on it
+    if (!adminChecked) return;
+
     const savedData = localStorage.getItem(CERTIFICATE_STORAGE_KEY);
     if (!savedData) return;
 
@@ -289,6 +382,13 @@ export default function CertificatePreviewPage() {
 
     (async () => {
       if (!isCertRef(parsed.ref_no)) {
+        // ADMIN starting a brand new certificate sees it unlocked (admin never pays); everyone else -> draft
+        if (isAdmin) {
+          setIsPaid(true);
+          setIsDraft(false);
+          setCurrentRefNo("");
+          return;
+        }
         showDraft();
         return;
       }
@@ -310,12 +410,52 @@ export default function CertificatePreviewPage() {
         if (!paid) paid = !!mis && String(mis.platform_payment_status || "").toLowerCase() === "paid";
 
         if (!alive) return;
-        if (!paid) {
+
+        // Baseline fingerprint = the record exactly as stored (core columns + bank/dates kept in the snapshot)
+        if (cert) {
+          const snap: any = cert.snapshot && typeof cert.snapshot === "object" ? cert.snapshot : {};
+          initialSnapRef.current = makeCertSnapshot(cert, {
+            bank: snap.bank_name || snap.financial_institution || mis?.bank_name || parsed.financial_institution || parsed.bank_name,
+            inspection: snap.inspection_date ?? parsed.inspection_date,
+            completion: snap.completion_date ?? parsed.completion_date,
+          });
+          savedRowRef.current = { ...cert, _mis: mis || null };
+          setRecordOwnerId(cert.user_id ?? null);
+        }
+
+        // LEGACY record: the ref no exists only in mis_records (no estimates row, e.g. an old CT#### certificate).
+        // Its baseline comes from the MIS row, so printing it never goes through a save and never creates a new ref no.
+        if (!cert && mis) {
+          initialSnapRef.current = makeCertSnapshot(mis, {
+            bank: mis.bank_name || parsed.financial_institution || parsed.bank_name,
+            inspection: parsed.inspection_date,
+            completion: parsed.completion_date,
+          });
+          savedRowRef.current = null;
+          setRecordOwnerId(mis.user_id ?? null);
+        }
+
+        // ADMIN reopening ANY certificate: same record, same ref no, no payment, no 15% / 60-day rule.
+        // Nothing about payment or ownership is changed by viewing / printing it.
+        if (isAdmin && (cert || mis)) {
+          orderIdRef.current = mis?.razorpay_order_id ?? cert?.razorpay_order_id ?? null;
+          paymentIdRef.current = mis?.razorpay_payment_id ?? cert?.razorpay_payment_id ?? null;
+          const adminStored = Number(mis?.amount_paid ?? mis?.user_payment ?? cert?.user_payment ?? 0);
+          userPaymentRef.current = adminStored > 0 ? adminStored : null;
+          setCertificateId(cert?.id ?? parsed.id ?? null);
+          setNeedsNewPayment(false);
+          setIsPaid(true);
+          setIsDraft(false);
+          setCurrentRefNo(refNo);
+          return;
+        }
+
+        if (!paid && !isAdmin) {
           showDraft();
           return;
         }
 
-        // 15% rule + 60-day rule (same helpers as the estimate preview)
+        // 15% rule + 60-day rule (same helpers as the estimate preview) - not applied to admin (handled above)
         const changedTooMuch = !!cert && isNameAddressChangeMajor(
           { customer_name: cert.customer_name, property_address: cert.property_address },
           { customer_name: parsed.customer_name, property_address: parsed.property_address }
@@ -323,6 +463,9 @@ export default function CertificatePreviewPage() {
         const expired = !!cert && isEstimateExpired(cert.created_at);
 
         if (changedTooMuch || expired) {
+          initialSnapRef.current = null;
+          savedRowRef.current = null;
+          setRecordOwnerId(null);
           setNeedsNewPayment(true);
           setNewPaymentReason(expired ? "EXPIRED_60_DAYS" : "CHANGED");
           setOriginalRefNo(refNo);
@@ -349,7 +492,13 @@ export default function CertificatePreviewPage() {
     })();
 
     return () => { alive = false; };
-  }, [user?.id]);
+  }, [user?.id, adminChecked, isAdmin]);
+
+  // Current on-screen fingerprint vs the saved one
+  const currentSnap = () =>
+    makeCertSnapshot(estimate, { bank: bankName, inspection: inspectionDate, completion: completionDate });
+  const isUnchangedFromSaved = () =>
+    !needsNewPayment && isCertRef(currentRefNo) && !!initialSnapRef.current && currentSnap() === initialSnapRef.current;
 
   // ---------------------------------------------------------------
   // SAVE (create / update) through rpc_save_estimate (certificates live in estimates + mis_records)
@@ -375,22 +524,66 @@ export default function CertificatePreviewPage() {
       return false;
     }
 
+    // Print-only / no change -> the database is not touched at all (same ref no, no update, no new charge).
+    // This is also what makes an admin reprint of somebody else's file harmless.
+    if (!paymentData && isUnchangedFromSaved()) return true;
+
     isSavingRef.current = true;
     setIsSaving(true);
     try {
       let activeRefNo: string | null = !needsNewPayment && isCertRef(currentRefNo) ? currentRefNo : null;
       let activeId: string | null = needsNewPayment ? null : certificateId;
       const hadRefNoAtStart = !!activeRefNo;
+      // The stored row of the record being updated (null for a fresh / new-payment record)
+      const saved: any = hadRefNoAtStart ? savedRowRef.current : null;
 
-      // State has the ref no but not the id -> find the exact record
+      // State has the ref no but not the id -> find the exact record.
+      // ADMIN may open any user's record, so the lookup is by ref no only; everybody else is limited to own records.
       if (!activeId && activeRefNo) {
-        const { data: found } = await supabase
+        let q = supabase.from("estimates").select("id, user_id").eq("ref_no", activeRefNo);
+        if (!isAdmin) q = q.eq("user_id", userId);
+        const { data: found } = await q.maybeSingle();
+        if (found) {
+          activeId = found.id;
+          if (isAdmin && found.user_id) setRecordOwnerId(found.user_id);
+        }
+      }
+
+      // SAFETY: the page has a ref no but no estimates row exists for it (legacy / mis-only record).
+      // Never fall through to the RPC here: with no id it would create a brand new record + a new ref no.
+      if (hadRefNoAtStart && !activeId && !paymentData) {
+        console.warn("[CERTIFICATE SAVE] No estimates row for", activeRefNo, "- nothing to update, ref no kept.");
+        isSavingRef.current = false;
+        setIsSaving(false);
+        return true;
+      }
+
+      // The record keeps its ORIGINAL owner (an admin re-save never moves a file to the admin's account)
+      const ownerId: string = (isAdmin && (saved?.user_id || recordOwnerId)) || userId;
+
+      // Duplicate check (only for a fresh record that has no ref no yet) - same rule as the estimate preview,
+      // limited to certificates of the same type so an estimate is never overwritten by mistake.
+      if (!activeRefNo && !needsNewPayment) {
+        const { data: sameOwner } = await supabase
           .from("estimates")
-          .select("id")
-          .eq("ref_no", activeRefNo)
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (found) activeId = found.id;
+          .select("id, ref_no, customer_name, property_address, estimate_type")
+          .eq("user_id", ownerId)
+          .eq("estimate_type", currentCaseType)
+          .limit(100);
+        const norm = (v: any) => String(v ?? "").trim().toUpperCase();
+        const duplicate = (sameOwner || []).find(
+          (r: any) => norm(r.customer_name) === norm(estimate?.customer_name) && norm(r.property_address) === norm(estimate?.property_address)
+        );
+        if (duplicate) {
+          const confirmOverwrite = confirm(`Duplicate found (Ref: ${duplicate.ref_no}). OK to OVERWRITE?`);
+          if (!confirmOverwrite) {
+            isSavingRef.current = false;
+            setIsSaving(false);
+            return false;
+          }
+          activeId = duplicate.id;
+          activeRefNo = duplicate.ref_no;
+        }
       }
 
       // A fresh / new-payment record has no ref no yet: rpc_save_estimate generates it (and returns it below)
@@ -421,9 +614,20 @@ export default function CertificatePreviewPage() {
       // Saved through the SAME rpc as the estimates (rpc_save_estimate): the row goes to `estimates` and is
       // mirrored to mis_records, so ledger / revenue / MIS / reopen work without any change.
       // The certificate type is carried by p_estimate_type; bank, dates etc. are kept in the snapshot.
+      // Re-saving an EXISTING record without a fresh payment (owner edit, or admin edit of any file) must not
+      // touch its payment state: status / type / payment status are carried over from the stored row.
+      const keepStored = !paymentData && !!saved;
+      const storedPayStatus: string = saved
+        ? String(
+            saved.platform_payment_status ??
+            saved._mis?.platform_payment_status ??
+            (isPaidRecord(saved) ? "paid" : "unpaid")
+          )
+        : "paid";
+
       const { data, error } = await supabase.rpc("rpc_save_estimate", {
         p_estimate_id: activeId,
-        p_user_id: userId,
+        p_user_id: ownerId,
         p_customer_name: estimate?.customer_name || "GUEST",
         p_snapshot: {
           ...snapshot,
@@ -433,7 +637,7 @@ export default function CertificatePreviewPage() {
           date: new Date().toISOString(),
         },
         p_fee_standard: Number(estimate?.fee_amount) || 0,
-        p_estimate_type: currentCaseType,
+        p_estimate_type: keepStored ? (saved.estimate_type || currentCaseType) : currentCaseType,
         p_plan_type: "BASIC",
         p_rate_per_sqft: 0,
         p_floor_details: estimate?.floor_details && typeof estimate.floor_details === "object" ? estimate.floor_details : {},
@@ -444,8 +648,8 @@ export default function CertificatePreviewPage() {
         p_total_builtup_area: Number(estimate?.total_builtup_area) || 0,
         p_total_construction_cost: 0,
         p_ref_no: activeRefNo,
-        p_status: CERT_SAVE_STATUS,
-        p_payment_status: paymentData?.p_payment_status || "paid",
+        p_status: keepStored ? (saved.status || CERT_SAVE_STATUS) : CERT_SAVE_STATUS,
+        p_payment_status: paymentData?.p_payment_status || storedPayStatus,
         p_order_id: orderId,
         p_payment_id: paymentId,
         p_user_payment: amount,
@@ -465,7 +669,25 @@ export default function CertificatePreviewPage() {
         await supabase.from("mis_records").update({ bank_name: bankName || null }).eq("ref_no", savedRef);
       } catch {}
 
-      // Success
+      // New record only: count it on the owner's profile (same as the estimate preview). Best effort.
+      if (!hadRefNoAtStart && savedRef !== activeRefNo && !isAdmin) {
+        try {
+          await supabase.from("profiles").update({ estimate_count: (user?.estimate_count || 0) + 1 }).eq("id", userId);
+        } catch {}
+      }
+
+      // Success: the saved record is now the baseline for change detection
+      initialSnapRef.current = currentSnap();
+      savedRowRef.current = {
+        ...(saved || {}),
+        id: savedId,
+        ref_no: savedRef,
+        user_id: ownerId,
+        estimate_type: keepStored ? (saved.estimate_type || currentCaseType) : currentCaseType,
+        status: keepStored ? (saved.status || CERT_SAVE_STATUS) : CERT_SAVE_STATUS,
+        platform_payment_status: paymentData?.p_payment_status || storedPayStatus,
+      };
+      setRecordOwnerId(ownerId);
       orderIdRef.current = orderId;
       paymentIdRef.current = paymentId;
       userPaymentRef.current = amount > 0 ? amount : userPaymentRef.current;
@@ -491,8 +713,8 @@ export default function CertificatePreviewPage() {
             bank_name: bankName,
             inspection_date: inspectionDate,
             completion_date: completionDate,
-            payment_status: "paid",
-            isPaid: true,
+            payment_status: paymentData?.p_payment_status || storedPayStatus,
+            isPaid: String(paymentData?.p_payment_status || storedPayStatus).toLowerCase() === "paid",
           })
         );
       } catch {}
@@ -594,22 +816,154 @@ export default function CertificatePreviewPage() {
     }
   };
 
-  // Verify on the server, then save the latest edits (same ref no -> UPDATE) before anything is released
+  // Save (only if something changed) and confirm the payment against the database before ANY output is released
+  // (print / PDF / share). Admin skips the payment check; an admin reopening a saved file never creates a new ref no
+  // (the record keeps its ref no, owner and payment fields - see handleSaveAndFinalize).
   const releaseGuard = async (): Promise<boolean> => {
-    if (userCategory !== "ADMIN") {
-      const verified = await verifyPaidOnServer(currentRefNo);
-      if (!verified) { alert("🔒 Server verification failed."); return false; }
+    if (needsNewPayment) {
+      alert(`Payment of ₹${fee}/- is required to print this certificate.`);
+      return false;
     }
-    return handleSaveAndFinalize();
+    if (!isAdmin) {
+      const verified = await verifyPaidOnServer(currentRefNo);
+      if (!verified) { alert("🔒 Payment could not be verified for this certificate. Please complete the payment to print or download it."); return false; }
+    }
+    const ok = await handleSaveAndFinalize();
+    if (ok) await new Promise((r) => setTimeout(r, 500)); // let a new ref no render before capturing / printing
+    return ok;
   };
 
+  // Print guard source of truth (same as the estimate preview). Updated from the effect below.
+  printAuthorizedRef.current = printAuthorized;
+
+  useEffect(() => {
+    let alive = true;
+    if (isAdmin) {
+      setPrintAuthorized(true);
+      return;
+    }
+    const eligible = isPaid && !needsNewPayment && isCertRef(currentRefNo) && isUnchangedFromSaved();
+    if (!eligible) {
+      setPrintAuthorized(false);
+      return;
+    }
+    verifyPaidOnServer(currentRefNo).then((ok) => { if (alive) setPrintAuthorized(ok); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, isPaid, needsNewPayment, currentRefNo, estimate, bankName, inspectionDate, completionDate]);
+
+  // Switch the guard on for this page only (the print css below is scoped to html[data-print-guard="on"])
+  useEffect(() => {
+    document.documentElement.setAttribute("data-print-guard", "on");
+    return () => {
+      document.documentElement.removeAttribute("data-print-guard");
+      document.body.classList.remove("print-authorized");
+    };
+  }, []);
+
+  useEffect(() => {
+    document.body.classList.toggle("print-authorized", printAuthorized);
+  }, [printAuthorized]);
+
+  // Ctrl+P / Cmd+P and right-click are blocked unless the certificate is authorized for printing
+  useEffect(() => {
+    const preventSystemPrint = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        if (printAuthorizedRef.current || allowPrintRef.current) return;
+        e.preventDefault();
+        e.stopPropagation();
+        alert("Printing is locked. It unlocks only after the payment is completed and the certificate is saved.");
+      }
+    };
+    const preventRightClick = (e: MouseEvent) => e.preventDefault();
+    window.addEventListener("keydown", preventSystemPrint, true);
+    window.addEventListener("contextmenu", preventRightClick);
+    return () => {
+      window.removeEventListener("keydown", preventSystemPrint, true);
+      window.removeEventListener("contextmenu", preventRightClick);
+    };
+  }, []);
+
+  // Leaving the flow (e.g. to the dashboard) clears the saved input; going back to the input form keeps it
+  useEffect(() => {
+    isMountedRef.current = true;
+    const onPop = () => {
+      goingToFormRef.current = true;
+      try { sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1"); } catch {}
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      isMountedRef.current = false;
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToFormRef.current) {
+          try {
+            localStorage.removeItem(CERTIFICATE_STORAGE_KEY);
+            sessionStorage.removeItem(RETURN_TO_FORM_FLAG);
+          } catch {}
+        }
+      }, 0);
+    };
+  }, []);
+
+  // System Audit Status text (same idea as the estimate preview)
+  useEffect(() => {
+    if (!user) return;
+    if (isAdmin) {
+      setValidationReason(
+        isAdminReopen
+          ? `Admin view: this certificate belongs to another user. Its Ref No (${currentRefNo || "-"}), owner and payment details stay unchanged when you print, download or share it.`
+          : ""
+      );
+    } else if (isPaid && !needsNewPayment) {
+      setValidationReason("");
+    } else {
+      setValidationReason(
+        needsNewPayment
+          ? (newPaymentReason === "EXPIRED_60_DAYS"
+              ? `⚠️ This certificate is older than 60 days, so it will be treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`
+              : `⚠️ Customer name or property address has changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%, so this will be treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`)
+          : "Note: To print this certificate, please complete the payment process."
+      );
+    }
+  }, [user, isAdmin, isAdminReopen, isPaid, needsNewPayment, newPaymentReason, originalRefNo, currentRefNo]);
+
+  // Prevent any other path from showing a new-payment certificate as paid
+  useEffect(() => {
+    if (needsNewPayment && isPaid && !isAdmin) setIsPaid(false);
+  }, [needsNewPayment, isPaid, isAdmin]);
+
   const handleSaveAndPrint = async () => {
-    if (isDraft || !isPaid) {
+    if (!isAdmin && (isDraft || !isPaid)) {
       handleRazorpayPayment();
       return;
     }
-    if (!(await releaseGuard())) return;
-    window.print();
+    if (isBusy || isSaving) return;
+    setIsBusy(true);
+    try {
+      if (!(await releaseGuard())) return;
+      // Release the printout for this in-app print (payment + save + server check are all done at this point)
+      document.body.classList.add("print-authorized");
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            allowPrintRef.current = true;
+            const restore = () => document.body.classList.toggle("print-authorized", printAuthorizedRef.current);
+            window.addEventListener("afterprint", restore, { once: true });
+            try {
+              window.print();
+            } finally {
+              setTimeout(() => { allowPrintRef.current = false; }, 1000);
+            }
+            resolve();
+          })
+        )
+      );
+    } catch (err) {
+      console.error("Print failed", err);
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   // ---------------------------------------------------------------
@@ -726,6 +1080,10 @@ export default function CertificatePreviewPage() {
     }
   };
 
+  if (!adminChecked) {
+    return <div className="p-10 text-center font-sans text-gray-500 font-bold">Loading...</div>;
+  }
+
   if (!estimate) {
     return (
       <div className="p-10 text-center font-sans">
@@ -749,6 +1107,19 @@ export default function CertificatePreviewPage() {
     <div className="bg-white min-h-screen relative font-sans text-sm p-8 md:p-12 print:p-0">
       <style jsx global>{`
         @media print {
+          /* PRINT GUARD: nothing is printed unless <body> has "print-authorized" (paid + saved + confirmed, or admin) */
+          html[data-print-guard="on"] body:not(.print-authorized) > * {
+            display: none !important;
+          }
+          html[data-print-guard="on"] body:not(.print-authorized)::before {
+            content: "🔒 PRINT LOCKED\\A Printing unlocks only after the payment is completed and the certificate is saved.";
+            display: block !important;
+            white-space: pre-line !important;
+            text-align: center !important;
+            font: 700 16pt Arial, sans-serif !important;
+            color: #cc0000 !important;
+            margin: 40mm 15mm 0 !important;
+          }
           body * {
             visibility: hidden !important;
           }
@@ -1077,12 +1448,15 @@ export default function CertificatePreviewPage() {
         );
       })()}
 
-      {needsNewPayment && !isPaid && (
-        <p className="print:hidden max-w-4xl mx-auto mt-6 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-300 rounded p-3">
-          {newPaymentReason === "EXPIRED_60_DAYS"
-            ? `⚠️ This certificate is older than 60 days, so it is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`
-            : `⚠️ Customer name or property address changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%, so this is treated as a NEW certificate (previous Ref: ${originalRefNo || "-"}). A new REF NO will be generated and a new payment is required to print.`}
-        </p>
+      {validationReason && (
+        <div
+          className={`print:hidden max-w-4xl mx-auto mt-6 p-4 border text-left ${
+            !isPaid || needsNewPayment ? "bg-amber-50 border-amber-500 text-amber-900" : "bg-emerald-50 border-emerald-500 text-emerald-900"
+          }`}
+        >
+          <p className="font-bold uppercase text-xs tracking-wider mb-1">📋 System Audit Status</p>
+          <p className="text-sm font-medium">{validationReason}</p>
+        </div>
       )}
 
       {/* Offer banner - dynamic from pricing_config (rate, MRP, % off), same as the estimate preview */}
@@ -1181,6 +1555,8 @@ export default function CertificatePreviewPage() {
         <button
           onClick={() => {
             // Keep the data (with ref no / id) so the input form comes back filled in - same as the estimate preview
+            goingToFormRef.current = true;
+            try { sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1"); } catch {}
             router.push(CERTIFICATE_FORM_ROUTE);
           }}
           className="bg-gray-600 text-white px-8 py-3 rounded shadow-md hover:bg-gray-700 transition font-bold"

@@ -30,7 +30,7 @@ const CERTIFICATE_FORM_ROUTE = "/construction-certificate";
 const CERT_SAVE_STATUS = "pending";
 
 // sessionStorage flag shared with the input forms: "the user is going back to the form, keep the data"
-const RETURN_TO_FORM_FLAG = "estimateReturnToForm";
+const RETURN_TO_FORM_FLAG = "certificateReturnToForm";
 
 // Owner account (always treated as admin, same as the wallet gate)
 const OWNER_EMAIL = "legalntech@gmail.com";
@@ -382,6 +382,13 @@ export default function CertificatePreviewPage() {
 
     (async () => {
       if (!isCertRef(parsed.ref_no)) {
+        // The input form already decided: new ref no + new payment (name/address changed > limit, or older than 60 days)
+        if (!isAdmin && parsed.force_new_ref) {
+          setNeedsNewPayment(true);
+          setNewPaymentReason(parsed.new_ref_reason || "CHANGED");
+          setOriginalRefNo(parsed.previous_ref_no || null);
+          setEstimate((prev: any) => (prev ? { ...prev, id: null, ref_no: null } : prev));
+        }
         // ADMIN starting a brand new certificate sees it unlocked (admin never pays); everyone else -> draft
         if (isAdmin) {
           setIsPaid(true);
@@ -899,6 +906,7 @@ export default function CertificatePreviewPage() {
         if (!isMountedRef.current && !goingToFormRef.current) {
           try {
             localStorage.removeItem(CERTIFICATE_STORAGE_KEY);
+            localStorage.removeItem("certificateData");
             sessionStorage.removeItem(RETURN_TO_FORM_FLAG);
           } catch {}
         }
@@ -1443,6 +1451,13 @@ export default function CertificatePreviewPage() {
                   Recharge Now →
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={() => { setWalletBlock(null); handleRazorpayPayment(); }}
+                className="mt-2 w-full cursor-pointer rounded-lg border border-emerald-400 bg-emerald-50 py-2 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+              >
+                I have recharged - check balance again
+              </button>
             </div>
           </div>
         );

@@ -1,10 +1,48 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 // [START NEW FEATURE] - Supabase Client Import
 import { supabase } from "@/lib/supabase";
 // [END NEW FEATURE]
+import { fetchPricingRow, getDisplayPricing } from "@/lib/pricingFetch";
+import { getItemRate } from "@/lib/pricing";
+import {
+  NAME_ADDRESS_CHANGE_LIMIT,
+  isRealRef,
+  isNameAddressChangeMajor,
+  isEstimateExpired,
+} from "@/lib/estimateRules";
+
+// localStorage keys that carry the certificate between this form and /certificate-preview
+const CERT_STORAGE_KEYS = ["certificateData", "certificatePreview"];
+// sessionStorage flag: "the data was loaded / returned on purpose (reopen or Back to Input) - keep it"
+const RETURN_TO_FORM_FLAG = "certificateReturnToForm";
+// Same business rules as the estimate flow: 3 edits per ref no, then a new certificate is needed
+const MAX_EDITS = 3;
+const CERTIFICATE_PRICING_ITEM = "constructionCertificate";
+const FALLBACK_FEE = 21;
+const OWNER_EMAIL = "legalntech@gmail.com";
+
+const clearSavedCertificate = () => {
+  try {
+    CERT_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+    sessionStorage.removeItem(RETURN_TO_FORM_FLAG);
+  } catch {}
+};
+
+// Order-independent fingerprint of the floor areas (key order of a stored JSON must not count as a change)
+const areaMapKey = (fd: any): string => {
+  const out: Record<string, number> = {};
+  Object.keys(fd || {}).sort().forEach((k) => {
+    const a = Number(fd[k]?.area || 0);
+    if (a > 0) out[k] = a;
+  });
+  return JSON.stringify(out);
+};
+
+type ChoiceOption = { key: string; label: string; tone: "primary" | "danger" | "neutral" };
+type ChoiceDialog = { title: string; lines: string[]; options: ChoiceOption[] };
 
 const DEFAULT_FLOORS = ["GROUND FLOOR"];
 const EXTRA_FLOORS = [
@@ -57,12 +95,92 @@ export default function ConstructionCertificatePage() {
   const [registeredFee, setRegisteredFee] = useState<number>(0);
   const [currentRefNo, setCurrentRefNo] = useState("");
 
+  // Admin = profile role admin/ceo, user_type ADMIN or the owner account (premium/advanced plans are NOT admin here)
+  const [isAdmin, setIsAdmin] = useState(false);
+  // Leave-the-form guard: saved data is wiped when the user leaves, except when moving on to the preview page
+  const goingToPreviewRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  // Confirmation dialog (new-certificate charge / admin "same ref or new ref")
+  const [dialog, setDialog] = useState<ChoiceDialog | null>(null);
+  const dialogResolveRef = useRef<((key: string) => void) | null>(null);
+  const askChoice = (d: ChoiceDialog) =>
+    new Promise<string>((resolve) => {
+      dialogResolveRef.current = resolve;
+      setDialog(d);
+    });
+  const answerDialog = (key: string) => {
+    setDialog(null);
+    dialogResolveRef.current?.(key);
+    dialogResolveRef.current = null;
+  };
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) return;
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role, user_type")
+          .eq("id", session.user.id)
+          .maybeSingle();
+        const role = String(profile?.role || "").toLowerCase();
+        const type = String(profile?.user_type || "").toUpperCase();
+        setIsAdmin(
+          role === "admin" || role === "ceo" || type === "ADMIN" ||
+          String(session.user.email || "").toLowerCase() === OWNER_EMAIL
+        );
+      } catch (err) {
+        console.error("Admin check error:", err);
+      }
+    })();
+  }, []);
+
+  // Clear the saved certificate when the user leaves the form (dashboard, another service, ...).
+  // It is kept only when the form hands over to the preview page.
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      // Deferred so that a React strict-mode remount does not wipe the data
+      setTimeout(() => {
+        if (!isMountedRef.current && !goingToPreviewRef.current) clearSavedCertificate();
+      }, 0);
+    };
+  }, []);
+
+  // Certificate charge from the pricing table (state + user category) - shown in the "new certificate" warning
+  const resolveCertificateFee = async (userId: string): Promise<number> => {
+    try {
+      const { data: profile } = await supabase.from("profiles").select("state, user_type").eq("id", userId).maybeSingle();
+      const state = String(profile?.state || "MADHYA PRADESH");
+      const category = String(profile?.user_type || "INDIVIDUAL USER").toUpperCase();
+      const row = await fetchPricingRow(CERTIFICATE_PRICING_ITEM, state, category);
+      const display = getDisplayPricing(row);
+      if (display.isFromDB && display.price > 0) return display.price;
+      return getItemRate(state, CERTIFICATE_PRICING_ITEM) || FALLBACK_FEE;
+    } catch {
+      return FALLBACK_FEE;
+    }
+  };
+
   // Load existing certificate data from local storage if reopening an entry
   useEffect(() => {
     const savedData = localStorage.getItem("certificateData") || localStorage.getItem("certificatePreview");
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
+
+        // A finished (paid) certificate is only reloaded when the user came back from the preview page or reopened it.
+        // A fresh visit (new session, reopened tab) must start with an empty form.
+        const isFinished = parsed.is_paid === true || parsed.isPaid === true || parsed.payment_status === "paid";
+        const deliberate = sessionStorage.getItem(RETURN_TO_FORM_FLAG) === "1" || !!localStorage.getItem("certificateData");
+        if (isFinished && !deliberate) {
+          CERT_STORAGE_KEYS.forEach((k) => localStorage.removeItem(k));
+          return;
+        }
+
         if (parsed.ref_no) setCurrentRefNo(parsed.ref_no);
         setCustomerName(parsed.customer_name || "");
         setPropertyAddress(parsed.property_address || "");
@@ -252,6 +370,10 @@ export default function ConstructionCertificatePage() {
     
     for (const floor of selectedFloors) {
       const floorArea = floorData[floor]?.area || 0;
+      if (!(floorData[floor]?.length > 0) || !(floorData[floor]?.width > 0) || floorArea <= 0) {
+        alert(`Validation Error: Floor "${floor}" has missing or zero dimensions. Please fill valid values or unselect this floor.`);
+        return;
+      }
       if (floorArea > plotAreaNum) {
         alert(`Validation Error: The area for ${floor} (${floorArea} SQ.FT) exceeds the plot area (${plotAreaNum} SQ.FT).`);
         return;
@@ -264,17 +386,141 @@ export default function ConstructionCertificatePage() {
       return;
     }
 
+    if (isGenerating) return;
+    setIsGenerating(true);
+    try {
     const plotMaster = await getPlotMasterData();
     const finalFee = feeMode === "AUTO" ? registeredFee : manualFee;
 
-    // The ref no is NOT decided here any more. It is generated by the preview after the payment
-    // (global sequence). The preview also applies the name/address (15%) and 60-day rules against the
-    // saved record and detaches from the old ref no when a new payment is required.
-    const existingRefNo = storedData.ref_no && !String(storedData.ref_no).startsWith("CERT-") ? storedData.ref_no : null;
+    const filteredFloorDetails: Record<string, { length: number; width: number; area: number }> = {};
+    selectedFloors.forEach((floor) => {
+      if (floorData[floor]?.area > 0) filteredFloorDetails[floor] = floorData[floor];
+    });
+
+    // The ref no is generated by the preview after the payment (global sequence). Here we only decide whether
+    // this certificate keeps its saved ref no (update) or must become a NEW certificate (new ref no + new payment).
+    const existingRefNo: string | null =
+      storedData.ref_no && isRealRef(storedData.ref_no) && !String(storedData.ref_no).startsWith("CERT-") && !String(storedData.ref_no).toUpperCase().startsWith("DRAFT")
+        ? storedData.ref_no
+        : null;
+    const hadRealRef = !!existingRefNo;
+
+    // The saved record is the truth for the 15% / 60-day rules (not the browser copy)
+    let rec: any = null;
+    if (hadRealRef) {
+      const { data } = await supabase
+        .from("estimates")
+        .select("id, user_id, customer_name, property_address, created_at")
+        .eq("ref_no", existingRefNo)
+        .maybeSingle();
+      rec = data || null;
+    }
+
+    const isSame =
+      String(storedData.customer_name || "").trim() === String(customerName || "").trim() &&
+      String(storedData.property_address || "").trim() === String(propertyAddress || "").trim() &&
+      Number(storedData.plot_area || 0) === Number(plotArea || 0) &&
+      String(storedData.client_name || "").trim() === String(selectedClientName || "").trim() &&
+      String(storedData.representative || "").trim() === String(representative || "").trim() &&
+      areaMapKey(storedData.floor_details) === areaMapKey(filteredFloorDetails);
+
+    let decision: "same" | "new" = "same";
+    let newReason: string | null = null;
+
+    if (hadRealRef) {
+      const baseline = {
+        customer_name: rec?.customer_name ?? storedData.customer_name,
+        property_address: rec?.property_address ?? storedData.property_address,
+      };
+      const majorChange = isNameAddressChangeMajor(baseline, { customer_name: customerName, property_address: propertyAddress });
+      const expired = !!rec && isEstimateExpired(rec.created_at);
+
+      if (isAdmin) {
+        // ADMIN: a saved certificate is never turned into a new one silently, and never into one in the admin's name.
+        // Only when something changed does the admin choose: update the SAME ref no (owner / payment untouched)
+        // or generate a NEW ref no (created under the admin's own account, like a fresh input).
+        if (!isSame) {
+          const ownerNote = rec?.user_id && rec.user_id !== user.id ? " It belongs to another user." : "";
+          const choice = await askChoice({
+            title: "Existing certificate found",
+            lines: [
+              `Ref No: ${existingRefNo}.${ownerNote}`,
+              "You changed the details of this saved certificate. What do you want to do?",
+              "UPDATE SAME REF: the details are updated on the same Ref No. Owner, payment and ledger stay unchanged.",
+              "GENERATE NEW REF: a new certificate with a new Ref No is created under your account.",
+            ],
+            options: [
+              { key: "same", label: "Update same Ref No", tone: "primary" },
+              { key: "new", label: "Generate new Ref No", tone: "danger" },
+              { key: "cancel", label: "Cancel", tone: "neutral" },
+            ],
+          });
+          if (choice === "cancel") return;
+          decision = choice === "new" ? "new" : "same";
+          if (decision === "new") newReason = "ADMIN_NEW";
+        }
+      } else if (majorChange || expired) {
+        // USER: changed beyond the limit (or older than 60 days) -> NEW certificate, new payment. Tell before continuing.
+        const reason = expired
+          ? "this certificate is older than 60 days"
+          : `the customer name / property address changed by more than ${NAME_ADDRESS_CHANGE_LIMIT}%`;
+        const fee = await resolveCertificateFee(user.id);
+        const choice = await askChoice({
+          title: "New certificate charge applies",
+          lines: [
+            `Because ${reason}, this is treated as a NEW certificate.`,
+            `A new Ref No will be generated and a new charge of ₹${fee} will apply (previous Ref ${existingRefNo} stays as it is).`,
+            "Press CONTINUE to go to the preview and pay for the new certificate, or CANCEL to keep editing.",
+          ],
+          options: [
+            { key: "new", label: `Continue (pay ₹${fee})`, tone: "primary" },
+            { key: "cancel", label: "Cancel", tone: "neutral" },
+          ],
+        });
+        if (choice !== "new") return;
+        decision = "new";
+        newReason = expired ? "EXPIRED_60_DAYS" : "NAME_ADDRESS_CHANGED";
+      } else if (!isSame) {
+        // USER: change within the limit -> SAME ref no is updated, but only MAX_EDITS times
+        const { count } = await supabase
+          .from("estimate_history")
+          .select("*", { count: "exact", head: true })
+          .eq("ref_no", existingRefNo);
+        if (count !== null && count >= MAX_EDITS) {
+          alert(`LIMIT REACHED: You cannot edit this certificate more than ${MAX_EDITS} times. Please generate a new certificate.`);
+          return;
+        }
+        await supabase.from("estimate_history").insert([
+          {
+            ref_no: existingRefNo,
+            action_type: "RATE_UPDATE",
+            user_id: user.id,
+            changes: JSON.stringify({
+              customer_name: customerName,
+              property_address: propertyAddress,
+              plot_area: plotArea,
+              client_name: selectedClientName,
+              representative_name: representative,
+              floor_details: filteredFloorDetails,
+              financial_institution: selectedInstitution,
+              type: "CONSTRUCTION CERTIFICATE",
+            }),
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+    }
+
+    const keepRef = hadRealRef && decision === "same";
+    const forNewUserCharge = decision === "new" && !isAdmin;
 
     const certificateData = {
-      ref_no: existingRefNo,
-      id: existingRefNo ? (storedData.id || null) : null,
+      ref_no: keepRef ? existingRefNo : null,
+      id: keepRef ? (rec?.id || storedData.id || null) : null,
+      // Tells the preview that the decision is already made: new ref no + new payment required (users only)
+      force_new_ref: forNewUserCharge,
+      new_ref_reason: forNewUserCharge ? newReason : null,
+      previous_ref_no: decision === "new" && hadRealRef ? existingRefNo : null,
       customer_name: customerName,
       client_name: selectedClientName,
       representative: representative,
@@ -282,8 +528,12 @@ export default function ConstructionCertificatePage() {
       property_address: propertyAddress,
       plot_area: plotArea,
       selected_floors: selectedFloors,
-      floor_details: floorData,
-      total_builtup_area: totalBuiltUpArea,
+      floor_details: filteredFloorDetails,
+      total_builtup_area: Object.values(filteredFloorDetails).reduce((sum, f) => sum + (f.area || 0), 0),
+      // Inspection / completion dates and signature text typed on the preview survive a round trip
+      inspection_date: storedData.inspection_date || "",
+      completion_date: storedData.completion_date || "",
+      signature_details: storedData.signature_details || "",
       // Legacy keys kept as 0 for backward compatibility with the preview page
       rate_per_sqft: 0,
       construction_cost: 0,
@@ -300,14 +550,20 @@ export default function ConstructionCertificatePage() {
       door_count: doorCount,
       window_count: windowCount,
     };
-    
+
+    setCurrentRefNo(keepRef ? (existingRefNo as string) : "");
     localStorage.setItem("certificatePreview", JSON.stringify(certificateData));
+    // The preview page needs the saved data; do not wipe it while navigating there
+    goingToPreviewRef.current = true;
     router.push("/certificate-preview");
+    } finally {
+      setIsGenerating(false);
+    }
   };
   
   const handleClear = () => {
-    localStorage.removeItem("certificateData");
-    localStorage.removeItem("certificatePreview");
+    clearSavedCertificate();
+    setCurrentRefNo("");
     setFloorData({});
     setCustomerName("");
     setPropertyAddress("");
@@ -491,9 +747,37 @@ export default function ConstructionCertificatePage() {
 
       {/* Action Buttons */}
       <div className="flex gap-4 border-t border-black pt-4">
-        <button onClick={handleGenerate} className="bg-black text-white px-6 py-2 font-bold uppercase hover:bg-gray-800">GENERATE CERTIFICATE</button>
+        <button onClick={handleGenerate} disabled={isGenerating} className="bg-black text-white px-6 py-2 font-bold uppercase hover:bg-gray-800 disabled:opacity-60">{isGenerating ? "PLEASE WAIT..." : "GENERATE CERTIFICATE"}</button>
         <button onClick={handleClear} className="bg-red-600 text-white px-6 py-2 font-bold uppercase hover:bg-red-700">Clear Data</button>
       </div>
+
+      {/* Confirmation dialog: new-certificate charge (users) / same ref or new ref (admin) */}
+      {dialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100] p-4">
+          <div className="bg-white p-6 border-2 border-black w-full max-w-md normal-case text-sm">
+            <h2 className="font-bold uppercase mb-3 border-b border-black pb-2 text-base">{dialog.title}</h2>
+            <div className="space-y-2 mb-5 text-gray-800">
+              {dialog.lines.map((l, i) => (<p key={i}>{l}</p>))}
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              {dialog.options.map((o) => (
+                <button
+                  key={o.key}
+                  onClick={() => answerDialog(o.key)}
+                  className={
+                    "px-4 py-2 font-bold uppercase border border-black " +
+                    (o.tone === "primary" ? "bg-black text-white hover:bg-gray-800"
+                      : o.tone === "danger" ? "bg-red-600 text-white hover:bg-red-700"
+                      : "bg-white hover:bg-gray-100")
+                  }
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floor Selection Modal */}
       {isFloorModalOpen && (

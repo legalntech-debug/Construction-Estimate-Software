@@ -1,5 +1,5 @@
 // Leaflet helpers shared by the map components: CDN loader, real-size boxes, hatch pattern, road weights.
-import { haversineMeters, routeLengthMeters } from "./routeMapGeo";
+import { bearingDeg, haversineMeters } from "./routeMapGeo";
 import type { LatLng } from "./routeMapGeo";
 import { GREEN_HATCH_ID, HATCH_GREEN, LEAFLET_VERSION } from "./constants";
 import { escapeHtml } from "./helpers";
@@ -37,22 +37,22 @@ export const loadLeaflet = (): Promise<any> => {
 };
 
 
-// Point located at half of the total route length (used to place the distance label)
-export const routeMidPoint = (pts: LatLng[]): LatLng => {
-  const half = routeLengthMeters(pts) / 2;
-  let walked = 0;
+// Where the distance text of a route goes: the middle of its longest straight stretch, and the direction of that
+// stretch (bearing, 0 = north), so the text lies parallel to the road it describes and has room to be read.
+export const routeLabelInfo = (pts: LatLng[]): { point: LatLng; bearing: number } => {
+  let best = 0;
+  let bestLen = -1;
   for (let i = 1; i < pts.length; i++) {
-    const seg = haversineMeters(pts[i - 1], pts[i]);
-    if (walked + seg >= half && seg > 0) {
-      const t = (half - walked) / seg;
-      return {
-        lat: pts[i - 1].lat + (pts[i].lat - pts[i - 1].lat) * t,
-        lng: pts[i - 1].lng + (pts[i].lng - pts[i - 1].lng) * t,
-      };
+    const len = haversineMeters(pts[i - 1], pts[i]);
+    if (len > bestLen) {
+      bestLen = len;
+      best = i;
     }
-    walked += seg;
   }
-  return pts[pts.length - 1];
+  if (best === 0) return { point: pts[0], bearing: 0 };
+  const a = pts[best - 1];
+  const b = pts[best];
+  return { point: { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 }, bearing: bearingDeg(a, b) };
 };
 
 

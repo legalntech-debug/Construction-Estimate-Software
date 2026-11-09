@@ -14,7 +14,7 @@ const PMTILES_VERSION = "3.2.0";
 const GL_LEAFLET_VERSION = "0.0.20";
 
 const MAPLIBRE_JS = `https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/${MAPLIBRE_VERSION}/maplibre-gl.min.js`;
-const MAPLIBRE_CSS = `https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/${MAPLIBRE_VERSION}/maplibre-gl.min.css`;
+export const MAPLIBRE_CSS = `https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/${MAPLIBRE_VERSION}/maplibre-gl.min.css`;
 const PMTILES_JS = `https://unpkg.com/pmtiles@${PMTILES_VERSION}/dist/pmtiles.js`;
 const GL_LEAFLET_JS = `https://unpkg.com/@maplibre/maplibre-gl-leaflet@${GL_LEAFLET_VERSION}/leaflet-maplibre-gl.js`;
 

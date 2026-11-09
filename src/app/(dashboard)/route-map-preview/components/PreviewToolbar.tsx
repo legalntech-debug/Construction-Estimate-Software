@@ -1,8 +1,14 @@
 "use client";
 // Screen-only control panel above the sheet (hidden when printing).
+import { useEffect, useState } from "react";
 import type { BaseMode, Landmark } from "../engine/types";
+import type { ViewMode } from "./SheetViewport";
 
 interface PreviewToolbarProps {
+  // How the sheet is shown on screen: scaled to the screen width or at its real size
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
+
   baseMode: BaseMode;
   onBaseModeChange: (mode: BaseMode) => void;
   mapBusy: boolean;
@@ -63,24 +69,38 @@ interface PreviewToolbarProps {
   onPrint: () => void;
 }
 
-const toolBtn = "border border-black px-3 py-2 font-bold uppercase text-xs sm:text-sm bg-white hover:bg-gray-100";
-const activeBtn = "border border-black px-3 py-2 font-bold uppercase text-xs sm:text-sm bg-blue-700 text-white";
+const toolBtn = "border border-black px-3 py-2 min-h-[40px] font-bold uppercase text-xs sm:text-sm bg-white hover:bg-gray-100";
+const activeBtn = "border border-black px-3 py-2 min-h-[40px] font-bold uppercase text-xs sm:text-sm bg-blue-700 text-white";
 const rowClass = "flex flex-wrap items-center gap-2 border-t border-black pt-3";
 
 const toNumber = (value: string) => Number(value.replace(/[^0-9.]/g, "")) || 0;
 
 export default function PreviewToolbar(p: PreviewToolbarProps) {
+  // The tools are open on a computer and folded away on a phone (the top row stays)
+  const [toolsOpen, setToolsOpen] = useState(true);
+  useEffect(() => {
+    if (window.innerWidth < 1024) setToolsOpen(false);
+  }, []);
+
   return (
     <div className="no-print border border-black bg-gray-100 p-3 mb-4 space-y-3 uppercase">
       <div className="flex flex-wrap items-center gap-2">
-        <button onClick={p.onBack} className={toolBtn}>← BACK TO INPUT</button>
-        <button onClick={p.onPrint} className="bg-black text-white px-4 py-2 font-bold uppercase text-xs sm:text-sm hover:bg-gray-800">
+        <button onClick={p.onBack} className={toolBtn}>← BACK</button>
+        <button onClick={p.onPrint} className="bg-black text-white px-4 py-2 min-h-[40px] font-bold uppercase text-xs sm:text-sm hover:bg-gray-800">
           🖨️ PRINT / SAVE PDF
         </button>
-        <span className="text-[11px] sm:text-xs text-gray-600 normal-case">
-          Choose "Save as PDF", paper A4, layout Landscape, margins None.
+        <button onClick={() => p.onViewModeChange("fit")} className={p.viewMode === "fit" ? activeBtn : toolBtn}>FIT SCREEN</button>
+        <button onClick={() => p.onViewModeChange("actual")} className={p.viewMode === "actual" ? activeBtn : toolBtn}>100%</button>
+        <button onClick={() => setToolsOpen((v) => !v)} className={toolsOpen ? activeBtn : toolBtn}>
+          {toolsOpen ? "▲ TOOLS" : "▼ TOOLS"}
+        </button>
+        <span className="basis-full text-[11px] sm:text-xs text-gray-600 normal-case">
+          Print opens the sheet in a new window: choose "Save as PDF" (or your printer), paper A4, landscape. Allow pop-ups for this site.
         </span>
       </div>
+
+      {toolsOpen && (
+        <>
 
       <div className={rowClass}>
         <span className="font-bold text-xs sm:text-sm">ROUTE MAP BASE:</span>
@@ -252,6 +272,8 @@ export default function PreviewToolbar(p: PreviewToolbarProps) {
         </label>
         {p.hasInset && <button onClick={p.onInsetRemove} className={toolBtn}>REMOVE</button>}
       </div>
+        </>
+      )}
     </div>
   );
 }

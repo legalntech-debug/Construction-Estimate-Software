@@ -8,27 +8,33 @@
 // The plot outline, landmarks, main road highlight and route are Leaflet overlays on top of every base layer.
 // The plot outline can be moved, reshaped and drawn by hand (edit / draw mode); names and boundary texts follow it.
 import { useEffect, useRef, useState } from "react";
-import { bearingDeg, haversineMeters, pointInRing, ringCentroid, routeLengthMeters } from "../engine/routeMapGeo";
+import { bearingDeg, haversineMeters, pointAlongWays, pointInRing, ringCentroid, routeLengthMeters } from "../engine/routeMapGeo";
 import type { LatLng, MapFeatures } from "../engine/routeMapGeo";
 import type { BaseMode, Boundaries, MapViewState } from "../engine/types";
 import {
-  BUILDING_FILL, GREEN_HATCH_ID, LABEL_YELLOW, OSM_ATTRIBUTION, PLOT_LABEL_SHORT, ROUTE_COLOR, SATELLITE_TILES, STREET_TILES,
+  BUILDING_FILL, GREEN_HATCH_ID, LABEL_YELLOW, MAP_FONT_PX, OSM_ATTRIBUTION, PLOT_LABEL_SHORT, PRINT_PREPARE_EVENT, ROUTE_COLOR,
+  SATELLITE_TILES, STREET_TILES,
 } from "../engine/constants";
 import {
   TEXT_HALO_BLACK, TEXT_HALO_WHITE, addHtmlMarker, ensureHatchPattern, loadLeaflet, mapLabelHtml, roadWeight,
-  routeMidPoint, toLL,
+  routeLabelInfo, toLL,
 } from "../engine/leafletSupport";
 import { escapeHtml, measureText, wrapByWidth } from "../engine/helpers";
 import { createTopoLayer } from "../engine/topoStyle";
 import { ringCenter, simplifyRing } from "../engine/plotShape";
-import { edgeFacing, fitLabelInRing, pxCentroid, placeBoundaryLabels } from "../engine/labelLayout";
+import { edgeFacing, fitLabelInRing, placeBoundaryLabels, pxCentroid, readableAngle } from "../engine/labelLayout";
 import type { LabelRect, PxPoint } from "../engine/labelLayout";
 
 // Boundary labels around the plot are shown from this zoom level on
 const BOUNDARY_LABEL_MIN_ZOOM = 16;
-const BOUNDARY_LABEL_FONT = 8;
 const BOUNDARY_LABEL_MAX_WIDTH = 92;
 const BOUNDARY_LABEL_LINE_HEIGHT = 9.5;
+// The main road name is put this far (metres) along the road from the plot, so it does not sit on the plot texts
+const MAIN_ROAD_LABEL_OFFSET_M = 45;
+// A route shorter than this (plot on the main road) gets no distance text
+const MIN_ROUTE_LABEL_M = 15;
+// Texts along a line sit this many pixels beside it
+const LINE_LABEL_GAP_PX = 8;
 // The red dot that marks the site is shown up to this zoom level (the outline itself is too small to see)
 const SITE_DOT_MAX_ZOOM = 16;
 // Names inside the plot / landmark outlines grow with the zoom up to this size and disappear below the minimum
@@ -97,12 +103,12 @@ interface LeafletMapProps {
 // Square / circular handles of the plot editor (screen only: "no-print" hides them when printing)
 const handleHtml = (kind: "vertex" | "mid" | "move") => {
   if (kind === "vertex") {
-    return `<div style="width:16px;height:16px;margin:-8px 0 0 -8px;background:#fff;border:2px solid #1d4ed8;box-sizing:border-box;cursor:move"></div>`;
+    return `<div class="rm-h-vertex" style="width:16px;height:16px;margin:-8px 0 0 -8px;background:#fff;border:2px solid #1d4ed8;box-sizing:border-box;cursor:move"></div>`;
   }
   if (kind === "mid") {
-    return `<div style="width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:rgba(29,78,216,0.35);border:1.5px solid #1d4ed8;box-sizing:border-box;cursor:copy" title="Add a corner"></div>`;
+    return `<div class="rm-h-mid" style="width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:rgba(29,78,216,0.35);border:1.5px solid #1d4ed8;box-sizing:border-box;cursor:copy" title="Add a corner"></div>`;
   }
-  return `<div style="width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:#1d4ed8;color:#fff;font:700 18px/30px Arial,sans-serif;text-align:center;cursor:move;box-shadow:0 0 0 2px #fff" title="Drag to move the plot">✥</div>`;
+  return `<div class="rm-h-move" style="width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:#1d4ed8;color:#fff;font:700 18px/30px Arial,sans-serif;text-align:center;cursor:move;box-shadow:0 0 0 2px #fff" title="Drag to move the plot">✥</div>`;
 };
 
 const geoJsonRing = (coords: number[][]): LatLng[] => coords.map(([lng, lat]) => ({ lat, lng }));
@@ -399,8 +405,16 @@ export default function LeafletMap({
     features.roads.forEach((r) => mainWayIds.has(r.id) && drawRoad(r, true));
 
     if (mainRoadLabel) {
-      const html = mapLabelHtml(mainRoadLabel.text, { shift: "translate(-50%,-140%)", font: "800 10px/1.2 Arial,sans-serif", halo: TEXT_HALO_WHITE });
-      addHtmlMarker(L, layer, mainRoadLabel.position, html);
+      // The name runs parallel to the road, a little way along it
+      const along = pointAlongWays(features.roads, mainWayIds, mainRoadLabel.position, MAIN_ROAD_LABEL_OFFSET_M);
+      const at = along ? along.point : mainRoadLabel.position;
+      const angle = along ? readableAngle(along.bearing - 90) : 0;
+      const html = mapLabelHtml(mainRoadLabel.text, {
+        shift: `translate(-50%,-50%) rotate(${angle.toFixed(1)}deg) translateY(${-LINE_LABEL_GAP_PX - 2}px)`,
+        font: `800 ${MAP_FONT_PX.small}px/1.2 Arial,sans-serif`,
+        halo: TEXT_HALO_WHITE,
+      });
+      addHtmlMarker(L, layer, at, html);
     }
   }, [ready, base, topo?.features, topo?.mainWayIds, topo?.colonyId, topo?.mainRoadLabel]);
 
@@ -468,9 +482,15 @@ export default function LeafletMap({
         const m = L.marker([p.lat, p.lng], { draggable: true, icon: handleIcon("vertex"), zIndexOffset: 1000 }).addTo(layer);
         m.on("drag", () => plotPoly.setLatLngs(vertexMarkers.map((x: any) => x.getLatLng())));
         m.on("dragend", () => onChange(vertexMarkers.map(toPlain)));
+        // Delete a corner: double click with a mouse, a tap (with confirmation) on a touch screen
         m.on("dblclick", (e: any) => {
           L.DomEvent.stop(e);
           if (ring.length > 3) onChange(ring.filter((_, j) => j !== i));
+        });
+        m.on("click", () => {
+          if (window.matchMedia("(pointer: coarse)").matches && ring.length > 3 && window.confirm("Delete this corner?")) {
+            onChange(ring.filter((_, j) => j !== i));
+          }
         });
         return m;
       });
@@ -566,8 +586,8 @@ export default function LeafletMap({
         const text = (boundaries[key] || "").trim();
         const edge = edgeFacing(px, dirs[key]);
         if (!text || !edge) return [];
-        const lines = wrapByWidth(text, BOUNDARY_LABEL_MAX_WIDTH, BOUNDARY_LABEL_FONT, 4);
-        const w = Math.max(...lines.map((l) => measureText(l, BOUNDARY_LABEL_FONT))) + 4;
+        const lines = wrapByWidth(text, BOUNDARY_LABEL_MAX_WIDTH, MAP_FONT_PX.fine, 4);
+        const w = Math.max(...lines.map((l) => measureText(l, MAP_FONT_PX.fine))) + 4;
         const h = lines.length * BOUNDARY_LABEL_LINE_HEIGHT + 3;
         return [{ key, edge, w, h, lines }];
       });
@@ -575,10 +595,12 @@ export default function LeafletMap({
 
       const anchor = map.layerPointToLatLng([centre.x, centre.y]);
       requests.forEach((r) => {
-        const rect = placed[r.key];
+        const label = placed[r.key];
+        // Each text lies parallel to its plot edge
         const html =
-          `<div style="position:absolute;left:0;top:0;transform:translate(${(rect.x - centre.x - rect.w / 2).toFixed(1)}px,${(rect.y - centre.y - rect.h / 2).toFixed(1)}px);` +
-          `width:${Math.ceil(rect.w)}px;text-align:center;white-space:nowrap;font:700 ${BOUNDARY_LABEL_FONT}px/${BOUNDARY_LABEL_LINE_HEIGHT}px Arial,sans-serif;` +
+          `<div style="position:absolute;left:0;top:0;` +
+          `transform:translate(${(label.x - centre.x).toFixed(1)}px,${(label.y - centre.y).toFixed(1)}px) translate(-50%,-50%) rotate(${label.angleDeg.toFixed(1)}deg);` +
+          `width:${Math.ceil(label.textW)}px;text-align:center;white-space:nowrap;font:700 ${MAP_FONT_PX.fine}px/${BOUNDARY_LABEL_LINE_HEIGHT}px Arial,sans-serif;` +
           `color:#000;${TEXT_HALO_WHITE}">${r.lines.map(escapeHtml).join("<br>")}</div>`;
         addHtmlMarker(L, boundaryGroup, { lat: anchor.lat, lng: anchor.lng }, html);
       });
@@ -641,13 +663,16 @@ export default function LeafletMap({
       addHtmlMarker(L, layer, last, arrowHtml);
 
       const meters = Math.round(routeLengthMeters(pts));
-      const mid = routeMidPoint(pts);
-      const labelHtml = mapLabelHtml(`APPROX. ${meters} METER`, {
-        shift: "translate(-50%,-125%)",
-        font: "700 9px/1.3 Arial,sans-serif",
-        extraStyle: "background:rgba(255,255,255,0.85);padding:0 3px",
-      });
-      addHtmlMarker(L, layer, mid, labelHtml);
+      if (meters >= MIN_ROUTE_LABEL_M) {
+        // The distance runs parallel to the route, just beside it
+        const mid = routeLabelInfo(pts);
+        const labelHtml = mapLabelHtml(`APPROX. ${meters} METER`, {
+          shift: `translate(-50%,-50%) rotate(${readableAngle(mid.bearing - 90).toFixed(1)}deg) translateY(${-LINE_LABEL_GAP_PX}px)`,
+          font: `700 ${MAP_FONT_PX.fine}px/1.3 Arial,sans-serif`,
+          extraStyle: "background:rgba(255,255,255,0.85);padding:0 3px",
+        });
+        addHtmlMarker(L, layer, mid.point, labelHtml);
+      }
     }
   }, [ready, route?.points, route?.drawing]);
 
@@ -658,14 +683,33 @@ export default function LeafletMap({
     mapRef.current.getContainer().style.cursor = picking ? "crosshair" : "";
   }, [ready, picking]);
 
-  // Make sure tiles fill the container right before printing
+  // Repaint the maps at print size: right before printing (print button, Ctrl+P / browser menu, print preview)
   useEffect(() => {
-    const handler = () => {
-      mapRef.current?.invalidateSize();
-      glLayerRef.current?.getMaplibreMap?.()?.resize?.();
+    const prepare = () => {
+      mapRef.current?.invalidateSize({ animate: false });
+      const gl = glLayerRef.current?.getMaplibreMap?.();
+      gl?.resize?.();
+      // Keep a picture of the topo map right after it was drawn, for the print copy of the sheet
+      gl?.once?.("render", () => {
+        try {
+          const canvas: HTMLCanvasElement = gl.getCanvas();
+          canvas.setAttribute("data-snapshot", canvas.toDataURL("image/png"));
+        } catch {
+          // The print copy reads the canvas directly instead
+        }
+      });
+      gl?.triggerRepaint?.();
     };
-    window.addEventListener("beforeprint", handler);
-    return () => window.removeEventListener("beforeprint", handler);
+    const media = window.matchMedia("print");
+    const onMedia = (e: MediaQueryListEvent) => e.matches && prepare();
+    window.addEventListener(PRINT_PREPARE_EVENT, prepare);
+    window.addEventListener("beforeprint", prepare);
+    media.addEventListener("change", onMedia);
+    return () => {
+      window.removeEventListener(PRINT_PREPARE_EVENT, prepare);
+      window.removeEventListener("beforeprint", prepare);
+      media.removeEventListener("change", onMedia);
+    };
   }, []);
 
   const chipText = glStatus === "loading" ? "LOADING TOPO MAP…" : statusChip;

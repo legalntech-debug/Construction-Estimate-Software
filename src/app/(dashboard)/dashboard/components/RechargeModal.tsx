@@ -10,6 +10,12 @@ interface RechargeModalProps {
   onRechargeSubmitted?: () => Promise<void> | void;
   upiId?: string;
   helplineNo?: string;
+  /** Service charge the user is trying to pay for (shows a shortfall banner and pre-fills the amount). */
+  requiredAmount?: number;
+  /** Name of the service that needs the charge (shown in the banner). */
+  serviceName?: string;
+  /** Wallet balance at the time the modal is opened (used to compute the shortfall). */
+  currentBalance?: number;
 }
 
 export default function RechargeModal({
@@ -18,10 +24,23 @@ export default function RechargeModal({
   userData,
   onRechargeSubmitted,
   upiId = '9669562719-3@axl',
-  helplineNo = '7987561396'
+  helplineNo = '7987561396',
+  requiredAmount,
+  serviceName,
+  currentBalance
 }: RechargeModalProps) {
+  // Minimum recharge amount
+  const MIN_RECHARGE = 100;
+
+  // Shortfall = service charge minus current balance (only when a service charge was passed in)
+  const shortfall =
+    typeof requiredAmount === 'number' && requiredAmount > 0
+      ? Math.max(0, requiredAmount - Number(currentBalance || 0))
+      : 0;
+
   const [step, setStep] = useState<1 | 2>(1);
-  const [amount, setAmount] = useState<string>('');
+  // Pre-fill the amount with the shortfall (but never below the minimum recharge)
+  const [amount, setAmount] = useState<string>(shortfall > 0 ? String(Math.max(MIN_RECHARGE, Math.ceil(shortfall))) : '');
   const [utr, setUtr] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
@@ -31,9 +50,6 @@ export default function RechargeModal({
   const [latestStatus, setLatestStatus] = useState<string | null>(null);
   const [adminRemark, setAdminRemark] = useState<string | null>(null);
   const [userRecharges, setUserRecharges] = useState<any[]>([]);
-
-  // Minimum recharge amount
-  const MIN_RECHARGE = 100;
 
   // Fetch user's recharge history and latest status when modal opens
   useEffect(() => {
@@ -232,6 +248,18 @@ export default function RechargeModal({
           </button>
         </div>
 
+        {/* Service shortfall banner (shown when opened from a service click) */}
+        {shortfall > 0 && (
+          <div className="px-4 py-3 bg-rose-50 border-b border-rose-200 text-[11px] text-rose-900 leading-snug">
+            <p className="font-bold text-rose-700">
+              Insufficient wallet balance{serviceName ? ` for ${serviceName}` : ''}
+            </p>
+            <p className="mt-0.5">
+              Service charge: <b>₹{Number(requiredAmount).toFixed(2)}</b> · Wallet: <b>₹{Number(currentBalance || 0).toFixed(2)}</b> · Short by: <b>₹{shortfall.toFixed(2)}</b>
+            </p>
+          </div>
+        )}
+
         {/* Latest Status & Prominent Rejection Reason Banner */}
         {latestStatus && (
           <div className={`px-4 py-3 border-b text-xs font-semibold flex flex-col gap-1.5 ${getStatusBadge(latestStatus)}`}>
@@ -257,7 +285,7 @@ export default function RechargeModal({
         {/* Desktop Browser Alert */}
         {desktopNotice && (
           <div className="bg-amber-50 border-b border-amber-200 p-2.5 text-[11px] text-amber-900 font-medium text-center leading-tight">
-            📋 UPI ID copied! Mobile device par ye click direct PhonePe / GPay app launch karega.
+            📋 UPI ID copied! On a mobile device this click opens the PhonePe / GPay app directly.
           </div>
         )}
 

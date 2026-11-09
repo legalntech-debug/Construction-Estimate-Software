@@ -31,13 +31,18 @@ import {
   MAX_PHOTOS,
   PHOTO_STORAGE_PREFIX,
   PICK_ROAD_TOLERANCE_M,
+  PRINT_PREPARE_EVENT,
+  PRINT_SETTLE_MS,
   RETURN_TO_FORM_FLAG,
   ROUTE_MAP_TYPE,
+  SHEET_FONT,
+  SHEET_FONT_FAMILY,
   SIGNATORY_NAME,
   STORAGE_KEY,
 } from "./engine/constants";
 import { compressImageFile, findRoadSide, formatCoordinate, formatSignatureDate, mainRoadText, newId } from "./engine/helpers";
 import { plotSidesFt, quadRing, rectAround, ringAreaSqFt, ringCenter, simplifyRing } from "./engine/plotShape";
+import { printSheet } from "./engine/printSheet";
 import { useMapFeatures } from "./hooks/useMapFeatures";
 import LeafletMap from "./components/LeafletMap";
 import type { LandmarkShape, MapApi, TopoData } from "./components/LeafletMap";
@@ -45,6 +50,8 @@ import NorthArrow from "./components/NorthArrow";
 import PhotoPanel from "./components/PhotoPanel";
 import PlotSketch from "./components/PlotSketch";
 import PreviewToolbar from "./components/PreviewToolbar";
+import SheetViewport from "./components/SheetViewport";
+import type { ViewMode } from "./components/SheetViewport";
 
 // Only one click mode is active at a time
 type EditMode = "none" | "route" | "landmark" | "pickRoad" | "plotEdit" | "plotDraw";
@@ -62,6 +69,8 @@ export default function RouteMapPreviewPage() {
   const [insetImage, setInsetImage] = useState<string | null>(null);
   const [photos, setPhotos] = useState<string[]>([]);
   const mapApiRef = useRef<MapApi | null>(null);
+  // The sheet is shown scaled to the screen by default, so it is usable on a phone as well as on a computer
+  const [viewMode, setViewMode] = useState<ViewMode>("fit");
 
   // Load the record handed over by the input form
   useEffect(() => {
@@ -367,6 +376,42 @@ export default function RouteMapPreviewPage() {
     }
   };
 
+  // Print from a clean window (see engine/printSheet.ts). If the browser blocks the new window, the page itself is printed.
+  const handlePrint = async () => {
+    const sheet = document.getElementById("route-map-sheet");
+    if (!sheet) return;
+    const prepare = async () => {
+      window.dispatchEvent(new Event(PRINT_PREPARE_EVENT));
+      await new Promise((resolve) => setTimeout(resolve, PRINT_SETTLE_MS));
+    };
+    try {
+      const opened = await printSheet(sheet, {
+        title: document.title,
+        css: ".rm-street-gray .leaflet-tile-pane { filter: grayscale(1) contrast(1.1); }",
+        prepare,
+      });
+      if (opened) return;
+    } catch (e) {
+      console.error("Printing from a new window failed:", e);
+    }
+    await prepare();
+    window.print();
+  };
+
+  // Ctrl+P / Cmd+P use the same clean print
+  const handlePrintRef = useRef(handlePrint);
+  handlePrintRef.current = handlePrint;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        handlePrintRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const handleBackToInput = () => {
     try {
       sessionStorage.setItem(RETURN_TO_FORM_FLAG, "1");
@@ -416,12 +461,27 @@ export default function RouteMapPreviewPage() {
         #route-map-sheet { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         #route-map-sheet .leaflet-container { font-family: Arial, sans-serif; }
         #route-map-sheet .rm-street-gray .leaflet-tile-pane { filter: grayscale(1) contrast(1.1); }
+        @media (pointer: coarse) {
+          .rm-h-vertex { width: 28px !important; height: 28px !important; margin: -14px 0 0 -14px !important; }
+          .rm-h-mid { width: 22px !important; height: 22px !important; margin: -11px 0 0 -11px !important; }
+          .rm-h-move { width: 40px !important; height: 40px !important; margin: -20px 0 0 -20px !important; font-size: 24px !important; line-height: 40px !important; }
+        }
         @media print {
-          @page { size: A4 landscape; margin: 0; }
-          html, body { height: 210mm !important; overflow: hidden !important; background: #fff !important; }
+          @page { size: 297mm 210mm; margin: 0; }
+          html, body { width: 297mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; background: #fff !important; }
+          /* The layout around the sheet (side menu, scroll boxes, transforms) must not move or clip it */
+          body *:has(#route-map-sheet) {
+            position: static !important; display: block !important; transform: none !important; filter: none !important;
+            width: auto !important; max-width: none !important; height: auto !important; max-height: none !important;
+            margin: 0 !important; padding: 0 !important; border: 0 !important; overflow: visible !important;
+          }
           body * { visibility: hidden !important; }
           #route-map-sheet, #route-map-sheet * { visibility: visible !important; }
-          #route-map-sheet { position: fixed !important; left: 0; top: 0; margin: 0 !important; box-shadow: none !important; }
+          #route-map-sheet {
+            position: absolute !important; left: 0 !important; top: 0 !important; margin: 0 !important;
+            width: 297mm !important; height: 209.8mm !important; box-shadow: none !important; overflow: hidden !important;
+            break-inside: avoid; page-break-after: avoid;
+          }
           .no-print { display: none !important; }
           #route-map-sheet .leaflet-control-zoom { display: none !important; }
         }
@@ -474,11 +534,13 @@ export default function RouteMapPreviewPage() {
         onInsetUpload={handleInsetUpload}
         onInsetRemove={handleInsetRemove}
         onBack={handleBackToInput}
-        onPrint={() => window.print()}
+        onPrint={handlePrint}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
       />
 
       {/* Sheet (A4 landscape, printed as is) */}
-      <div id="route-map-scroll" className="overflow-x-auto">
+      <SheetViewport mode={viewMode}>
         <div
           id="route-map-sheet"
           style={{
@@ -489,7 +551,7 @@ export default function RouteMapPreviewPage() {
             background: "#fff",
             boxShadow: "0 0 8px rgba(0,0,0,0.25)",
             margin: "0 auto",
-            fontFamily: "Arial, Helvetica, sans-serif",
+            fontFamily: SHEET_FONT_FAMILY,
             color: "#000",
           }}
         >
@@ -540,11 +602,11 @@ export default function RouteMapPreviewPage() {
 
                 {/* Coordinates and main road */}
                 <div style={{ position: "absolute", top: "2mm", left: "3mm", zIndex: 1200, pointerEvents: "none", maxWidth: "44%" }}>
-                  <div style={{ background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: "13pt", color: CYAN, display: "inline-block" }}>
+                  <div style={{ background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: SHEET_FONT.title, color: CYAN, display: "inline-block" }}>
                     LAT &amp; LONG : {formatCoordinate(printedLat)}, {formatCoordinate(printedLng)}
                   </div>
                   {summary && (
-                    <div style={{ marginTop: "1mm", background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: "7.5pt", display: "inline-block", lineHeight: 1.25 }}>
+                    <div style={{ marginTop: "1mm", background: "rgba(255,255,255,0.9)", padding: "0.5mm 2mm", fontWeight: 700, fontSize: SHEET_FONT.note, display: "inline-block", lineHeight: 1.25 }}>
                       {mainRoadText(summary)}
                     </div>
                   )}
@@ -565,7 +627,7 @@ export default function RouteMapPreviewPage() {
                 </div>
 
                 {/* Disclaimer */}
-                <div style={{ position: "absolute", left: "2mm", bottom: "1.5mm", zIndex: 1200, maxWidth: "62%", background: "rgba(255,255,255,0.9)", padding: "0.3mm 1mm", fontWeight: 700, fontSize: "5.5pt", lineHeight: 1.25, pointerEvents: "none" }}>
+                <div style={{ position: "absolute", left: "2mm", bottom: "1.5mm", zIndex: 1200, maxWidth: "62%", background: "rgba(255,255,255,0.9)", padding: "0.3mm 1mm", fontWeight: 700, fontSize: SHEET_FONT.fine, lineHeight: 1.25, pointerEvents: "none" }}>
                   {DISCLAIMER_TEXT}
                 </div>
               </div>
@@ -575,21 +637,21 @@ export default function RouteMapPreviewPage() {
             <div style={{ width: "29%", display: "flex", flexDirection: "column" }}>
               {/* Customer block */}
               <div style={{ flex: "0 0 34.5%", padding: "3mm 3mm 2mm", boxSizing: "border-box", overflow: "hidden" }}>
-                <div style={{ color: CYAN, fontWeight: 700, fontSize: "12.5pt", textAlign: "center", lineHeight: 1.15, marginBottom: "4mm" }}>
+                <div style={{ color: CYAN, fontWeight: 700, fontSize: SHEET_FONT.title, textAlign: "center", lineHeight: 1.15, marginBottom: "4mm" }}>
                   ROUTE MAP / KEY PLAN / LOCATION PLAN
                 </div>
-                <div style={{ color: CYAN, fontWeight: 700, fontSize: "8.5pt", marginBottom: "1.5mm" }}>CUSTOMER NAME</div>
-                <div style={{ fontWeight: 700, fontSize: "8pt", textTransform: "uppercase", lineHeight: 1.25, marginBottom: "3.5mm" }}>
+                <div style={{ color: CYAN, fontWeight: 700, fontSize: SHEET_FONT.heading, marginBottom: "1.5mm" }}>CUSTOMER NAME</div>
+                <div style={{ fontWeight: 700, fontSize: SHEET_FONT.heading, textTransform: "uppercase", lineHeight: 1.25, marginBottom: "3.5mm" }}>
                   {data.customer_name}
                 </div>
-                <div style={{ color: CYAN, fontWeight: 700, fontSize: "8.5pt", marginBottom: "1.5mm" }}>PROPERTY ADDRESS :</div>
-                <div style={{ fontWeight: 700, fontSize: "8pt", textTransform: "uppercase", lineHeight: 1.25 }}>
+                <div style={{ color: CYAN, fontWeight: 700, fontSize: SHEET_FONT.heading, marginBottom: "1.5mm" }}>PROPERTY ADDRESS :</div>
+                <div style={{ fontWeight: 700, fontSize: SHEET_FONT.heading, textTransform: "uppercase", lineHeight: 1.25 }}>
                   {data.property_address}
                 </div>
               </div>
 
               {/* Plot area row */}
-              <div style={{ flex: "0 0 4%", borderTop: "0.3mm solid #000", borderBottom: "0.3mm solid #000", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 3mm", fontWeight: 700, fontSize: "10.5pt", textTransform: "uppercase" }}>
+              <div style={{ flex: "0 0 4%", borderTop: "0.3mm solid #000", borderBottom: "0.3mm solid #000", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 3mm", fontWeight: 700, fontSize: SHEET_FONT.row, textTransform: "uppercase" }}>
                 <span>PLOT AREA</span>
                 <span>{data.plot_area} SQ. FT</span>
               </div>
@@ -600,14 +662,14 @@ export default function RouteMapPreviewPage() {
               </div>
 
               {/* Signature block */}
-              <div style={{ flex: "0 0 17.5%", borderTop: "0.3mm solid #000", padding: "2.5mm 3mm", boxSizing: "border-box", fontSize: "10.5pt", lineHeight: 1.3 }}>
+              <div style={{ flex: "0 0 17.5%", borderTop: "0.3mm solid #000", padding: "2.5mm 3mm", boxSizing: "border-box", fontSize: SHEET_FONT.row, lineHeight: 1.3 }}>
                 <div>Digitally signed by {SIGNATORY_NAME}</div>
                 <div>Date: {formatSignatureDate(data.generated_at)}</div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </SheetViewport>
     </div>
   );
 }

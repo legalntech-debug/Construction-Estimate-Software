@@ -705,3 +705,72 @@ export const plotRotationDeg = (
   }
   return Math.round(angle * 10) / 10;
 };
+
+// ---------------------------------------------------------------------------
+// Point along a road
+// ---------------------------------------------------------------------------
+
+// A point on one of the given ways, distM metres along the road from the spot nearest to "near", and the direction of
+// the road there (bearing in degrees, 0 = north). Used to put the main road name beside the plot instead of on it.
+// The way is followed in the direction that has enough road left; null when none of the ways exist.
+export const pointAlongWays = (
+  roads: RoadWay[],
+  wayIds: number[] | Set<number>,
+  near: LatLng,
+  distM: number
+): { point: LatLng; bearing: number } | null => {
+  const ids = wayIds instanceof Set ? wayIds : new Set(wayIds);
+  const proj = makeProjector(near);
+  const origin = { x: 0, y: 0 };
+
+  // Nearest segment of the ways
+  let best: { way: RoadWay; index: number; t: number; dist: number } | null = null;
+  for (const way of roads) {
+    if (!ids.has(way.id)) continue;
+    for (let i = 1; i < way.geometry.length; i++) {
+      const hit = projectOnSegment(origin, proj(way.geometry[i - 1]), proj(way.geometry[i]));
+      if (!best || hit.dist < best.dist) best = { way, index: i, t: hit.t, dist: hit.dist };
+    }
+  }
+  if (!best) return null;
+
+  const { way, index, t } = best;
+  const geometry = way.geometry;
+  const start: LatLng = {
+    lat: geometry[index - 1].lat + (geometry[index].lat - geometry[index - 1].lat) * t,
+    lng: geometry[index - 1].lng + (geometry[index].lng - geometry[index - 1].lng) * t,
+  };
+
+  // Walk along the way from the start point in one direction
+  const walk = (forward: boolean): { point: LatLng; bearing: number; reached: boolean } => {
+    let from = start;
+    let remaining = distM;
+    let i = forward ? index : index - 1;
+    let lastBearing = bearingDeg(geometry[index - 1], geometry[index]) + (forward ? 0 : 180);
+    while (i >= 0 && i < geometry.length) {
+      const to = geometry[i];
+      const seg = haversineMeters(from, to);
+      if (seg > 0) lastBearing = bearingDeg(from, to);
+      if (seg >= remaining && seg > 0) {
+        const k = remaining / seg;
+        return {
+          point: { lat: from.lat + (to.lat - from.lat) * k, lng: from.lng + (to.lng - from.lng) * k },
+          bearing: lastBearing,
+          reached: true,
+        };
+      }
+      remaining -= seg;
+      from = to;
+      i += forward ? 1 : -1;
+    }
+    return { point: from, bearing: lastBearing, reached: false };
+  };
+
+  const forward = walk(true);
+  if (forward.reached) return { point: forward.point, bearing: forward.bearing };
+  const backward = walk(false);
+  if (backward.reached) return { point: backward.point, bearing: backward.bearing };
+  // The road is shorter than the distance in both directions: use the end that is further away
+  const far = haversineMeters(start, forward.point) >= haversineMeters(start, backward.point) ? forward : backward;
+  return { point: far.point, bearing: far.bearing };
+};

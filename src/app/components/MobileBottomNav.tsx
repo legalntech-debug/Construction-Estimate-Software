@@ -56,7 +56,8 @@ export default function MobileBottomNav({ onOpenMenu }: MobileBottomNavProps) {
     checkUserSession();
   }, []);
 
-  const isWalletLow = walletBalance < 36;
+  // Lock only when the wallet balance is negative (per-service charge checks happen in each service page)
+  const isWalletLow = walletBalance < 0;
   const isPremium = userPlan.toUpperCase().includes('PREMIUM');
   const isRestricted = !isAdmin && !isPremium && (isWalletLow || !isDataLoaded);
 
@@ -74,7 +75,7 @@ export default function MobileBottomNav({ onOpenMenu }: MobileBottomNavProps) {
   const handleRestrictedClick = (e: React.MouseEvent, href: string) => {
     if (isRestricted) {
       e.preventDefault();
-      alert('Aapka wallet balance ₹100 se kam hai. Kripya wallet recharge karein.');
+      alert('Your wallet balance is negative. Please recharge your wallet.');
       router.push('/wallet-ledger');
     }
   };

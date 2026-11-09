@@ -401,6 +401,8 @@ interface FloorManagerSectionProps {
   roomEditorFloor: string | null;
   floorRooms: Record<string, Record<string, FloorRoom>>;
   updateFloorAreaDirect: (floor: string, area: number) => void;
+  /** v28: irregular / L plot - specific area ko rectangular banane ka button (sirf zarurat par dikhta hai) */
+  shapeRect?: { status: (floor: string) => "OFFER" | "APPLIED" | null; make: (floor: string) => void; reset: (floor: string) => void };
   updateFloorDimensions?: (floor: string, width: number, length: number) => void;
   updateFloorSetbacks?: (floor: string, setback: { front?: number; rear?: number; left?: number; right?: number }) => void;
   updateFloorPosition?: (floor: string, x: number, y: number) => void;
@@ -472,6 +474,7 @@ export default function FloorManagerSection({
   roomEditorFloor,
   floorRooms,
   updateFloorAreaDirect,
+  shapeRect,
   updateFloorDimensions,
   updateFloorSetbacks,
   updateFloorPosition,
@@ -1050,6 +1053,24 @@ export default function FloorManagerSection({
   const gfL = Number(gfData.length) || plotDepth;
   const currentNearest = getNearestPreset(gfW, gfL);
 
+
+  // v28: irregular / L plot par chhota area diya ho tabhi "RECTANGULAR BANAO" dikhta hai; laga ho to "POORA SHAPE" se wapas
+  const renderRectBtn = (floor: string) => {
+    const st = shapeRect?.status(floor);
+    if (!st || !shapeRect) return null;
+    return st === "OFFER" ? (
+      <button type="button" onClick={() => shapeRect.make(floor)}
+        className="mt-1 w-full bg-indigo-700 text-white px-2 py-1 text-[9px] font-black uppercase leading-tight">
+        ▭ Rectangular banao (is area ka)
+      </button>
+    ) : (
+      <button type="button" onClick={() => shapeRect.reset(floor)}
+        className="mt-1 w-full bg-white text-indigo-800 border-2 border-indigo-700 px-2 py-1 text-[9px] font-black uppercase leading-tight">
+        ✕ Rectangular hataao (poora plot shape)
+      </button>
+    );
+  };
+
   return (
     <div className="border-2 border-black mb-4 bg-white shadow-sm uppercase font-sans text-xs">
       {/* HEADER */}
@@ -1146,6 +1167,7 @@ export default function FloorManagerSection({
                   onChange={(e) => updateFloorAreaDirect(floor, Number(e.target.value) || 0)}
                   className="w-full border-2 border-black p-1.5 text-center font-black text-xs bg-white"
                 />
+                {renderRectBtn(floor)}
               </div>
 
               {!isGround && (
@@ -1302,6 +1324,7 @@ export default function FloorManagerSection({
                         />
                         <span className="text-[10px] font-black">SQ.FT</span>
                       </div>
+                      {renderRectBtn(floor)}
                     </td>
 
                     <td className="border-r border-black p-2.5 text-center">

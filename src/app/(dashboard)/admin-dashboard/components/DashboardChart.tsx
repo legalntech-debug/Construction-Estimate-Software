@@ -4,75 +4,54 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 interface DashboardChartProps {
   data?: any[];
+  /** how many of the most recent records to plot */
+  limit?: number;
 }
 
-export default function DashboardChart({ data = [] }: DashboardChartProps) {
+const stamp = (item: any): number => {
+  const t = new Date(item.created_at || item.created_date || 0).getTime();
+  return Number.isFinite(t) ? t : 0;
+};
+
+/** MIS record amounts over time (oldest -> newest). */
+export default function DashboardChart({ data = [], limit = 30 }: DashboardChartProps) {
   const safeData = Array.isArray(data) ? data : [];
 
-  const chartData = safeData.slice(-10).map((item, index) => ({
-    name: item.created_at 
-      ? new Date(item.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }) 
-      : `Entry ${index + 1}`,
-    revenue: Number(item.fee_standard || item.amount || item.user_payment || item.paid_amount || 0)
-  }));
+  const chartData = [...safeData]
+    .sort((a, b) => stamp(a) - stamp(b))
+    .slice(-limit)
+    .map((item, index) => {
+      const ts = stamp(item);
+      return {
+        name: ts
+          ? new Date(ts).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' })
+          : `#${index + 1}`,
+        revenue: Number(item.fee_standard || item.amount || item.user_payment || item.paid_amount || 0),
+      };
+    });
 
   return (
-    <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl p-4 sm:p-6 my-6 space-y-4 text-slate-100">
-      {/* Header - Stacks on mobile */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h3 className="font-extrabold text-white text-sm sm:text-base tracking-wide uppercase">
-            Revenue & Analytics Trend
-          </h3>
-          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">Visualizing recent transaction history</p>
-        </div>
-        <span className="text-[11px] font-bold px-2.5 py-1 bg-slate-800 text-blue-400 border border-slate-700 rounded-lg self-start sm:self-auto">
-          {chartData.length} Records
-        </span>
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-slate-500">Most recent {chartData.length} MIS record{chartData.length === 1 ? '' : 's'} in the selected window</p>
       </div>
-
-      {/* Chart Container */}
-      <div className="h-[260px] sm:h-[300px] w-full pt-2">
+      <div className="h-[260px] w-full" role="img" aria-label="MIS record amounts over time">
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis 
-                dataKey="name" 
-                tick={{ fontSize: 10, fill: '#94a3b8' }} 
-                stroke="#334155" 
+            <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} width={56} tickFormatter={(v) => `₹${Number(v).toLocaleString('en-IN')}`} />
+              <Tooltip
+                contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+                formatter={(val: any) => [`₹${Number(val || 0).toLocaleString('en-IN')}`, 'Amount']}
               />
-              <YAxis 
-                tick={{ fontSize: 10, fill: '#94a3b8' }} 
-                stroke="#334155" 
-                tickFormatter={(val) => `₹${val}`}
-              />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#020617', 
-                  borderRadius: '12px', 
-                  border: '1px solid #1e293b', 
-                  color: '#fff', 
-                  fontSize: '11px',
-                  boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.5)'
-                }}
-                itemStyle={{ color: '#38bdf8', fontWeight: 'bold' }}
-                formatter={(val: any) => [`₹${Number(val || 0).toLocaleString('en-IN')}`, 'Revenue']}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="revenue" 
-                stroke="#3b82f6" 
-                strokeWidth={2.5} 
-                dot={{ r: 4, fill: '#3b82f6', strokeWidth: 2, stroke: '#60a5fa' }} 
-                activeDot={{ r: 6, fill: '#60a5fa' }}
-              />
+              <Line type="monotone" dataKey="revenue" stroke="#1d4ed8" strokeWidth={2} dot={{ r: 3, fill: '#1d4ed8' }} activeDot={{ r: 5 }} />
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div className="h-full flex flex-col items-center justify-center text-xs text-slate-500 font-mono bg-slate-950/40 rounded-xl border border-slate-800/80">
-            <span>📉</span>
-            <span className="mt-2 text-center px-2">NO TRANSACTION DATA AVAILABLE</span>
+          <div className="h-full flex items-center justify-center text-sm text-slate-500 rounded-lg border border-dashed border-slate-200">
+            No MIS records in this window
           </div>
         )}
       </div>

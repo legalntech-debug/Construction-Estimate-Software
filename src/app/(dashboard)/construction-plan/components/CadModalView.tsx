@@ -8,7 +8,8 @@ import { getRoadOrientation } from "../engine/roadOrientation";
 import CadFloorElevationRenderer from "./CadFloorElevationRenderer";
 import CadToolbarSection from "./CadToolbarSection";
 import CadSidebarDimensions from "./CadSidebarDimensions";
-import { completeQuadSides, quadFromDims } from "../engine/plotShapeFit";
+import { completeQuadSides, quadFromDims, lShapeFromDims } from "../engine/plotShapeFit";
+import PlotShapeHandles from "./PlotShapeHandles";
 import { SectionCutDef, ElevationSide, DEFAULT_SECTION_CUTS } from "../engine/sectionEngine";
 
 export interface CadObject {
@@ -295,6 +296,8 @@ export default function CadModalView({
 
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
+  // v28: shape ko mouse / touch se adjust (handles) - on/off
+  const [shapeEdit, setShapeEdit] = useState(true);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   // ✅ Canvas origin as ref (avoids useEffect dependency size change)
@@ -536,6 +539,14 @@ export default function CadModalView({
   let shiftXRight = 0;
 
   const slantB = sideSlant.B || "MID";
+  // v28: handles se aayi nayi dimensions -> plot dimensions (A..F) live update
+  const handleShapeDims = (d: Partial<Record<"A" | "B" | "C" | "D" | "E" | "F", number>>) => {
+    (Object.entries(d) as [string, number][]).forEach(([k, v]) => {
+      if (!(v > 0) || Math.abs(Number((plotDims as any)?.[k]) - v) < 0.001) return;
+      updateDimensionPart(k as any, "ft", v);
+      updateDimensionPart(k as any, "in", 0);
+    });
+  };
   if (slantB === "LEFT") {
     shiftXLeft = -diffWidth;
     shiftXRight = 0;
@@ -554,7 +565,17 @@ export default function CadModalView({
 
   // v23: DEG nahi diya -> chaaro sides ki ASLI length (front/back/left/right) wala polygon (engine ke saath same: quadFromDims)
   const hasSideAngle = !isSimpleRect && !!(sideAngles.A || sideAngles.B || sideAngles.C || sideAngles.D);
-  if (!isSimpleRect && !hasSideAngle) {
+  // v27: L-SHAPE -> asli 6-vertex polygon; 4 corner points = uska bounding box (baaki sab code bbox par chalta hai)
+  const lGeo = isMultiDimShape && String(plotShape).includes("L-SHAPE") ? lShapeFromDims(plotDims as any, String(plotShape)) : null;
+  let lPolyPts: { x: number; y: number }[] | null = null;
+  let lToPx: ((x: number, y: number) => { x: number; y: number }) | null = null;
+  if (lGeo) {
+    const toL = (x: number, y: number) => ({ x: (x - lGeo.W / 2) * scale, y: (y - lGeo.H / 2) * scale });
+    lToPx = toL;
+    lPolyPts = lGeo.poly.map((p) => toL(p.x, p.y));
+    pTopLeft = toL(0, 0); pTopRight = toL(lGeo.W, 0); pBottomRight = toL(lGeo.W, lGeo.H); pBottomLeft = toL(0, lGeo.H);
+  }
+  if (!isSimpleRect && !hasSideAngle && !lGeo) {
     const q = quadFromDims(dimA, dimB, dimC, dimD, slantB as any, null);   // [TL, TR, BR, BL], feet, y neeche
     const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
@@ -616,7 +637,7 @@ export default function CadModalView({
   const actualLenC = Math.hypot(pTopLeft.x - pBottomLeft.x, pTopLeft.y - pBottomLeft.y) / scale;
   const actualLenD = Math.hypot(pTopRight.x - pBottomRight.x, pTopRight.y - pBottomRight.y) / scale;
 
-  const polyPoints = [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
+  const polyPoints = lPolyPts || [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
   let calculatedArea = 0;
   for (let i = 0; i < polyPoints.length; i++) {
     const j = (i + 1) % polyPoints.length;
@@ -664,6 +685,13 @@ export default function CadModalView({
             </div>
           </div>
           <div className="flex items-center gap-1 md:gap-2 shrink-0">
+            {String(plotShape).toUpperCase() !== "RECTANGLE" && String(plotShape).toUpperCase() !== "SQUARE" && (
+              <button type="button" onClick={() => setShapeEdit((v) => !v)}
+                className={`px-1.5 md:px-2 py-0.5 text-[8px] md:text-[10px] font-black border border-black cursor-pointer ${shapeEdit ? "bg-blue-600 text-white" : "bg-white text-black"}`}
+                title="Plot shape ko mouse / touch se khinch kar badlo">
+                ✥ SHAPE {shapeEdit ? "ON" : "OFF"}
+              </button>
+            )}
             <div className="flex items-center gap-0.5 md:gap-1 bg-white text-black px-1 md:px-2 py-0.5 text-[8px] md:text-[10px] font-black border border-black">
               <span>ZOOM: {Math.round(currentZoom * 100)}%</span>
               <button type="button" onClick={() => setCadZoom((prev) => Math.max(0.2, (prev || 1) - 0.1))} className="px-1 font-bold hover:bg-gray-200 cursor-pointer">-</button>
@@ -773,7 +801,7 @@ export default function CadModalView({
 
               {/* Master Group Render */}
               {(() => {
-                const correctedPoints = [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
+                const correctedPoints = lPolyPts || [pTopLeft, pTopRight, pBottomRight, pBottomLeft];
                 const xs = correctedPoints.map(p => p.x);
                 const ys = correctedPoints.map(p => p.y);
                 const minX = Math.min(...xs);
@@ -1087,6 +1115,21 @@ export default function CadModalView({
                         </g>
                       );
                     })()}
+                    {/* v28: shape adjust handles (mouse + touch) */}
+                    {shapeEdit && !isSimpleRect && (lGeo && lToPx ? (
+                      <PlotShapeHandles
+                        mode="L" zoom={currentZoom} scale={scale}
+                        lGeo={{ W: lGeo.W, H: lGeo.H, notchW: lGeo.notchW, notchH: lGeo.notchH,
+                          flipX: /TYPE 1|TYPE 3/i.test(String(plotShape)), flipY: /TYPE 1|TYPE 2/i.test(String(plotShape)), toPx: lToPx }}
+                        onChange={handleShapeDims}
+                      />
+                    ) : (!hasSideAngle ? (
+                      <PlotShapeHandles
+                        mode="QUAD" zoom={currentZoom} scale={scale}
+                        corners={[pTopLeft, pTopRight, pBottomRight, pBottomLeft]}
+                        onChange={handleShapeDims}
+                      />
+                    ) : null))}
                   </g>
                 );
               })()}

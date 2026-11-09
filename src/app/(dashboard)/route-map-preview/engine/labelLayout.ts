@@ -42,7 +42,7 @@ export interface FittedLabel {
 }
 
 // Turns an angle into the range (-90, 90] so text never runs upside down
-const readableAngle = (deg: number) => {
+export const readableAngle = (deg: number) => {
   let r = ((deg % 180) + 180) % 180;
   if (r > 90) r -= 180;
   return r;
@@ -102,6 +102,8 @@ export interface PlotEdge {
   // Unit normal pointing out of the polygon
   normal: PxPoint;
   length: number;
+  // Direction of the edge on screen in degrees (clockwise), in the readable range so text along it never runs upside down
+  angleDeg: number;
 }
 
 // The edge of the ring that faces a compass direction (dir = unit vector on screen: north (0,-1), east (1,0) ...)
@@ -125,7 +127,7 @@ export const edgeFacing = (ring: PxPoint[], dir: PxPoint): PlotEdge | null => {
     const score = normal.x * dir.x + normal.y * dir.y + length * 1e-4;
     if (score > bestScore) {
       bestScore = score;
-      best = { mid, normal, length };
+      best = { mid, normal, length, angleDeg: readableAngle((Math.atan2(dy, dx) * 180) / Math.PI) };
     }
   }
   return best;
@@ -134,32 +136,56 @@ export const edgeFacing = (ring: PxPoint[], dir: PxPoint): PlotEdge | null => {
 export interface BoundaryLabelRequest {
   key: string;
   edge: PlotEdge;
+  // Size of the text block (width along the edge, height across it)
   w: number;
   h: number;
 }
 
-// Puts every label outside its edge and pushes it outwards until it touches no obstacle and no earlier label.
-// Returns the label centres relative to the same origin as the edges.
+export interface PlacedLabel {
+  // Centre of the text block, its turn (parallel to the plot edge) and the size of the unturned block
+  x: number;
+  y: number;
+  angleDeg: number;
+  textW: number;
+  textH: number;
+  // Box around the turned block (used for the overlap test)
+  box: LabelRect;
+}
+
+// Box around a w x h block turned by angleDeg
+const turnedBox = (x: number, y: number, w: number, h: number, angleDeg: number): LabelRect => {
+  const a = (angleDeg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(a));
+  const s = Math.abs(Math.sin(a));
+  return { x, y, w: w * c + h * s, h: w * s + h * c };
+};
+
+// Puts every text outside its edge, parallel to it, and pushes it outwards until it touches no obstacle and no earlier
+// text. Returns the text centres in the same coordinates as the edges.
 export const placeBoundaryLabels = (
   requests: BoundaryLabelRequest[],
   obstacles: LabelRect[],
   gap = 2,
   step = 3,
   maxSteps = 80
-): Record<string, LabelRect> => {
+): Record<string, PlacedLabel> => {
   const placed: LabelRect[] = [...obstacles];
-  const result: Record<string, LabelRect> = {};
+  const result: Record<string, PlacedLabel> = {};
   requests.forEach(({ key, edge, w, h }) => {
-    const reach = Math.abs(edge.normal.x) * (w / 2) + Math.abs(edge.normal.y) * (h / 2);
-    let dist = gap;
-    let rect: LabelRect = { x: edge.mid.x, y: edge.mid.y, w, h };
+    // The text runs along the edge, so across the edge it needs half of its height
+    let dist = gap + h / 2;
+    let x = edge.mid.x;
+    let y = edge.mid.y;
+    let box = turnedBox(x, y, w, h, edge.angleDeg);
     for (let i = 0; i < maxSteps; i++) {
-      rect = { x: edge.mid.x + edge.normal.x * (dist + reach), y: edge.mid.y + edge.normal.y * (dist + reach), w, h };
-      if (!placed.some((p) => rectsOverlap(rect, p))) break;
+      x = edge.mid.x + edge.normal.x * dist;
+      y = edge.mid.y + edge.normal.y * dist;
+      box = turnedBox(x, y, w, h, edge.angleDeg);
+      if (!placed.some((p) => rectsOverlap(box, p))) break;
       dist += step;
     }
-    placed.push(rect);
-    result[key] = rect;
+    placed.push(box);
+    result[key] = { x, y, angleDeg: edge.angleDeg, textW: w, textH: h, box };
   });
   return result;
 };

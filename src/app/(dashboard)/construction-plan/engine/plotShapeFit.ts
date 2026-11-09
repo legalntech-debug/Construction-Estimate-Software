@@ -51,6 +51,31 @@ export function normalizePolygon(p: Pt[]): Pt[] {
 }
 
 /**
+ * v27: L-SHAPE plot polygon. UI blueprint: A = front (road) width, B = right (chhota) side, C = top (rear) width,
+ * D = left (poori) height, E = A - C (inner step), F = D - B (inner vertical). Front bottom me (y neeche).
+ * Notch (kata hua hissa): B & C diye ho to (A-C) x (D-B), warna E x F, warna A/3 x D/3.
+ * TYPE 1 = front-left cut, TYPE 2 = front-right, TYPE 3 = rear-left, baaki (TYPE 4/5/6/plain) = rear-right (base).
+ */
+export function lShapeFromDims(dims: { A?: any; B?: any; C?: any; D?: any; E?: any; F?: any }, shape: string): { poly: Pt[]; W: number; H: number; area: number; notchW: number; notchH: number } | null {
+  const n = (v: any) => Number(v) || 0;
+  const A = n(dims.A), D = n(dims.D) || n(dims.C);
+  if (!(A > 1 && D > 1)) return null;
+  let nw = 0, nh = 0;
+  if (n(dims.B) > 0 && n(dims.C) > 0 && n(dims.C) < A && n(dims.B) < D && n(dims.D) > 0) { nw = A - n(dims.C); nh = D - n(dims.B); }
+  else if (n(dims.E) > 0 && n(dims.F) > 0) { nw = n(dims.E); nh = n(dims.F); }
+  else { nw = A / 3; nh = D / 3; }
+  nw = Math.min(Math.max(nw, 1), A - 1); nh = Math.min(Math.max(nh, 1), D - 1);
+  let pts: Pt[] = [{ x: 0, y: D }, { x: A, y: D }, { x: A, y: nh }, { x: A - nw, y: nh }, { x: A - nw, y: 0 }, { x: 0, y: 0 }];   // notch rear-right
+  const t = String(shape || '').toUpperCase();
+  const flipX = t.includes('TYPE 1') || t.includes('TYPE 3');
+  const flipY = t.includes('TYPE 1') || t.includes('TYPE 2');
+  pts = pts.map((p) => ({ x: flipX ? A - p.x : p.x, y: flipY ? D - p.y : p.y }));
+  if (flipX !== flipY) pts = pts.reverse();
+  const poly = normalizePolygon(pts);
+  return { poly, W: A, H: D, area: Math.abs(polygonArea(poly)), notchW: nw, notchH: nh };
+}
+
+/**
  * v26: irregular plot par user ka SPECIFIC area -> rectangular (outer) dims. Core (plot ke andar ka max rectangle) ke
  * aspect ke hisaab se; core se bada nahi jaata. cw/ch = core ka OUTER size (core + 2 wall).
  */
@@ -65,11 +90,11 @@ export function rectForArea(area: number, cw: number, ch: number): { w: number; 
 }
 
 /** v26: base fit ke core ke andar (core ke top-left se) outerW x outerL ka RECTANGULAR floor fit (polygon = rectangle) */
-export function makeRectFit(base: PlotShapeFit, outerW: number, outerL: number): PlotShapeFit {
+export function makeRectFit(base: PlotShapeFit, outerW: number, outerL: number, alignBottom = false): PlotShapeFit {
   const wall = base.wall;
   const iw = Math.max(1, Math.min(outerW - 2 * wall, base.core.w));
   const il = Math.max(1, Math.min(outerL - 2 * wall, base.core.h));
-  const X0 = base.core.x, Y0 = base.core.y;
+  const X0 = base.core.x, Y0 = alignBottom ? base.core.y + base.core.h - il : base.core.y;   // L: rectangle road (neeche) se lagi rahe
   const inner: Pt[] = [{ x: X0, y: Y0 }, { x: X0 + iw, y: Y0 }, { x: X0 + iw, y: Y0 + il }, { x: X0, y: Y0 + il }];
   const outer: Pt[] = [{ x: X0, y: Y0 }, { x: X0 + iw + 2 * wall, y: Y0 }, { x: X0 + iw + 2 * wall, y: Y0 + il + 2 * wall }, { x: X0, y: Y0 + il + 2 * wall }];
   return { outer, inner, width: Number((iw + 2 * wall).toFixed(3)), length: Number((il + 2 * wall).toFixed(3)), core: { x: X0, y: Y0, w: iw, h: il }, wall };
@@ -214,7 +239,7 @@ export function scanInterval(poly: Pt[], y: number): [number, number] | null {
 }
 
 /** polygon ke andar sabse bada axis-aligned rectangle (area max; barabar par zyada depth) */
-export function maxInscribedRect(poly: Pt[], minW = 8, minH = 12): Rect | null {
+export function maxInscribedRect(poly: Pt[], minW = 8, minH = 12, touchBottom = false): Rect | null {
   const b = bbox(poly);
   const step = 0.25;
   const ys: number[] = [];
@@ -231,10 +256,12 @@ export function maxInscribedRect(poly: Pt[], minW = 8, minH = 12): Rect | null {
     for (let k1 = k0; k1 < ys.length; k1++) {
       lo = Math.max(lo, xl[k1]); hi = Math.min(hi, xr[k1]);
       if (hi - lo < minW) break;
-      if ((k1 - k0 + 1) % stride !== 0) continue;
+      // v28: road-touching core (L-shape) -> rectangle polygon ke sabse neeche (road face) tak jaana chahiye
+      if (touchBottom) { if (k1 !== ys.length - 1) continue; }
+      else if ((k1 - k0 + 1) % stride !== 0) continue;
       const h = (k1 - k0 + 1) * step, w = hi - lo;
       if (h < minH) continue;
-      const score = w * h + h * 0.001;
+      const score = touchBottom ? w * h + w * 0.001 : w * h + h * 0.001;
       if (score > bestScore) { bestScore = score; best = { x: lo, y: b.minY + k0 * step, w, h }; }
     }
   }
@@ -279,6 +306,8 @@ export function buildPlotShapeFit(args: {
   angles?: { A?: number; B?: number; C?: number; D?: number } | null;
   setbacks: { front: number; rear: number; left: number; right: number };
   wall: number;
+  /** v28: core road face (neeche) ko chhoona chahiye (L-shape) */
+  roadBottom?: boolean;
 }): PlotShapeFit | null {
   const shape = String(args.shape || '').toUpperCase();
   const simpleRect = shape === 'RECTANGLE' || shape === 'RECTANGULAR' || shape === 'SQUARE';
@@ -297,7 +326,7 @@ export function buildPlotShapeFit(args: {
   const outer = outerRaw.map(p => ({ x: Number((p.x - ob.minX).toFixed(4)), y: Number((p.y - ob.minY).toFixed(4)) }));
   const innerOuterFrame = insetPolygon(outer, { front: args.wall, rear: args.wall, left: args.wall, right: args.wall });
   const inner = innerOuterFrame.map(p => ({ x: Number((p.x - args.wall).toFixed(4)), y: Number((p.y - args.wall).toFixed(4)) }));
-  const core = maxInscribedRect(inner);
+  const core = (args.roadBottom ? maxInscribedRect(inner, 8, 12, true) : null) || maxInscribedRect(inner);
   if (!core) return null;
   return {
     outer, inner, width: Number((ob.maxX - ob.minX).toFixed(3)), length: Number((ob.maxY - ob.minY).toFixed(3)),
@@ -313,8 +342,10 @@ const edgeXAt = (poly: Pt[], y: number): [number, number] | null => scanInterval
  * rooms core-frame se pehle hi INNER frame me shift ho chuke hote hain.
  * return: extWalls = wedge ke andar partition lines [x1,y1,x2,y2]
  */
+const isServiceRoom = (r: any) => /TOILET|BATH|WC|DUCT|SHAFT|STAIR|PASSAGE|DRESSING|LOBBY/i.test(String(r?.name || ''));
+
 export function extendRoomsToPolygon(
-  rooms: any[], inner: Pt[], core: Rect,
+  rooms: any[], inner: Pt[], core: Rect, opts?: { avoidService?: boolean },
 ): { extWalls: number[][]; extended: number } {
   const b = bbox(inner);
   const extWalls: number[][] = [];
@@ -352,12 +383,25 @@ export function extendRoomsToPolygon(
       const cov = cand.filter(r => { const [a, bb] = iv(r); return a <= m && bb >= m; });
       if (!cov.length) continue;
       cov.sort((p, q) => area(p) - area(q));          // sabse chhota (sub-room) pehle
-      const pick = cov[0];
+      // v28 (L-shape): toilet / duct / passage / stair wedge me extend na hon -> bedroom / living / kitchen extend hon
+      const habitable = opts?.avoidService ? cov.filter((r) => !isServiceRoom(r)) : cov;
+      const pick = (habitable.length ? habitable : cov)[0];
       const last = segs[segs.length - 1];
       if (last && last.room === pick && Math.abs(last.b - bps[i]) < 1e-6) last.b = bps[i + 1];
       else segs.push({ a: bps[i], b: bps[i + 1], room: pick });
     }
     if (!segs.length) continue;
+    if (opts?.avoidService) {
+      // service-only segment (common toilet, duct, passage ...) -> pados ke habitable room ko de do
+      for (let si = 0; si < segs.length; si++) {
+        if (!isServiceRoom(segs[si].room)) continue;
+        const nb = [segs[si - 1], segs[si + 1]].find((q) => q && !isServiceRoom(q.room));
+        if (nb) segs[si].room = nb.room;
+      }
+      for (let si = segs.length - 1; si > 0; si--) {
+        if (segs[si].room === segs[si - 1].room && Math.abs(segs[si - 1].b - segs[si].a) < 1e-6) { segs[si - 1].b = segs[si].b; segs.splice(si, 1); }
+      }
+    }
     // pehla/aakhri segment polygon ke extreme tak jaye
     const ext0 = horizontalStrip ? b.minY : b.minX;
     const ext1 = horizontalStrip ? b.maxY : b.maxX;

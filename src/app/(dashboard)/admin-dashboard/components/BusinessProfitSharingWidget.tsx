@@ -2,6 +2,11 @@
 
 import { useState, useEffect, Fragment } from 'react';
 import { supabase } from '@/lib/supabase';
+import {
+  EXCLUDED_ADMIN_USER_ID, FIXED_MONTHLY_OVERHEAD, EFFECTIVE_START_MONTH,
+  buildRevenueTxns, computeMonthProfit, fetchRevenueSources, inr,
+  isRevenueRow, istMonthKey, istYearRange, resolveAmount, toNum, type MonthProfit,
+} from '../lib/finance';
 
 interface Profile {
   id: string;
@@ -61,12 +66,18 @@ interface MonthlyBreakupItem {
   adminDeduction: number;
   expenses: number;
   payouts: number;
+  /** pool after overhead; negative = loss */
+  pool: number;
+  /** max(0, pool) - what partners share */
   net: number;
+  /** net - payouts already settled */
+  undistributed: number;
+  active: boolean;
 }
 
-const EXCLUDED_USER_ID = '458350dc-59b3-44d9-a9e4-6051602c5291';
-const EFFECTIVE_START_DATE = new Date('2026-09-01T00:00:00.000Z');
-const FIXED_OPERATIONAL_COST = 10000;
+// Single source of truth lives in lib/finance.ts so every module agrees.
+const EXCLUDED_USER_ID = EXCLUDED_ADMIN_USER_ID;
+const FIXED_OPERATIONAL_COST = FIXED_MONTHLY_OVERHEAD;
 
 export default function BusinessProfitSharingWidget() {
   const [isInitiated, setIsInitiated] = useState(false);
@@ -91,6 +102,8 @@ export default function BusinessProfitSharingWidget() {
   const [adminUsageDeduction, setAdminUsageDeduction] = useState(0);
   const [netRevenue, setNetRevenue] = useState(0);
   const [totalMonthPayouts, setTotalMonthPayouts] = useState<number>(0);
+  const [monthProfit, setMonthProfit] = useState<MonthProfit | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   // Month Breakup Modal State
   const [isBreakupModalOpen, setIsBreakupModalOpen] = useState(false);
@@ -138,6 +151,7 @@ export default function BusinessProfitSharingWidget() {
 
   const fetchProfitSharingData = async () => {
     setLoading(true);
+    setFetchError(null);
     try {
       const { data: profileData, error: profErr } = await supabase
         .from('profiles')
@@ -163,193 +177,88 @@ export default function BusinessProfitSharingWidget() {
 
       const userStateMap: { [userId: string]: string } = {};
       profileData?.forEach((p) => {
-        if (p.id) {
-          const formattedState = p.state ? p.state.trim().toUpperCase() : 'OTHER';
-          userStateMap[p.id] = formattedState;
-        }
+        if (p.id) userStateMap[p.id] = p.state ? p.state.trim().toUpperCase() : 'OTHER';
       });
 
-      const filterStart = new Date(selectedYear, selectedMonth - 1, 1);
-      const filterEnd = new Date(selectedYear, selectedMonth, 0, 23, 59, 59);
+      /* ------------------------------------------------------------------
+         Revenue = EARNED revenue only (estimates + service records, paid
+         directly or deducted from wallet). A wallet recharge is a deposit,
+         not revenue - it becomes revenue when the user spends it, so adding
+         recharges on top would double count. Same rule as the whole dashboard
+         (lib/finance.ts). Months and the year are cut at IST midnight and every
+         page is fetched (no 1000-row cap).
+         ------------------------------------------------------------------ */
+      const src = await fetchRevenueSources(supabase, istYearRange(selectedYear));
+      const srcErr = src.estimates.error || src.services.error;
+      if (srcErr) {
+        // Never show a "profit" built from half the data.
+        throw new Error(`Revenue data could not be loaded (${srcErr.message}). Profit is not shown to avoid wrong numbers.`);
+      }
+      if (src.estimates.truncated || src.services.truncated) {
+        setFetchError('Row limit reached while loading revenue - profit may be understated.');
+      }
 
-      const startDate = filterStart < EFFECTIVE_START_DATE ? EFFECTIVE_START_DATE.toISOString() : filterStart.toISOString();
-      const endDate = filterEnd.toISOString();
-
-      let overallGross = 0;
-      let adminDeduction = 0;
+      const txns = buildRevenueTxns(src.estimates.data, src.services.data);
+      const byMonth = new Map<string, { gross: number; admin: number }>();
       const stateMap: { [key: string]: number } = {};
+      const selectedKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
-      if (new Date(endDate) >= EFFECTIVE_START_DATE) {
-        const { data: estimatesData } = await supabase
-          .from('estimates')
-          .select('id, user_id, user_payment, created_at')
-          .gte('created_at', startDate)
-          .lte('created_at', endDate);
-
-        if (estimatesData) {
-          estimatesData.forEach((est: any) => {
-            const amt = Number(est.user_payment || 0);
-            if (amt > 0) {
-              overallGross += amt;
-              if (est.user_id === EXCLUDED_USER_ID) {
-                adminDeduction += amt;
-              } else {
-                const userState = userStateMap[est.user_id] || 'OTHER';
-                stateMap[userState] = (stateMap[userState] || 0) + amt;
-              }
-            }
-          });
-        }
-
-        const { data: rechargeData } = await supabase
-          .from('wallet_recharges')
-          .select('amount, user_id, status, created_at')
-          .gte('created_at', startDate)
-          .lte('created_at', endDate);
-
-        if (rechargeData) {
-          rechargeData.forEach((item: any) => {
-            const status = item.status ? String(item.status).toLowerCase() : '';
-            const isPaid = status === 'success' || status === 'paid' || status === 'completed';
-            const amt = Number(item.amount || 0);
-
-            if (isPaid && amt > 0) {
-              overallGross += amt;
-              if (item.user_id === EXCLUDED_USER_ID) {
-                adminDeduction += amt;
-              } else {
-                const userState = userStateMap[item.user_id] || 'OTHER';
-                stateMap[userState] = (stateMap[userState] || 0) + amt;
-              }
-            }
-          });
+      for (const tx of txns) {
+        if (!isRevenueRow(tx)) continue;
+        const amt = resolveAmount(tx);
+        if (amt <= 0) continue;
+        const key = istMonthKey(tx.created_at);
+        if (!key) continue;
+        const m = byMonth.get(key) ?? { gross: 0, admin: 0 };
+        m.gross += amt;
+        const isAdminUsage = tx.user_id === EXCLUDED_USER_ID;
+        if (isAdminUsage) m.admin += amt;
+        byMonth.set(key, m);
+        if (key === selectedKey && !isAdminUsage) {
+          const st = userStateMap[tx.user_id ?? ''] || 'OTHER';
+          stateMap[st] = (stateMap[st] || 0) + amt;
         }
       }
 
-      // 4-Point Net Calculation
-      const publicGross = overallGross - adminDeduction;
-      const calculatedNetTotal = Math.max(0, publicGross - FIXED_OPERATIONAL_COST);
+      // Partner payouts (one query, bucketed by settlement month 'MM-YYYY')
+      const { data: allPayouts, error: payErr } = await supabase.from('shareholder_paytable').select('*');
+      if (payErr) console.error('Payout fetch error:', payErr.message);
+      const payoutByMonth = new Map<string, number>();
+      (allPayouts || []).forEach((pay: any) => {
+        const k = String(pay.settlement_month || '');
+        payoutByMonth.set(k, (payoutByMonth.get(k) || 0) + toNum(pay.amount_settled ?? pay.amount));
+      });
+      setDbPayouts((allPayouts || []).filter((p: any) => p.settlement_month === `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`));
 
-      const formattedStateData = Object.keys(stateMap).map((st) => ({
-        state: st,
-        revenue: stateMap[st],
-      }));
-
-      setStateRevenues(formattedStateData);
-      setTotalGrossBilling(overallGross);
-      setAdminUsageDeduction(adminDeduction);
-      setNetRevenue(calculatedNetTotal);
-
-      // Payouts Settlement Fetch
-      const formattedMonthStr = `${selectedMonth.toString().padStart(2, '0')}-${selectedYear}`;
-      const { data: payoutsData } = await supabase
-        .from('shareholder_paytable')
-        .select('*')
-        .eq('settlement_month', formattedMonthStr);
-
-      let totalMonthPaid = 0;
-      if (payoutsData) {
-        setDbPayouts(payoutsData);
-        totalMonthPaid = payoutsData.reduce(
-          (sum, pay) => sum + Number(pay.amount_settled || pay.amount || 0),
-          0
-        );
-      } else {
-        const { data: fallbackPayouts } = await supabase.from('shareholder_paytable').select('*');
-        if (fallbackPayouts) {
-          setDbPayouts(fallbackPayouts);
-          totalMonthPaid = fallbackPayouts.reduce(
-            (sum, pay) => sum + Number(pay.amount_settled || pay.amount || 0),
-            0
-          );
-        }
-      }
-      setTotalMonthPayouts(totalMonthPaid);
-
-      // FY Month Breakup Data Calculation
       const monthNames = [
         'January', 'February', 'March', 'April', 'May', 'June',
         'July', 'August', 'September', 'October', 'November', 'December'
       ];
-
-      const fyBreakupList: MonthlyBreakupItem[] = [];
-      const fyStart = new Date(selectedYear, 0, 1);
-      const fyEnd = new Date(selectedYear, 11, 31, 23, 59, 59);
-
-      const { data: allFyEstimates } = await supabase
-        .from('estimates')
-        .select('user_id, user_payment, created_at')
-        .gte('created_at', fyStart.toISOString())
-        .lte('created_at', fyEnd.toISOString());
-
-      const { data: allFyRecharges } = await supabase
-        .from('wallet_recharges')
-        .select('user_id, amount, status, created_at')
-        .gte('created_at', fyStart.toISOString())
-        .lte('created_at', fyEnd.toISOString());
-
-      const { data: allFyPayouts } = await supabase
-        .from('shareholder_paytable')
-        .select('*');
-
-      for (let m = 0; m < 12; m++) {
-        let mTotalGross = 0;
-        let mAdminDeduction = 0;
-        const monthNumStr = `${(m + 1).toString().padStart(2, '0')}-${selectedYear}`;
-
-        allFyEstimates?.forEach((est: any) => {
-          const d = new Date(est.created_at);
-          if (d.getMonth() === m && d.getFullYear() === selectedYear) {
-            const amt = Number(est.user_payment || 0);
-            if (amt > 0) {
-              mTotalGross += amt;
-              if (est.user_id === EXCLUDED_USER_ID) {
-                mAdminDeduction += amt;
-              }
-            }
-          }
+      const breakup: MonthlyBreakupItem[] = [];
+      let selected: MonthProfit | null = null;
+      for (let m = 1; m <= 12; m++) {
+        const key = `${selectedYear}-${String(m).padStart(2, '0')}`;
+        const agg = byMonth.get(key) ?? { gross: 0, admin: 0 };
+        const payouts = payoutByMonth.get(`${String(m).padStart(2, '0')}-${selectedYear}`) || 0;
+        const mp = computeMonthProfit({
+          month: key, gross: agg.gross, adminSelfUsage: agg.admin, overheadPerMonth: FIXED_OPERATIONAL_COST, payouts,
         });
-
-        allFyRecharges?.forEach((rec: any) => {
-          const d = new Date(rec.created_at);
-          const st = String(rec.status || '').toLowerCase();
-          if (
-            d.getMonth() === m &&
-            d.getFullYear() === selectedYear &&
-            (st === 'success' || st === 'paid' || st === 'completed')
-          ) {
-            const amt = Number(rec.amount || 0);
-            if (amt > 0) {
-              mTotalGross += amt;
-              if (rec.user_id === EXCLUDED_USER_ID) {
-                mAdminDeduction += amt;
-              }
-            }
-          }
-        });
-
-        let mPayouts = 0;
-        allFyPayouts?.forEach((pay: any) => {
-          if (pay.settlement_month === monthNumStr) {
-            mPayouts += Number(pay.amount_settled || pay.amount || 0);
-          }
-        });
-
-        const mPublicGross = mTotalGross - mAdminDeduction;
-        const mNet = Math.max(0, mPublicGross - FIXED_OPERATIONAL_COST - mPayouts);
-
-        fyBreakupList.push({
-          monthName: monthNames[m],
-          monthIndex: m + 1,
-          totalGross: mTotalGross,
-          adminDeduction: mAdminDeduction,
-          expenses: FIXED_OPERATIONAL_COST,
-          payouts: mPayouts,
-          net: mNet,
+        if (m === selectedMonth) selected = mp;
+        breakup.push({
+          monthName: monthNames[m - 1], monthIndex: m,
+          totalGross: mp.gross, adminDeduction: mp.adminSelfUsage, expenses: mp.overhead,
+          payouts: mp.payouts, pool: mp.pool, net: mp.distributable, undistributed: mp.undistributed,
+          active: key >= EFFECTIVE_START_MONTH,
         });
       }
 
-      setMonthlyBreakupData(fyBreakupList);
+      setMonthlyBreakupData(breakup);
+      setMonthProfit(selected);
+      setStateRevenues(Object.keys(stateMap).map((st) => ({ state: st, revenue: stateMap[st] })));
+      setTotalGrossBilling(selected?.gross ?? 0);
+      setAdminUsageDeduction(selected?.adminSelfUsage ?? 0);
+      setNetRevenue(selected?.distributable ?? 0);
+      setTotalMonthPayouts(selected?.payouts ?? 0);
 
       const { data: requestsData } = await supabase
         .from('payout_requests')
@@ -365,6 +274,9 @@ export default function BusinessProfitSharingWidget() {
       }
     } catch (err: any) {
       console.error('Profit Sharing Data Fetch Error:', err?.message || err);
+      setFetchError(err?.message || 'Could not load profit data.');
+      setMonthProfit(null);
+      setTotalGrossBilling(0); setAdminUsageDeduction(0); setNetRevenue(0); setTotalMonthPayouts(0);
     } finally {
       setLoading(false);
     }
@@ -806,11 +718,11 @@ export default function BusinessProfitSharingWidget() {
                       </span>
                     </div>
 
-                    {/* 1. Total Gross Billing */}
+                    {/* 1. Total Earned Revenue (all users) */}
                     <div className="flex justify-between items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
                       <div className="flex items-center space-x-3">
                         <span className="h-2.5 w-2.5 rounded-full bg-emerald-500"></span>
-                        <span className="text-sm font-bold text-slate-200">1. Total Gross Billing</span>
+                        <span className="text-sm font-bold text-slate-200">1. Total Earned Revenue (all users)</span>
                       </div>
                       <span className="text-lg font-black text-emerald-400">
                         ₹ {(totalGrossBilling || 0).toLocaleString('en-IN')}
@@ -845,20 +757,18 @@ export default function BusinessProfitSharingWidget() {
                         </div>
                       </div>
                       <span className="text-lg font-black text-amber-400">
-                        - ₹ {FIXED_OPERATIONAL_COST.toLocaleString('en-IN')}
+                        - ₹ {(monthProfit?.overhead ?? 0).toLocaleString('en-IN')}
                       </span>
                     </div>
 
-                    {/* 4. Less: Network Partner Payouts */}
-                    <div className="flex justify-between items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
-                      <div className="flex items-center space-x-3">
-                        <span className="h-2.5 w-2.5 rounded-full bg-indigo-500"></span>
-                        <span className="text-sm font-bold text-slate-200">4. Less: Network Partner Payouts</span>
+                    {fetchError && (
+                      <div className="rounded-xl border border-amber-500/40 bg-amber-950/30 p-3 text-xs text-amber-200">{fetchError}</div>
+                    )}
+                    {monthProfit && monthProfit.month < EFFECTIVE_START_MONTH && (
+                      <div className="rounded-xl border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-400">
+                        Profit sharing starts from {EFFECTIVE_START_MONTH}. Earlier months are shown as zero by design.
                       </div>
-                      <span className="text-lg font-black text-indigo-400">
-                        - ₹ {(totalMonthPayouts || 0).toLocaleString('en-IN')}
-                      </span>
-                    </div>
+                    )}
 
                     <hr className="border-slate-800 my-2" />
 
@@ -870,15 +780,20 @@ export default function BusinessProfitSharingWidget() {
                       <div>
                         <div className="flex items-center space-x-2">
                           <span className="text-xs font-black uppercase text-emerald-400 tracking-wider">
-                            Final Net Distributable Profit
+                            Net Distributable Profit
                           </span>
                           <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-bold">
                             🔍 Click for Month-wise Breakup
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">
-                          Click here to view month-by-month expense, gross billing, and net profit analysis.
+                          Public revenue − fixed overhead. This is the pool partners&apos; shares are calculated on.
                         </p>
+                        {monthProfit && monthProfit.pool < 0 && (
+                          <p className="text-xs text-rose-300 mt-1 font-semibold">
+                            Loss this month: overhead exceeds revenue by {inr(Math.abs(monthProfit.pool))}. Nothing is distributable.
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center space-x-3">
@@ -886,6 +801,24 @@ export default function BusinessProfitSharingWidget() {
                           ₹ {(netRevenue || 0).toLocaleString('en-IN')}
                         </span>
                         <span className="text-emerald-400 font-bold group-hover:translate-x-1 transition-transform">➔</span>
+                      </div>
+                    </div>
+
+                    {/* Settlement position (payouts are a distribution of profit, not a cost) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="flex justify-between items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
+                        <div className="flex items-center space-x-3">
+                          <span className="h-2.5 w-2.5 rounded-full bg-indigo-500"></span>
+                          <span className="text-sm font-bold text-slate-200">Already settled to partners</span>
+                        </div>
+                        <span className="text-base font-black text-indigo-400">₹ {(totalMonthPayouts || 0).toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between items-center bg-slate-900/60 p-4 rounded-xl border border-slate-800/80">
+                        <div className="flex items-center space-x-3">
+                          <span className="h-2.5 w-2.5 rounded-full bg-sky-500"></span>
+                          <span className="text-sm font-bold text-slate-200">Yet to be settled</span>
+                        </div>
+                        <span className="text-base font-black text-sky-300">₹ {(monthProfit?.undistributed ?? 0).toLocaleString('en-IN')}</span>
                       </div>
                     </div>
                   </div>
@@ -1410,10 +1343,10 @@ export default function BusinessProfitSharingWidget() {
             <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-950">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-100 uppercase tracking-wider">
-                  Financial Year Month-Wise Expense & Revenue Breakup
+                  Month-Wise Revenue, Expense & Profit Breakup
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Financial Year: FY {selectedYear} | Detail view showing Total Gross Billing & Deductions
+                  Calendar year {selectedYear} (Jan–Dec, India time) | Earned revenue, deductions and settlement position
                 </p>
               </div>
               <button
@@ -1429,11 +1362,12 @@ export default function BusinessProfitSharingWidget() {
                 <thead>
                   <tr className="border-b border-slate-800 font-bold text-slate-400 uppercase bg-slate-800/40">
                     <th className="p-3">Month</th>
-                    <th className="p-3 text-right">Total Gross Billing</th>
+                    <th className="p-3 text-right">Earned Revenue</th>
                     <th className="p-3 text-right">Admin Deduction</th>
                     <th className="p-3 text-right">Fixed Op Costs</th>
-                    <th className="p-3 text-right">Partner Payouts</th>
                     <th className="p-3 text-right">Net Profit</th>
+                    <th className="p-3 text-right">Settled</th>
+                    <th className="p-3 text-right">Yet to settle</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-medium">
@@ -1461,11 +1395,14 @@ export default function BusinessProfitSharingWidget() {
                       <td className="p-3 text-right text-amber-400 font-bold">
                         - ₹ {item.expenses.toLocaleString('en-IN')}
                       </td>
-                      <td className="p-3 text-right text-indigo-400 font-bold">
-                        - ₹ {item.payouts.toLocaleString('en-IN')}
+                      <td className={`p-3 text-right font-black text-sm ${item.pool < 0 ? 'text-rose-400' : 'text-emerald-300'}`}>
+                        {item.pool < 0 ? '- ' : ''}₹ {Math.abs(item.pool).toLocaleString('en-IN')}
                       </td>
-                      <td className="p-3 text-right font-black text-emerald-300 text-sm">
-                        ₹ {item.net.toLocaleString('en-IN')}
+                      <td className="p-3 text-right text-indigo-400 font-bold">
+                        ₹ {item.payouts.toLocaleString('en-IN')}
+                      </td>
+                      <td className="p-3 text-right text-sky-300 font-bold">
+                        ₹ {item.undistributed.toLocaleString('en-IN')}
                       </td>
                     </tr>
                   ))}
@@ -1474,7 +1411,7 @@ export default function BusinessProfitSharingWidget() {
             </div>
 
             <div className="p-4 border-t border-slate-800 bg-slate-950 flex justify-between items-center text-xs text-slate-400">
-              <span>Formula: Net Profit = Total Gross - Admin Deduction - Op Cost - Payouts</span>
+              <span>Net Profit = Gross earned revenue − Admin self-usage − Fixed overhead. Payouts are shown separately (they distribute the profit, they are not a cost).</span>
               <button
                 onClick={() => setIsBreakupModalOpen(false)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow"

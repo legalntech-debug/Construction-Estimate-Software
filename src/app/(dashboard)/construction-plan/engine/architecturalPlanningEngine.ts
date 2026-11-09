@@ -11,7 +11,7 @@ import {
   type SectionModel,
 } from './sectionEngine';
 import { generateWallsFromRooms, generateStructuralColumns } from './cad/cadGeometry';
-import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit, completeQuadSides, quadFromDims, polygonArea, rectForArea, makeRectFit } from './plotShapeFit';
+import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit, completeQuadSides, quadFromDims, polygonArea, rectForArea, makeRectFit, lShapeFromDims } from './plotShapeFit';
 import { PlotDimensions, PlotShape, FloorRoom, PlanningMode, ParkingMode, VastuAssessment, VastuDirection } from './planningTypes';
 import { toFiniteNumber, cleanFloorName } from './planningInput';
 import { getRoadOrientation } from './roadOrientation';
@@ -595,7 +595,7 @@ function snapStairToWedge(plan: any, fit: PlotShapeFit): void {
   e.snappedToWedge = { side, gapFt: g };
 }
 
-function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, originY: number): void {
+function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, originY: number, avoidService = false): void {
   const dx = fit.core.x, dy = fit.core.y;
   const mv = (o: any) => { if (o && typeof o.x === 'number') { o.x = Number((o.x + dx).toFixed(3)); o.y = Number((o.y + dy).toFixed(3)); } };
   for (const r of plan.rooms as any[]) mv(r);
@@ -605,7 +605,7 @@ function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, orig
   }
   for (const c of (plan.columns || []) as any[]) mv(c);
   const wall = fit.wall;
-  const ext = extendRoomsToPolygon(plan.rooms as any[], fit.inner, fit.core);
+  const ext = extendRoomsToPolygon(plan.rooms as any[], fit.inner, fit.core, { avoidService });
   // jis wall par wedge juda hai wo ab andar ki line hai -> us par khidki/bahari opening nahi
   const sideWall: Record<string, string> = { L: 'LEFT', R: 'RIGHT', T: 'TOP', B: 'BOTTOM' };
   for (const r of plan.rooms as any[]) {
@@ -637,13 +637,16 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
   const shape = (payload?.plotShape || payload?.plot_shape || 'RECTANGULAR') as PlotShape;
   // v23: irregular plot -> 3 sides se 4th auto + chaaro sides asli length
   const isIrrShape = !/^(RECTANGLE|RECTANGULAR|SQUARE)$/i.test(String(shape)) && !String(shape).toUpperCase().includes('L-SHAPE');
+  // v27: L-SHAPE -> asli 6-vertex polygon (bounding box = A x D)
+  const lShapeGeo = /L-SHAPE/i.test(String(shape)) && !(Array.isArray(payload?.plotVertices) && payload.plotVertices.length >= 3) ? lShapeFromDims(raw, String(shape)) : null;
   const qs = isIrrShape ? completeQuadSides(num(raw.A ?? raw.width ?? raw.a, 0), num(raw.B, 0), num(raw.C ?? raw.length ?? raw.c, 0), num(raw.D, 0)) : null;
-  const A = Math.max(1, qs && qs.A > 0 ? qs.A : num(raw.A ?? raw.width ?? raw.a, 30));
-  const C = Math.max(1, qs && qs.C > 0 ? qs.C : num(raw.C ?? raw.length ?? raw.c, 50));
-  const dimB = qs && qs.B > 0 ? qs.B : num(raw.B, A);
-  const dimD = qs && qs.D > 0 ? qs.D : num(raw.D, C);
+  const A = Math.max(1, lShapeGeo ? lShapeGeo.W : qs && qs.A > 0 ? qs.A : num(raw.A ?? raw.width ?? raw.a, 30));
+  const C = Math.max(1, lShapeGeo ? lShapeGeo.H : qs && qs.C > 0 ? qs.C : num(raw.C ?? raw.length ?? raw.c, 50));
+  const dimB = lShapeGeo ? A : qs && qs.B > 0 ? qs.B : num(raw.B, A);
+  const dimD = lShapeGeo ? C : qs && qs.D > 0 ? qs.D : num(raw.D, C);
   const dimensions: PlotDimensions = { ...raw, A, B: dimB, C, D: dimD, E: num(raw.E, 0), F: num(raw.F, 0), width: A, length: C, area: A * C };
-  const plotGeometry = createPlotGeometry(dimensions, shape, payload?.plotVertices);
+  const plotGeometry = createPlotGeometry(dimensions, shape, lShapeGeo ? lShapeGeo.poly : payload?.plotVertices);
+  if (lShapeGeo) { (plotGeometry as any).area = Number(lShapeGeo.area.toFixed(2)); (dimensions as any).area = Number(lShapeGeo.area.toFixed(2)); }
   // v23: polygon ka asli area (shoelace) - avg-formula nahi
   if (isIrrShape && !(Array.isArray(payload?.plotVertices) && payload.plotVertices.length >= 3) && !(payload?.plotAngles && Object.values(payload.plotAngles).some((v: any) => Number(v)))) {
     try { const pa = Math.abs(polygonArea(quadFromDims(A, dimB, C, dimD, payload?.plotSlant?.B, null))); if (pa > 1) { (plotGeometry as any).area = Number(pa.toFixed(2)); (dimensions as any).area = Number(pa.toFixed(2)); } } catch (e) { /* ignore */ }
@@ -658,11 +661,12 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     shapeFit = buildPlotShapeFit({
       dims: { A, B: dimB, C, D: dimD },
       shape: String(shape),
-      vertices: Array.isArray(payload?.plotVertices) ? payload.plotVertices : null,
+      vertices: lShapeGeo ? lShapeGeo.poly : (Array.isArray(payload?.plotVertices) ? payload.plotVertices : null),
       slantB: payload?.plotSlant?.B,
       angles: payload?.plotAngles || null,
       setbacks: { front: setbacks.frontSetback, rear: setbacks.rearSetback, left: setbacks.leftSetback, right: setbacks.rightSetback },
       wall: 4 / 12,
+      roadBottom: !!lShapeGeo,
     });
   } catch (e) { shapeFit = null; }
   const selectedFloors: string[] = (payload?.selectedFloors || payload?.selected_floors || Object.keys(payload?.floorData || {})).map(cleanFloorName).filter((v: string, i: number, arr: string[]) => v && arr.indexOf(v) === i);
@@ -745,7 +749,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       const tooBig = rw > coreOW + 0.01 || rl > coreOL + 0.01;
       rw = Math.min(rw, coreOW); rl = Math.min(rl, coreOL);
       if (rw > 2 * wl + 4 && rl > 2 * wl + 4) {
-        floorFit = makeRectFit(shapeFit, rw, rl);
+        floorFit = makeRectFit(shapeFit, rw, rl, !!lShapeGeo);
         rectNote = tooBig
           ? `Specific area plot ke andar ke max rectangle (${coreOW.toFixed(1)}' x ${coreOL.toFixed(1)}') se bada tha: rectangular floor ${floorFit.width.toFixed(1)}' x ${floorFit.length.toFixed(1)}' tak limit kiya gaya.`
           : `Specific area ke hisaab se floor rectangular: ${floorFit.width.toFixed(1)}' x ${floorFit.length.toFixed(1)}'.`;
@@ -807,7 +811,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     }
 
     if (useFit && floorFit) {
-      try { applyShapeFitToPlan(plan as any, floorFit, maxFootprint.originX, maxFootprint.originY); if (rectNote) (plan as any).warnings = [...((plan as any).warnings || []), rectNote]; }
+      try { applyShapeFitToPlan(plan as any, floorFit, maxFootprint.originX, maxFootprint.originY, !!lShapeGeo); if (rectNote) (plan as any).warnings = [...((plan as any).warnings || []), rectNote]; }
       catch (e) { console.error('[PLANNING ENGINE] shape fit failed', e); }
     }
 

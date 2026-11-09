@@ -26,8 +26,8 @@ export default function SalesTrendChart({ data }: any) {
     return `${names[parseInt(mo) - 1]} ${y.slice(-2)}`;
   };
 
-  // ✅ FIX: Current incomplete month ko trend se exclude karo
-  // Sirf complete months ka MoM (Month-over-Month) trend dikhao
+  // FIX: exclude the current, incomplete month from the trend
+  // Show the MoM (month-over-month) trend for complete months only
   const now = new Date();
   const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 

@@ -9,8 +9,8 @@ import { BarChart3, LayoutDashboard, Send } from 'lucide-react';
 
 // ✅ Analytics Components
 
-// ✅ Heavy / kam-use wale components ab sirf zarurat par load hote hain (first load fast)
-// ✅ FIX (TS2769): props any rakhe — warna dynamic() component ko `{}` props wala maan leta hai
+// Heavy / rarely used components are loaded lazily, only when needed (faster first load)
+// FIX (TS2769): props are typed as any, otherwise the lazy component is inferred as taking `{}` props
 const lazy = (loader: () => Promise<any>) =>
   dynamic(loader, { ssr: false }) as ComponentType<any>;
 const RechargeModal = lazy(() => import('./components/RechargeModal'));
@@ -25,14 +25,14 @@ const StateWiseHeatmap = lazy(() => import('./components/StateWiseHeatmap'));
 const ProductWiseBreakdown = lazy(() => import('./components/ProductWiseBreakdown'));
 const FyComparisonChart = lazy(() => import('./components/FyComparisonChart'));
 
-// ✅ Sirf zaruri columns — heavy columns (form_snapshot etc.) nahi aate.
-// Agar koi column DB me na mile to automatically select('*') par fallback hota hai.
+// Only the required columns are selected - heavy columns (form_snapshot etc.) are skipped.
+// If a column is missing in the DB, the query automatically falls back to select('*').
 const MIS_COLS = 'id, ref_no, customer_name, client_name, representative, case_type, fee_standard, user_payment, status, created_date, user_id';
 const EST_COLS = 'id, ref_no, customer_name, client_name, representative, estimate_type, fee_standard, user_payment, status, created_at, user_id';
 const SVC_COLS = 'id, ref_no, customer_name, client_name, representative, case_type, deed_type, fee_standard, gateway_fee, user_payment, user_service_fee, status, payment_status, created_at, user_id, state_name, city_district, razorpay_payment_id, buyers:form_snapshot->buyers';
 
-// ✅ Jo column DB me nahi hota, wo khud list se hat jata hai aur query dobara chalti hai
-// (poora select('*') nahi). Chuni hui list session me yaad rehti hai.
+// A column that does not exist in the DB is dropped from the list and the query is retried
+// (instead of a full select('*')). The resulting column list is remembered for the session.
 const colsCache = new Map<string, string>();
 
 async function queryWithFallback(table: string, cols: string, build: (q: any) => any) {
@@ -60,7 +60,7 @@ async function queryWithFallback(table: string, cols: string, build: (q: any) =>
 
 const PAGE_SIZE = 100;
 
-// ✅ Instant load: pichla data sessionStorage me (user-wise), fresh data background me aata hai
+// Instant load: the previous data is kept in sessionStorage (per user); fresh data arrives in the background
 const CACHE_PREFIX = 'dash_cache_v1_';
 const clearDashCache = () => {
   try {
@@ -68,7 +68,55 @@ const clearDashCache = () => {
   } catch {}
 };
 
-// ✅ Row memo — typing / column resize par poori table dobara render nahi hoti
+/**
+ * Services opened from the dashboard menu (profile features are NOT listed here, so they are never charged).
+ * - chargeKeywords: matched (case-insensitive) against pricing_config.case_type to find the service charge.
+ * - fallbackCharge: used when pricing_config has no matching row. 0 means "free / no pre-check".
+ */
+interface DashboardService {
+  label: string;
+  path: string;
+  chargeKeywords: string[];
+  fallbackCharge: number;
+}
+
+const DASHBOARD_SERVICES: DashboardService[] = [
+  { label: '📝 Deed Drafting', path: '/deed-drafting', chargeKeywords: ['deed'], fallbackCharge: 0 },
+  { label: '🏗️ Construction Plan / Map', path: '/construction-plan', chargeKeywords: ['construction plan', 'map', 'plan'], fallbackCharge: 0 },
+  { label: '📊 Estimate (New / Renovation)', path: '/estimate', chargeKeywords: ['estimate', 'renovation', 'new construction'], fallbackCharge: 0 },
+  { label: '📁 Document Management', path: '/document-management', chargeKeywords: ['document'], fallbackCharge: 0 },
+];
+
+/**
+ * Resolve the minimum charge a user must hold to start a service.
+ * Priority: active pricing_config row for the user's state -> generic/default row -> any matching row -> fallbackCharge.
+ * The lowest matching price is used because the exact option is chosen later, inside the service page,
+ * which performs its own precise wallet check.
+ */
+const resolveServiceCharge = async (svc: DashboardService, userState: string): Promise<number> => {
+  try {
+    const { data, error } = await supabase.from('pricing_config').select('case_type, state_name, price, active');
+    if (error || !data) return svc.fallbackCharge;
+
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+    const matches = data.filter(
+      (row: any) => row.active !== false && svc.chargeKeywords.some((k) => norm(row.case_type).includes(k))
+    );
+    if (matches.length === 0) return svc.fallbackCharge;
+
+    const state = norm(userState);
+    const stateRows = matches.filter((row: any) => state && norm(row.state_name) === state);
+    const defaultRows = matches.filter((row: any) => ['', 'all', 'all states', 'default'].includes(norm(row.state_name)));
+    const pool = stateRows.length ? stateRows : defaultRows.length ? defaultRows : matches;
+
+    const prices = pool.map((row: any) => Number(row.price)).filter((n: number) => Number.isFinite(n) && n > 0);
+    return prices.length ? Math.min(...prices) : svc.fallbackCharge;
+  } catch {
+    return svc.fallbackCharge;
+  }
+};
+
+// Row memo - typing / column resizing does not re-render the whole table
 const TxnRow = memo(function TxnRow({ est, onHistory }: { est: any; onHistory: (e: any) => void }) {
   const dateSource = est.created_date || est.created_at;
   const dateObj = dateSource ? new Date(dateSource) : null;
@@ -157,6 +205,9 @@ export default function DashboardPage() {
   const [representativeSearch, setRepresentativeSearch] = useState('');
 
   const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
+  // Service the user tried to open but cannot afford yet (drives the recharge prompt and the re-check loop)
+  const [serviceGate, setServiceGate] = useState<{ svc: DashboardService; charge: number } | null>(null);
+  const [gateChecking, setGateChecking] = useState(false);
   const [rechargeRequests, setRechargeRequests] = useState<any[]>([]);
 
   const [showPartnerPromo, setShowPartnerPromo] = useState(false);
@@ -175,7 +226,7 @@ export default function DashboardPage() {
     const fetchData = async () => {
       const tStart = performance.now();
       try {
-        // getSession local hai (fast) — data access RLS se hi protected hai
+        // getSession reads local state (fast) - data access is still protected by RLS
         let { data: { session } } = await supabase.auth.getSession();
         let user = session?.user || null;
         if (!user) {
@@ -184,7 +235,7 @@ export default function DashboardPage() {
         }
         if (!user) return;
 
-        // ✅ Cache turant dikhao (sirf isi user ka) — network ka wait nahi
+        // Show the cache immediately (this user's only) - no waiting for the network
         const cacheKey = `${CACHE_PREFIX}${user.id}`;
         try {
           const raw = sessionStorage.getItem(cacheKey);
@@ -222,7 +273,7 @@ export default function DashboardPage() {
           userEmail === 'legalntech@gmail.com' ||
           approverRoles.some((r) => roleStr.includes(r) || secondRoleStr.includes(r));
 
-        // ✅ Header / naam turant dikh jaye
+        // Show the header / name immediately
         const nextUserData = {
           email: userEmail,
           id: profile?.user_code || user.id.slice(0, 8),
@@ -239,21 +290,21 @@ export default function DashboardPage() {
         };
         setUserData(nextUserData);
 
-        // ✅ Baaki sab queries PARALLEL (pehle ek ke baad ek chalti thi)
+        // All remaining queries run in PARALLEL (they used to run one after another)
         console.log(`[dashboard] auth+profile: ${Math.round(performance.now() - tStart)}ms`);
         const mine = (q: any) => (isAdmin ? q : q.eq('user_id', user!.id));
         const [partnerRes, profilesRes, misRes, estRes, svcRes, rechargeRes] = await Promise.all([
           isAdmin
             ? Promise.resolve({ data: null })
             : supabase.from('partner_profiles').select('partner_id, approval_status').eq('user_id', user.id).maybeSingle(),
-          // Saare users ki profiles sirf admin ko chahiye (state mapping + total users)
+          // All user profiles are needed by the admin only (state mapping + total users)
           isAdmin
             ? supabase.from('profiles').select('id, state, city', { count: 'exact' })
             : Promise.resolve({ data: null, count: null }),
           queryWithFallback('mis_records', MIS_COLS, (q) => mine(q.order('created_date', { ascending: false }))),
           queryWithFallback('estimates', EST_COLS, (q) => mine(q.order('created_at', { ascending: false }))),
           queryWithFallback('service_records', SVC_COLS, (q) => mine(q.order('created_at', { ascending: false }))),
-          // Admin ko sirf PENDING recharge requests chahiye
+          // The admin only needs PENDING recharge requests
           isAdmin
             ? supabase.from('wallet_recharges').select('*').eq('status', 'PENDING').order('created_at', { ascending: false })
             : supabase.from('wallet_recharges').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
@@ -381,7 +432,7 @@ export default function DashboardPage() {
             totalUsers: isAdmin ? ((profilesRes as any).count ?? 0) : 0,
             recharges: rechargeRes.data || [],
           }));
-        } catch {} // storage full ho to ignore
+        } catch {} // ignore if storage is full
       } catch (err) {
         console.error('[dashboard] load error:', err);
       } finally {
@@ -400,24 +451,60 @@ export default function DashboardPage() {
   };
 
   const currentDate = new Date();
-  const targetLockDate = new Date('2026-08-20T00:00:00');
-  const isAfterLockDate = currentDate > targetLockDate;
-
-  const accountCreationDate = new Date(userData.createdAt || Date.now());
-  const daysSinceCreation = (currentDate.getTime() - accountCreationDate.getTime()) / (1000 * 3600 * 24);
-  const isWithinGracePeriod = daysSinceCreation <= 21;
-
-  const isWalletLow = userData.wallet < 100;
   const isPremiumUser = (userData.planType || '').toUpperCase().includes('PREMIUM');
   const isFirstDateOfMonth = currentDate.getDate() === 1;
 
-  const isAccountLocked =
-    !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod &&
-    isAfterLockDate && isWalletLow;
-
-  const showLowWalletWarning =
-    !userData.isAdmin && !isPremiumUser && !isWithinGracePeriod && isWalletLow;
+  // The dashboard locks ONLY when the wallet balance is negative (admins and premium users are exempt).
+  // Per-service balance checks are handled separately in handleServiceClick().
+  const isAccountLocked = !userData.isAdmin && !isPremiumUser && userData.wallet < 0;
   const showPremiumBillClearAlert = isPremiumUser && isFirstDateOfMonth;
+
+  // Read the latest wallet balance from the database and sync it into local state
+  const fetchFreshWallet = async (): Promise<number> => {
+    try {
+      const { data } = await supabase.from('profiles').select('wallet_balance').eq('id', userData.uuid).maybeSingle();
+      const balance = Number(data?.wallet_balance ?? userData.wallet ?? 0);
+      setUserData((prev: any) => ({ ...prev, wallet: balance }));
+      return balance;
+    } catch {
+      return Number(userData.wallet || 0);
+    }
+  };
+
+  // Open a dashboard service: check the charge first, ask for a recharge when the wallet cannot cover it
+  const handleServiceClick = async (svc: DashboardService) => {
+    if (isPendingApproval) { alert('Your account is pending approval.'); return; }
+    setShowMenuDrawer(false);
+
+    // Admins and premium users are billed separately - no wallet pre-check
+    if (userData.isAdmin || isPremiumUser) { router.push(svc.path); return; }
+
+    const balance = await fetchFreshWallet();
+
+    // Negative balance: the dashboard lock overlay applies, a recharge is required first
+    if (balance < 0) { setIsRechargeModalOpen(true); return; }
+
+    const charge = await resolveServiceCharge(svc, userData.state);
+    if (charge <= 0 || balance >= charge) { router.push(svc.path); return; }
+
+    // Wallet cannot cover the service charge: ask for a recharge
+    setServiceGate({ svc, charge });
+    setIsRechargeModalOpen(true);
+  };
+
+  // Re-check the balance for the pending service; continue if it is covered, otherwise keep prompting
+  const recheckServiceGate = async () => {
+    if (!serviceGate) return;
+    setGateChecking(true);
+    const balance = await fetchFreshWallet();
+    setGateChecking(false);
+    if (balance >= serviceGate.charge) {
+      const target = serviceGate.svc.path;
+      setServiceGate(null);
+      router.push(target);
+    }
+    // Still short: the prompt stays open and shows the updated shortfall
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -451,7 +538,7 @@ export default function DashboardPage() {
     document.addEventListener('mouseup', handleMouseUp);
   };
 
-  // Dedupe (memo — har render par dobara nahi chalta)
+  // Dedupe (memoized - does not re-run on every render)
   const deduplicatedList = useMemo(() => {
     const seen: Record<string, any> = {};
     const priority = { mis_records: 3, estimates: 2, service_records: 1 };
@@ -513,7 +600,7 @@ export default function DashboardPage() {
     return true;
   }), [deduplicatedList, filterType, refSearch, clientSearch, representativeSearch]);
 
-  // ✅ Filter badalne par list wapas pehle 100 rows par
+  // Reset the list to the first 100 rows when the filters change
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filterType, refSearch, clientSearch, representativeSearch]);
   const visibleRows = useMemo(() => filteredList.slice(0, visibleCount), [filteredList, visibleCount]);
   const openHistory = useCallback((est: any) => { setSelectedTxn(est); setIsModalOpen(true); }, []);
@@ -579,7 +666,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           {userData.isApprover && <ApprovalNotificationBell />}
 
-          {/* Notification — Admin / CEO / Co-Partner ke liye mobile par hide, baaki sabke liye visible */}
+          {/* Notification - hidden on mobile for Admin / CEO / Co-Partner, visible for everyone else */}
           <div className={`relative ${userData.isApprover ? 'hidden sm:block' : ''}`}>
             <button
               onClick={async () => {
@@ -600,7 +687,7 @@ export default function DashboardPage() {
               <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-blue-600 rounded-full ring-2 ring-white"></span>
             </button>
 
-            {/* Mobile: screen ke andar fixed (left/right 8px), Desktop: button ke niche absolute */}
+            {/* Mobile: fixed inside the screen (8px left/right), Desktop: absolute below the button */}
             {showNotifications && (
               <div className="fixed left-2 right-2 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
                 <div className="bg-slate-900 p-3 text-white flex justify-between items-center">
@@ -608,9 +695,9 @@ export default function DashboardPage() {
                   <button onClick={() => setShowNotifications(false)} className="text-slate-400 hover:text-white text-sm font-bold cursor-pointer">&times;</button>
                 </div>
                 <div className="p-3 sm:p-4 space-y-2 bg-slate-50/50 max-h-[60vh] overflow-y-auto">
-                  {showLowWalletWarning && (
+                  {isAccountLocked && (
                     <div className="bg-red-50 p-3 rounded-xl border border-red-200 shadow-sm space-y-2">
-                      <p className="font-bold text-xs text-red-600">Low Wallet Balance Alert</p>
+                      <p className="font-bold text-xs text-red-600">Negative Wallet Balance</p>
                       <p className="text-xs text-slate-600">Balance: <b className="text-red-600">₹{userData.wallet.toFixed(2)}</b></p>
                       {isApproved && (
                         <button onClick={() => { setShowNotifications(false); setIsRechargeModalOpen(true); }} className="w-full bg-red-600 hover:bg-red-700 text-white font-extrabold py-1.5 rounded-lg text-[10px] uppercase cursor-pointer">
@@ -633,7 +720,7 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* Help — Admin / CEO / Co-Partner ke liye mobile par hide, baaki sabke liye visible */}
+          {/* Help - hidden on mobile for Admin / CEO / Co-Partner, visible for everyone else */}
           <button
             onClick={() => openSupportModal(null)}
             className={`${userData.isApprover ? 'hidden sm:flex' : 'flex'} items-center gap-1 px-2 py-1.5 sm:gap-1.5 sm:px-3 sm:py-2 rounded-full bg-white hover:bg-slate-50 text-slate-700 transition-all shadow-sm border border-slate-200 cursor-pointer group shrink-0`}
@@ -648,7 +735,7 @@ export default function DashboardPage() {
             </span>
           </button>
 
-          {/* Profile — hamesha visible */}
+          {/* Profile - always visible */}
           <div className="relative shrink-0">
             <button
               onClick={() => { setShowProfile(!showProfile); setShowMenuDrawer(false); setShowNotifications(false); }}
@@ -670,7 +757,7 @@ export default function DashboardPage() {
               </svg>
             </button>
 
-            {/* Mobile: screen ke andar fixed (left/right 8px), Desktop: button ke niche absolute */}
+            {/* Mobile: fixed inside the screen (8px left/right), Desktop: absolute below the button */}
             {showProfile && (
               <div className="fixed left-2 right-2 top-[68px] sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-3 sm:w-80 bg-white shadow-2xl rounded-2xl border border-slate-100 z-50 overflow-hidden">
                 <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-4 text-white">
@@ -807,12 +894,12 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {showLowWalletWarning && (
+          {isAccountLocked && (
             <div className="bg-rose-600 text-white p-3 sm:px-5 sm:py-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3 animate-pulse">
               <div className="flex items-center gap-2.5">
                 <span className="text-xl">⚠️</span>
                 <div>
-                  <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Low Wallet Balance</h4>
+                  <h4 className="font-extrabold text-[11px] sm:text-sm uppercase tracking-wide">Negative Wallet Balance</h4>
                   <p className="text-[10px] sm:text-xs opacity-95 mt-0.5">Balance: <strong className="underline">₹{userData.wallet.toFixed(2)}</strong></p>
                 </div>
               </div>
@@ -839,7 +926,7 @@ export default function DashboardPage() {
               ═══════════════════════════════════════════════════════ */}
           {adminView === 'dashboard' && (
             <>
-              {/* ✅ Recharge approval — sabse upar, sirf jab koi PENDING request ho */}
+              {/* Recharge approval - shown at the top, only when a PENDING request exists */}
               {userData.isAdmin && rechargeRequests.length > 0 && (
                 <AdminRechargeApproval
                   isAdmin={userData.isAdmin}
@@ -856,7 +943,7 @@ export default function DashboardPage() {
                 />
               )}
 
-              {/* ✅ Simple summary table + filter options (ek hi jagah, kam space) */}
+              {/* Simple summary table + filter options (all in one place, less space) */}
               <div className="shrink-0 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <table className="w-full text-center border-collapse">
                   <thead>
@@ -1023,6 +1110,7 @@ export default function DashboardPage() {
         <div className="absolute inset-x-3 sm:inset-x-6 top-32 z-40 bg-slate-900/95 text-white p-6 sm:p-8 rounded-3xl shadow-2xl border-2 border-rose-500 text-center space-y-4 backdrop-blur-md">
           <span className="text-4xl">🔒</span>
           <h3 className="text-lg sm:text-xl font-black uppercase text-rose-500 tracking-wider">Dashboard Locked — Recharge Required</h3>
+          <p className="text-xs text-slate-300">Your wallet balance is <b className="text-rose-400">₹{userData.wallet.toFixed(2)}</b>. Please recharge to continue.</p>
           <div className="pt-2 flex flex-col sm:flex-row gap-2 justify-center">
             <button onClick={() => setIsRechargeModalOpen(true)} className="bg-rose-600 hover:bg-rose-700 text-white font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg transition cursor-pointer">
               Recharge Wallet
@@ -1059,26 +1147,15 @@ export default function DashboardPage() {
                   <span>💬 Contact Support Team</span>
                 </button>
 
-                {[
-                  { label: '📝 Deed Drafting', path: '/deed-drafting' },
-                  { label: '🏗️ Construction Plan / Map', path: '/construction-plan' },
-                  { label: '📊 Estimate (New / Renovation)', path: '/estimate' },
-                  { label: '📁 Document Management', path: '/document-management' },
-                ].map((item) => {
-                  const isLocked = isPendingApproval || (!userData.isAdmin && !isPremiumUser && isWalletLow);
+                {DASHBOARD_SERVICES.map((svc) => {
+                  const isLocked = isPendingApproval || isAccountLocked;
                   return (
                     <button
-                      key={item.path}
-                      onClick={() => {
-                        if (isPendingApproval) { alert('Pending approval.'); return; }
-                        if (!userData.isAdmin && !isPremiumUser && isWalletLow) {
-                          alert('Wallet below ₹100.'); router.push('/wallet-ledger'); setShowMenuDrawer(false); return;
-                        }
-                        setShowMenuDrawer(false); router.push(item.path);
-                      }}
+                      key={svc.path}
+                      onClick={() => handleServiceClick(svc)}
                       className={`w-full text-left p-3 rounded-xl transition flex items-center gap-3 uppercase cursor-pointer ${isLocked ? 'opacity-40 text-slate-400' : 'hover:bg-slate-100 text-slate-700'}`}
                     >
-                      <span>{item.label}</span>
+                      <span>{svc.label}</span>
                     </button>
                   );
                 })}
@@ -1100,10 +1177,52 @@ export default function DashboardPage() {
       {isRechargeModalOpen && (
         <RechargeModal
           isOpen={isRechargeModalOpen}
-          onClose={() => setIsRechargeModalOpen(false)}
+          onClose={() => {
+            setIsRechargeModalOpen(false);
+            // After the recharge flow closes, re-check the balance for the pending service
+            if (serviceGate) recheckServiceGate();
+          }}
           userData={userData}
           onRechargeSubmitted={() => fetchRecharges(userData.uuid, userData.isAdmin)}
+          requiredAmount={serviceGate?.charge}
+          serviceName={serviceGate ? serviceGate.svc.label.replace(/^[^A-Za-z]+/, '') : undefined}
+          currentBalance={userData.wallet}
         />
+      )}
+
+      {/* Recharge prompt for a service the wallet cannot cover yet (re-appears until the balance is enough) */}
+      {serviceGate && !isRechargeModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-slate-900 text-white p-4 font-bold text-sm uppercase tracking-wide">
+              Recharge Required
+            </div>
+            <div className="p-5 space-y-3 text-xs text-slate-700">
+              <p className="font-bold text-slate-900">
+                {serviceGate.svc.label.replace(/^[^A-Za-z]+/, '')}
+              </p>
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                <div className="flex justify-between px-3 py-2"><span>Service charge</span><b>₹{serviceGate.charge.toFixed(2)}</b></div>
+                <div className="flex justify-between px-3 py-2"><span>Wallet balance</span><b>₹{userData.wallet.toFixed(2)}</b></div>
+                <div className="flex justify-between px-3 py-2 text-rose-600"><span>Short by</span><b>₹{Math.max(0, serviceGate.charge - userData.wallet).toFixed(2)}</b></div>
+              </div>
+              <p className="text-[11px] text-slate-500 leading-snug">
+                Recharge your wallet to continue. Once the recharge is approved, tap &quot;Check Balance&quot; and the service will open automatically.
+              </p>
+              <div className="flex flex-col gap-2 pt-1">
+                <button onClick={() => setIsRechargeModalOpen(true)} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-extrabold py-2.5 rounded-xl uppercase tracking-wider cursor-pointer">
+                  Recharge Wallet
+                </button>
+                <button onClick={recheckServiceGate} disabled={gateChecking} className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl uppercase tracking-wider cursor-pointer">
+                  {gateChecking ? 'Checking...' : 'Check Balance'}
+                </button>
+                <button onClick={() => setServiceGate(null)} className="w-full text-slate-500 hover:text-slate-800 font-semibold py-1.5 uppercase cursor-pointer">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {isModalOpen && selectedTxn && (

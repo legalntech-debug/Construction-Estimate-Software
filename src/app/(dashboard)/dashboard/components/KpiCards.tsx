@@ -7,8 +7,8 @@ export default function KpiCards({ data, previousPeriodData, totalUsers }: any) 
   const totalBusiness = data.reduce((s: number, r: any) => s + Number(r.fee_standard || 0), 0);
   const totalEntries = data.length;
 
-  // ✅ FIX: Unique user_id count karo (client_name nahi)
-  // Kyunki client_name = bank name (HDFC, YES BANK) — actual client nahi
+  // FIX: count unique user_id values (not client_name)
+  // Because client_name is the bank name (HDFC, YES BANK), not the actual client
   const uniqueUserIds = new Set(
     data.map((r: any) => r.user_id).filter(Boolean)
   ).size;

@@ -54,3 +54,20 @@ export const EXTRA_LOAD_BUILDING_RADIUS_M = 400;
 export const EMPTY_POINTS: LatLng[] = [];
 export const EMPTY_LANDMARKS: Landmark[] = [];
 export const EMPTY_DIMS: Boundaries = { east: "", west: "", north: "", south: "" };
+
+// Printing: the page asks the maps to repaint at print size (event), waits for the tiles, then opens the print dialog
+export const PRINT_PREPARE_EVENT = "route-map-prepare-print";
+export const PRINT_SETTLE_MS = 800;
+
+// One type scale for the whole sheet: every text on the sheet uses one of these sizes and the same font family
+export const SHEET_FONT_FAMILY = "Arial, Helvetica, sans-serif";
+export const SHEET_FONT = {
+  title: "12pt", // sheet title and coordinates
+  heading: "8.5pt", // field names and their values
+  row: "10pt", // plot area and signature
+  note: "7.5pt", // main road line
+  fine: "5.5pt", // disclaimer
+};
+
+// Map overlay texts in px: boundary texts and the route distance share one size, road names are one step larger
+export const MAP_FONT_PX = { fine: 8, small: 9 };

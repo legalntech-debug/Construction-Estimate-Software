@@ -322,7 +322,15 @@ export default function SystemHealthPanel({
         subtitle="Similar errors are grouped. Resolving an issue reopens it automatically if it happens again."
         actions={
           <>
-            <Segmented value={statusFilter} onChange={setStatusFilter} options={[{ value: 'open', label: 'Open' }, { value: 'resolved', label: 'Resolved' }, { value: 'all', label: 'All' }]} />
+            <Segmented
+              value={statusFilter}
+              onChange={(v) => setStatusFilter(v as 'open' | 'resolved' | 'all')}
+              options={[
+                { value: 'open', label: 'Open' },
+                { value: 'resolved', label: 'Resolved' },
+                { value: 'all', label: 'All' },
+              ]}
+            />
             <select className={inputCls} value={sevFilter} onChange={(e) => setSevFilter(e.target.value as any)} aria-label="Severity filter">
               <option value="all">All severities</option><option value="critical">Critical</option><option value="error">Error</option><option value="warning">Warning</option><option value="info">Info</option>
             </select>

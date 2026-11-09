@@ -70,7 +70,7 @@ export default function WalletOverviewPanel({ recharges, profiles, ledger, ledge
           <p className="text-xs text-slate-500">Money users deposited, how much they have consumed, and how much we are holding for them.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Segmented value={period} onChange={setPeriod} options={[{ value: 'all', label: 'All time' }, { value: 'month', label: 'Month' }]} />
+          <Segmented value={period} onChange={(v) => setPeriod(v as 'all' | 'month')} options={[{ value: 'all', label: 'All time' }, { value: 'month', label: 'Month' }]} />
           {period === 'month' && <input type="month" className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} />}
           <Btn size="sm" onClick={exportCsv}><Download className="h-3.5 w-3.5" /> Export CSV</Btn>
         </div>

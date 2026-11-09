@@ -69,7 +69,7 @@ export default function UserEstimatesModal({ profile, onClose, notify }: Props) 
         </header>
 
         <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center gap-2">
-          <Segmented value={mode} onChange={setMode} options={[{ value: 'all', label: 'All' }, { value: 'date', label: 'Date' }, { value: 'month', label: 'Month' }]} />
+          <Segmented value={mode} onChange={(v) => setMode(v as 'all' | 'date' | 'month')} options={[{ value: 'all', label: 'All' }, { value: 'date', label: 'Date' }, { value: 'month', label: 'Month' }]} />
           {mode === 'date' && <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />}
           {mode === 'month' && <input type="month" className={inputCls} value={month} onChange={(e) => setMonth(e.target.value)} />}
           <div className="ml-auto flex gap-2">

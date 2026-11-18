@@ -8,6 +8,8 @@ export interface FloorDetail {
   builtUpArea: string;
   areaUnit: string; // Sq. Ft., Sq. Mtr., Acre, Hectare
   constructionType: string; // RCC / Load Bearing / Tin Shed / Frame Structure
+  // Area basis used for FLAT deeds: BUILT_UP | SUPER_BUILT_UP | CARPET (defaults to SUPER_BUILT_UP)
+  areaType?: string;
 }
 
 export interface PaymentInstallment {
@@ -52,4 +54,7 @@ export interface DeedFormData {
   boundaryWest: string;
   boundaryNorth: string;
   boundarySouth: string;
+
+  // Reference number of an already-saved record (set when a draft is reopened from the dashboard)
+  refNo?: string;
 }

@@ -11,6 +11,10 @@ interface Section3Props {
 
 export default function Section3PropertyDetails({ formData, setFormData, handleChange }: Section3Props) {
   
+  // For FLAT deeds the land area is not relevant; the area is captured per floor
+  // (Built-up / Super Built-up / Carpet) instead.
+  const isFlat = formData.propertyType?.toUpperCase() === "FLAT";
+
   const isBuiltUpProperty = ["HOUSE", "FLAT", "COMMERCIAL"].includes(formData.propertyType?.toUpperCase());
   
   // Check if deed type is Gift Deed or Release Deed
@@ -21,7 +25,7 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
       ...prev,
       floorsList: [
         ...(prev.floorsList || []),
-        { floorName: "FIRST FLOOR", builtUpArea: "", areaUnit: "Sq. Ft.", constructionType: "RCC Frame Structure" }
+        { floorName: "FIRST FLOOR", builtUpArea: "", areaUnit: "Sq. Ft.", constructionType: "RCC Frame Structure", areaType: "SUPER_BUILT_UP" }
       ]
     }));
   };
@@ -92,7 +96,7 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
 
       {/* Plot Area & Exact Address - Mobile 2 columns, Desktop 4 columns */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-        {!isGiftOrRelease && (
+        {!isGiftOrRelease && !isFlat && (
           <>
             <div>
               <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">TOTAL PLOT / LAND AREA *</label>
@@ -125,7 +129,7 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
         )}
         
         {/* ✅ Exact Property Address with auto-transliteration */}
-        <div className={`col-span-2 ${isGiftOrRelease ? "md:col-span-4" : "md:col-span-2"}`}>
+        <div className={`col-span-2 ${isGiftOrRelease || isFlat ? "md:col-span-4" : "md:col-span-2"}`}>
           <label className="block text-[10px] sm:text-[11px] font-bold text-gray-700 mb-1">EXACT PROPERTY ADDRESS * (Auto-Wrap)</label>
           <TransliterateInput
             type="textarea"
@@ -180,8 +184,8 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
                 )}
               </div>
 
-              {/* Mobile 2 columns, Desktop 4 columns */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {/* Mobile 2 columns, Desktop 4 columns (5 when the area-type selector is shown for FLAT) */}
+              <div className={`grid grid-cols-2 gap-2 ${isFlat ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
                 <div>
                   <label className="block text-[10px] font-bold text-gray-600 mb-1">FLOOR / LEVEL NAME</label>
                   <select 
@@ -214,8 +218,31 @@ export default function Section3PropertyDetails({ formData, setFormData, handleC
                   </select>
                 </div>
 
+                {isFlat && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-600 mb-1">AREA TYPE (क्षेत्रफल प्रकार)</label>
+                    <select
+                      value={floor.areaType || "SUPER_BUILT_UP"}
+                      onChange={(e) => {
+                        const updated = [...formData.floorsList];
+                        updated[index] = { ...updated[index], areaType: e.target.value };
+                        setFormData((prev: any) => ({ ...prev, floorsList: updated }));
+                      }}
+                      className="w-full p-2 border rounded text-xs bg-white font-semibold"
+                    >
+                      <option value="BUILT_UP">Built-up (बिल्ट अप)</option>
+                      <option value="SUPER_BUILT_UP">Super Built-up (सुपर बिल्ट अप)</option>
+                      <option value="CARPET">Carpet (कारपेट)</option>
+                    </select>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-600 mb-1">BUILT-UP AREA</label>
+                  <label className="block text-[10px] font-bold text-gray-600 mb-1">
+                    {isFlat
+                      ? ({ BUILT_UP: "BUILT-UP AREA", SUPER_BUILT_UP: "SUPER BUILT-UP AREA", CARPET: "CARPET AREA" } as Record<string, string>)[floor.areaType || "SUPER_BUILT_UP"]
+                      : "BUILT-UP AREA"}
+                  </label>
                   <input 
                     type="text" 
                     placeholder="e.g. 800" 

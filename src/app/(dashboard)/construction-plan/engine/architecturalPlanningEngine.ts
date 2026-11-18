@@ -11,6 +11,7 @@ import {
   type SectionModel,
 } from './sectionEngine';
 import { generateWallsFromRooms, generateStructuralColumns } from './cad/cadGeometry';
+import { planWingRooms, findWings } from './lWingPlanner';
 import { buildPlotShapeFit, extendRoomsToPolygon, scanInterval, PlotShapeFit, completeQuadSides, quadFromDims, polygonArea, rectForArea, makeRectFit, lShapeFromDims } from './plotShapeFit';
 import { PlotDimensions, PlotShape, FloorRoom, PlanningMode, ParkingMode, VastuAssessment, VastuDirection } from './planningTypes';
 import { toFiniteNumber, cleanFloorName } from './planningInput';
@@ -65,6 +66,10 @@ export interface DynamicFloorRequest {
   userDims?: boolean;
   /** v20: bedroom wali upper floor selected hai? (false => stair sirf ground ke angle se) */
   hasUpperFloor?: boolean;
+  /** v30: L-shape - wing ke door wali core-wall (stair wahan nahi) */
+  avoidStairWalls?: Array<{ wall: 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM'; a: number; b: number }>;
+  /** v30: stair variant force (conflict-ladder) */
+  stairOverride?: any;
 }
 
 export interface GeneratedFloorPlan {
@@ -363,6 +368,8 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
       groundStairRelativeOffset: isGround ? undefined : request.groundStairRelativeOffset,
       groundStairSpec: isGround ? undefined : (request.groundStairSpec ?? request.groundStairPosition?.spec),
       hasUpperFloor: request.hasUpperFloor,
+      avoidStairWalls: isGround ? request.avoidStairWalls : undefined,
+      stairOverride: isGround ? request.stairOverride : undefined,
     }); } finally { setGroundWetStack(null); } })();
     rooms = smart.rooms;
     // v23: upper floor chhoti thi -> planner ne attached toilet hataya / bedroom -> hall/pooja kiya; validation ko bhi wahi program do
@@ -511,7 +518,7 @@ export function generateDynamicFloorPlan(request: DynamicFloorRequest, maxFootpr
   if (requestedW > maxFootprint.width + .01 || requestedL > maxFootprint.length + .01) {
     warnings.push(`Requested ${requestedW.toFixed(2)} × ${requestedL.toFixed(2)} ft exceeds the available buildable footprint and was clamped.`);
   }
-  if (isGround && floorArea > 750 && (opened.filter(r => canonical(r.name || '') === 'ATTACHED TOILET').length !== 1 || opened.filter(r => canonical(r.name || '') === 'COMMON TOILET').length !== 1) && String(request.planningMode || 'AUTO').toUpperCase() === 'AUTO') {
+  if (isGround && floorArea > 750 && !(opened as any[]).some((r: any) => r.isWingRoom) && (opened.filter(r => canonical(r.name || '') === 'ATTACHED TOILET').length < 1 || opened.filter(r => canonical(r.name || '') === 'COMMON TOILET').length !== 1) && String(request.planningMode || 'AUTO').toUpperCase() === 'AUTO') {
     errors.push('Ground AUTO > 750 SQ.FT requires exactly one attached toilet and one common toilet.');
   }
 
@@ -578,6 +585,18 @@ function snapStairToWedge(plan: any, fit: PlotShapeFit): void {
     if (!it) { g = 0; break; }
     g = Math.min(g, side === 'L' ? core.x - it[0] : it[1] - (core.x + core.w));
   }
+  // v29: stair ke samne chadhne / utarne ke liye >= 3 ft khuli jagah (polygon ke andar) - wedge snap ye jagah na khaye
+  const CLEAR = 3.0;
+  if (g >= 0.4 && (e.entryFace === 'BOTTOM' || e.entryFace === 'TOP')) {
+    for (let k = 1; k <= 6; k++) {
+      const y = e.entryFace === 'BOTTOM' ? sy + e.h + (CLEAR * k) / 6 : sy - (CLEAR * k) / 6;
+      const it = scanInterval(fit.inner, y);
+      if (!it) { g = 0; break; }
+      g = Math.min(g, Math.max(0, side === 'L' ? core.x - it[0] : it[1] - (core.x + core.w)));
+    }
+  } else if (g >= 0.4 && ((e.entryFace === 'LEFT' && side === 'L') || (e.entryFace === 'RIGHT' && side === 'R'))) {
+    g = Math.max(0, g - CLEAR);
+  }
   if (!(g >= 0.4)) return;
   g = Math.floor(Math.min(g, 3.5) * 4) / 4;
   const spec: any = e.staircaseSpec;
@@ -595,7 +614,7 @@ function snapStairToWedge(plan: any, fit: PlotShapeFit): void {
   e.snappedToWedge = { side, gapFt: g };
 }
 
-function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, originY: number, avoidService = false): void {
+function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, originY: number, avoidService = false, wingFloor: 'GROUND' | 'UPPER' | null = null): void {
   const dx = fit.core.x, dy = fit.core.y;
   const mv = (o: any) => { if (o && typeof o.x === 'number') { o.x = Number((o.x + dx).toFixed(3)); o.y = Number((o.y + dy).toFixed(3)); } };
   for (const r of plan.rooms as any[]) mv(r);
@@ -614,7 +633,29 @@ function applyShapeFitToPlan(plan: any, fit: PlotShapeFit, originX: number, orig
       r.windows = (r.windows || []).filter((q: any) => q.wall !== w);
     }
   }
-  try { snapStairToWedge(plan, fit); } catch (e) { /* stair snap optional */ }
+  // v29: L-shape - wing me rooms (bedroom / toilet / study / passage); wing ke extension hatao; stair core me hi rahe
+  if (wingFloor) {
+    try {
+      const wr = planWingRooms(plan, fit, wingFloor === 'GROUND');
+      if (wr.wings.length) {
+        const inWing = (x: number, y: number) => wr.wings.some((w) => x >= w.x - 0.3 && x <= w.x + w.w + 0.3 && y >= w.y - 0.3 && y <= w.y + w.h + 0.3);
+        for (const r of plan.rooms as any[]) {
+          if (!Array.isArray(r.extensions)) continue;
+          r.extensions = r.extensions.filter((e: any) => {
+            const pts: any[] = e.points || [];
+            if (!pts.length) return true;
+            const cx = pts.reduce((a, p) => a + p.x, 0) / pts.length, cy = pts.reduce((a, p) => a + p.y, 0) / pts.length;
+            return !inWing(cx, cy);
+          });
+          if (!r.extensions.length) delete r.extensions;
+        }
+        ext.extWalls = (ext.extWalls || []).filter((l: number[]) => !(inWing(l[0], l[1]) && inWing(l[2], l[3])));
+        plan.warnings = [...(plan.warnings || []), `L-shape: wing me ${wr.added.join(', ')} banaye gaye.`];
+      }
+    } catch (e) { console.error('[PLANNING ENGINE] L wing planning failed', e); }
+  } else {
+    try { snapStairToWedge(plan, fit); } catch (e) { /* stair snap optional */ }
+  }
   const polyArea = (p: any[]) => Math.abs(p.reduce((s: number, a: any, i: number) => { const b = p[(i + 1) % p.length]; return s + a.x * b.y - b.x * a.y; }, 0)) / 2;
   plan.area = Number(polyArea(fit.outer).toFixed(2)); plan.outerArea = plan.area;
   plan.buildableArea = Number(polyArea(fit.inner).toFixed(2));
@@ -779,7 +820,17 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       } catch (e) { towerStairPos = null; }
     }
 
-    const plan = generateDynamicFloorPlan({
+    // v30: L-shape ground - wing ke door wali wall par stair na aaye
+    let avoidWalls: Array<{ wall: 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM'; a: number; b: number }> | undefined;
+    if (isGround && lShapeGeo && floorFit && floorFit === shapeFit) {
+      try {
+        avoidWalls = findWings(floorFit).map((w) => {
+          const a = w.u0 - (w.side === 'LEFT' || w.side === 'RIGHT' ? floorFit!.core.y : floorFit!.core.x);
+          return { wall: w.side, a: Number(a.toFixed(2)), b: Number((a + w.uLen).toFixed(2)) };
+        });
+      } catch (e) { avoidWalls = undefined; }
+    }
+    const genPlan = (avoid: typeof avoidWalls, stairOv?: any) => generateDynamicFloorPlan({
       floorName, width, length,
       bhk: floorBhk[floorName] || 'AUTO',
       selectedRooms: floorRoomsInput[floorName] ?? floorRoomsInput[floorName.toUpperCase()],
@@ -793,8 +844,56 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
       groundStairRelativeOffset: isGround ? undefined : (groundStairOffset || undefined),
       groundWetStack: isGround ? undefined : groundWet,
       userDims: !!input.userDims,
+      avoidStairWalls: avoid,
+      stairOverride: stairOv,
       hasUpperFloor: selectedFloors.some(f => !f.includes('GROUND') && !f.includes('BASEMENT') && !f.includes('TOWER') && !f.includes('MUMTY')),
     }, planFootprint);
+
+    let plan = genPlan(avoidWalls);
+    // v30: L-shape ground - koi door stair ke footprint par khule (stair ke neeche / usi par) to alag stair variant (type / side / flip) try karo
+    if (isGround && avoidWalls && avoidWalls.length) {
+      const doorsOnStair = (p: any): number => {
+        const si: any = extractStairPositionFromResult(p);
+        if (!si) return 0;
+        let c = 0;
+        for (const r of (p.rooms || []) as any[]) for (const d of r.doors || []) {
+          const horiz = d.wall === 'TOP' || d.wall === 'BOTTOM';
+          const d0 = (horiz ? r.x : r.y) + (d.offsetFeet || 0), d1 = d0 + (d.widthFeet || 3);
+          const wp = d.wall === 'LEFT' ? r.x : d.wall === 'RIGHT' ? r.x + r.w : d.wall === 'TOP' ? r.y : r.y + r.h;
+          const [s0, s1] = horiz ? [si.x, si.x + si.w] : [si.y, si.y + si.h];
+          const onEdge = horiz ? (Math.abs(wp - si.y) <= 0.3 || Math.abs(wp - (si.y + si.h)) <= 0.3) : (Math.abs(wp - si.x) <= 0.3 || Math.abs(wp - (si.x + si.w)) <= 0.3);
+          if (onEdge && Math.min(d1, s1) - Math.max(d0, s0) > 0.3) c++;
+        }
+        return c;
+      };
+      const onAvoidWall = (p: any): boolean => {
+        const si: any = extractStairPositionFromResult(p);
+        if (!si) return false;
+        const Wc = Number((p as any).clearWidth) || width, Hc = Number((p as any).clearLength) || length;
+        return avoidWalls!.some((aw) => {
+          const abut = aw.wall === 'LEFT' ? si.x <= 0.8 : aw.wall === 'RIGHT' ? si.x + si.w >= Wc - 0.8 : aw.wall === 'TOP' ? si.y <= 0.8 : si.y + si.h >= Hc - 0.8;
+          if (!abut) return false;
+          const s0 = aw.wall === 'LEFT' || aw.wall === 'RIGHT' ? si.y : si.x, s1 = s0 + (aw.wall === 'LEFT' || aw.wall === 'RIGHT' ? si.h : si.w);
+          return Math.min(aw.b, s1) - Math.max(aw.a, s0) > 0.5;
+        });
+      };
+      const errCount = (p: any) => ((p?.validation?.errors || p?.errors || []) as string[]).filter((e) => !/STAIRCASE/.test(String(e))).length;
+      const baseErr = errCount(plan), baseOnStair = doorsOnStair(plan);
+      if (baseOnStair > 0) {
+        const types = ['DOG_LEGGED', '2_QUARTER_LANDING', 'L_SHAPED', '2_QUARTER_WINDER'];
+        let pickA: any = null, pickB: any = null;
+        outer: for (const rotated of [true, false]) for (const type of types) for (const faceFlip of [false, true]) for (const cornerX of [undefined, 'LEFT', 'RIGHT']) {
+          const ov = { rotated, type, faceFlip, cornerX };
+          let p: any; try { p = genPlan(avoidWalls, ov); } catch (e) { continue; }
+          const pErr = errCount(p), pOn = doorsOnStair(p);
+          if (pOn > 0 || pErr > baseErr) continue;
+          if (!onAvoidWall(p)) { pickA = ov; break outer; }
+          if (!pickB) pickB = ov;
+        }
+        const win = pickA || pickB;
+        plan = genPlan(avoidWalls, win || undefined);     // winner LAST - stair cache (upar ki floors / tower) isi ka rahe
+      }
+    }
 
     floors[floorName] = plan;
 
@@ -811,7 +910,7 @@ export function generateCompleteConstructionPlan(payload: any): GeneratedConstru
     }
 
     if (useFit && floorFit) {
-      try { applyShapeFitToPlan(plan as any, floorFit, maxFootprint.originX, maxFootprint.originY, !!lShapeGeo); if (rectNote) (plan as any).warnings = [...((plan as any).warnings || []), rectNote]; }
+      try { applyShapeFitToPlan(plan as any, floorFit, maxFootprint.originX, maxFootprint.originY, !!lShapeGeo, lShapeGeo && floorFit && floorFit === shapeFit ? (isGround ? 'GROUND' : 'UPPER') : null); if (rectNote) (plan as any).warnings = [...((plan as any).warnings || []), rectNote]; }
       catch (e) { console.error('[PLANNING ENGINE] shape fit failed', e); }
     }
 

@@ -212,16 +212,39 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
       <p><b>${plotAddress}</b> में स्थित है | उक्त भूखंड का कुल क्षेत्रफल <b>${plotAreaVal} ${plotUnit}</b> (अर्थात <b>${sqMeters} वर्गमीटर</b>) है सदर भूखंड वर्तमान में रिक्त अवस्था में होकर उस पर किसी भी प्रकार का कोई निर्माण कार्य नहीं किया गया है जिसे इस लेख के माध्यम से विक्रेतापक्ष द्वारा क्रेतापक्ष को विक्रय किया जा रहा है</p>
     `;
   } else if (subType.includes("FLAT") || subType.includes("प्रकोष्ठ")) {
-    const flatNo = formData.flatNumber || formData.propertyAddress || "प्रकोष्ठ क्रमांक 304, शांति सफायर ब्लॉक बी";
-    const floorName = getLocalizedFloorName(formData.flatFloor || "तृतीय मंजिल");
-    const landDetails = formData.landDetails || "भूखंड क्रमांक 55, श्री कृष्ण ऐवेन्यू फेस 3, ग्राम लिम्बोदड़ी, तहसील व जिला इंदौर (म.प्र.)";
-    const superBuiltUp = formData.plotArea || "715";
+    // FLAT: use ONLY the data entered in the form. No hard-coded land/plot details are injected.
+    const flatNo = (formData.propertyAddress || "").toString().trim() || "........";
+
+    const flatFloorEntry = formData.floorsList && formData.floorsList.length > 0 ? formData.floorsList[0] : null;
+    // Strip the English suffix in brackets, e.g. "तृतीय तल (Third Floor)" -> "तृतीय तल"
+    const floorName = flatFloorEntry?.floorName
+      ? getLocalizedFloorName(flatFloorEntry.floorName).replace(/\s*\(.*?\)\s*/g, "").trim()
+      : "........";
+
+    const areaTypeLabelMap: Record<string, string> = {
+      BUILT_UP: "बिल्ट अप",
+      SUPER_BUILT_UP: "सुपर बिल्ट अप",
+      CARPET: "कारपेट",
+    };
+    const areaUnitHindiMap: Record<string, string> = {
+      "SQ. FT.": "वर्गफीट",
+      "SQ. MTR.": "वर्गमीटर",
+      "ACRE": "एकड़",
+      "HECTARE": "हेक्टेयर",
+      "BIGHA": "बीघा",
+    };
+
+    const flatAreaTypeLabel = areaTypeLabelMap[flatFloorEntry?.areaType || "SUPER_BUILT_UP"] || "सुपर बिल्ट अप";
+    const flatAreaValue = (flatFloorEntry?.builtUpArea || "").toString().trim() || "........";
+    const rawFlatUnit = (flatFloorEntry?.areaUnit || "Sq. Ft.").toString();
+    const flatAreaUnit = areaUnitHindiMap[rawFlatUnit.toUpperCase()] || rawFlatUnit;
+    const flatAreaText = `${flatAreaValue} ${flatAreaUnit}`;
 
     propertyDescription = `
-      <p><b>1.</b> यह कि प्रथमपक्ष / विक्रेतापक्ष के एकमात्र स्वामित्व एवं आधिपत्य का यह प्रकोष्ठ/फ्लैट <b>${flatNo}</b>, जो कि <b>${floorName}</b> पर स्थित है तथा जिस भूखंड पर यह निर्मित है वह <b>${landDetails}</b> स्थित है। जिसका सुपर बिल्ट अप एरिया <b>${superBuiltUp} वर्गफीट</b> है। इस प्रकोष्ठ की पार्टीशन वॉल, फर्श व छत सामाहती उपयोग की होकर इस विक्रय पत्र में छत के अधिकार सम्मिलित नहीं हैं। उक्त प्रकोष्ठ पूर्ण निर्मित एवं आवासीय उपयोग का है। उक्त संपूर्ण भवन आवासीय उपयोग का होकर विक्रत प्रकोष्ठ भी आवासीय उपयोग का है। सदर संपत्ति का उपयोग एवं उपभोग विक्रेता पक्ष द्वारा मालिक व स्वामी नाते कर रहे हैं। इस प्रकार सदर संपत्ति को विक्रय करने का विक्रेता पक्ष को पूर्ण वैधानिक अधिकार प्राप्त है।</p>
+      <p><b>1.</b> यह कि प्रथमपक्ष / विक्रेतापक्ष के एकमात्र स्वामित्व एवं आधिपत्य का यह प्रकोष्ठ/फ्लैट <b>${flatNo}</b>, जो कि <b>${floorName}</b> पर स्थित है। जिसका ${flatAreaTypeLabel} एरिया <b>${flatAreaText}</b> है। इस प्रकोष्ठ की पार्टीशन वॉल, फर्श व छत सामाहती उपयोग की होकर इस विक्रय पत्र में छत के अधिकार सम्मिलित नहीं हैं। उक्त प्रकोष्ठ पूर्ण निर्मित एवं आवासीय उपयोग का है। उक्त संपूर्ण भवन आवासीय उपयोग का होकर विक्रत प्रकोष्ठ भी आवासीय उपयोग का है। सदर संपत्ति का उपयोग एवं उपभोग विक्रेता पक्ष द्वारा मालिक व स्वामी नाते कर रहे हैं। इस प्रकार सदर संपत्ति को विक्रय करने का विक्रेता पक्ष को पूर्ण वैधानिक अधिकार प्राप्त है।</p>
       
-      <p style="text-align: center; font-weight: bold; margin-top: 15px;">!! प्रकोष्ठ / भूखंड का वर्णन !!</p>
-      <p>यह प्रकोष्ठ <b>${flatNo}</b>, जो कि <b>${floorName}</b> पर स्थित है तथा भूखंड <b>${landDetails}</b> पर स्थित है। जिसका सुपर बिल्ट अप एरिया <b>${superBuiltUp} वर्गफीट</b> है जिसका यहाँ विक्रय है। इस प्रकोष्ठ की पार्टीशन वॉल, फर्श व छत सामाहती उपयोग की होकर इस विक्रय पत्र में छत के अधिकार सम्मिलित नहीं हैं। उक्त प्रकोष्ठ पूर्ण निर्मित अवस्था में है। उक्त संपूर्ण भवन आवासीय उपयोग का होकर विक्रत प्रकोष्ठ भी आवासीय उपयोग का है।</p>
+      <p style="text-align: center; font-weight: bold; margin-top: 15px;">!! प्रकोष्ठ का वर्णन !!</p>
+      <p>यह प्रकोष्ठ <b>${flatNo}</b>, जो कि <b>${floorName}</b> पर स्थित है। जिसका ${flatAreaTypeLabel} एरिया <b>${flatAreaText}</b> है जिसका यहाँ विक्रय है। इस प्रकोष्ठ की पार्टीशन वॉल, फर्श व छत सामाहती उपयोग की होकर इस विक्रय पत्र में छत के अधिकार सम्मिलित नहीं हैं। उक्त प्रकोष्ठ पूर्ण निर्मित अवस्था में है। उक्त संपूर्ण भवन आवासीय उपयोग का होकर विक्रत प्रकोष्ठ भी आवासीय उपयोग का है।</p>
     `;
   } else if (subType.includes("COMMERCIAL") || subType.includes("SHOP") || subType.includes("दुकान")) {
     propertyDescription = `
@@ -269,10 +292,84 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
 
   // Section 4 fields (Parent Document + Total Consideration): deed me sab CAPITAL me aayega.
   // NOTE: "PARENT DOCUMENT DETAILS" jaisa label deed me nahi likhna hai, wo sirf form me user ko samjhane ke liye hai.
-  const parentDocText = (formData.parentDocument || "").toString().trim().toUpperCase();
-  const parentDocHtml = parentDocText
-    ? `<p>यह कि <b>${parentDocText}${/[।.]$/.test(parentDocText) ? "" : "।"}</b></p>`
-    : "";
+  // Parent document line: user sirf doc no./date dalta hai (e.g. "MP179092022A1259016 दिनांक 11/03/2022").
+  // Deed me ye line SABHI deed types (Sale Deed, Sale Agreement, Co-Ownership, Mortgage, Release, Gift) aur
+  // SABHI property types (Plot/Flat/Shop/House) me aayegi, aur LANGUAGE dropdown ki bhasha me likhi jayegi:
+  // "<doc details> ke madhyam se jo sampatti ... ki ja rahi hai, wo <seller/owner> dwara kray ki gayi thi."
+  const parentDocText = (formData.parentDocument || "")
+    .toString()
+    .trim()
+    .replace(/[।.\s]+$/, "")
+    .toUpperCase();
+
+  const langKey: "HINDI" | "ENGLISH" | "MARATHI" | "GUJARATI" =
+    lang === "ENGLISH" ? "ENGLISH"
+    : lang === "MARATHI" || lang === "मराठी" ? "MARATHI"
+    : lang === "GUJARATI" || lang === "ગુજરાતી" ? "GUJARATI"
+    : "HINDI";
+
+  const deedKind: "SALE" | "AGREEMENT" | "COOWN" | "MORTGAGE" | "RELEASE" | "GIFT" =
+    isSaleAgreement ? "AGREEMENT"
+    : isCoOwnership ? "COOWN"
+    : isMortgage ? "MORTGAGE"
+    : isRelease ? "RELEASE"
+    : isGift ? "GIFT"
+    : "SALE";
+
+  // action = konsi sampatti / kya ho raha hai, owner = parent document ke madhyam se kharidne wala (current seller/owner)
+  const parentDocPhrases: Record<string, Record<string, { action: string; owner: string }>> = {
+    HINDI: {
+      SALE:      { action: "जो संपत्ति विक्रय की जा रही है", owner: "विक्रेता पक्ष" },
+      AGREEMENT: { action: "जिस संपत्ति का विक्रय अनुबंध किया जा रहा है", owner: "विक्रेता पक्ष" },
+      COOWN:     { action: "जिस संपत्ति में सह-स्वामी बनाया जा रहा है", owner: "प्रथमपक्ष" },
+      MORTGAGE:  { action: "जो संपत्ति बंधक (निक्षेप) रखी जा रही है", owner: "ऋणी / बंधककर्ता पक्ष" },
+      RELEASE:   { action: "जिस संपत्ति में हक का त्याग किया जा रहा है", owner: "हकत्यागकर्ता" },
+      GIFT:      { action: "जो संपत्ति दान की जा रही है", owner: "दानदाता" },
+    },
+    MARATHI: {
+      SALE:      { action: "जी मिळकत विक्री केली जात आहे", owner: "विक्रेत्या पक्षाने" },
+      AGREEMENT: { action: "ज्या मिळकतीचा विक्री करार केला जात आहे", owner: "विक्रेत्या पक्षाने" },
+      COOWN:     { action: "ज्या मिळकतीमध्ये सह-मालक केले जात आहे", owner: "पहिल्या पक्षाने" },
+      MORTGAGE:  { action: "जी मिळकत गहाण ठेवली जात आहे", owner: "कर्जदार / गहाणदार पक्षाने" },
+      RELEASE:   { action: "ज्या मिळकतीवरील हक्क सोडला जात आहे", owner: "हक्कत्यागकर्त्याने" },
+      GIFT:      { action: "जी मिळकत दान (बक्षीस) केली जात आहे", owner: "दानदात्याने" },
+    },
+    GUJARATI: {
+      SALE:      { action: "જે મિલકત વેચાણ કરવામાં આવી રહી છે", owner: "વેચનાર પક્ષે" },
+      AGREEMENT: { action: "જે મિલકતનો વેચાણ કરાર કરવામાં આવી રહ્યો છે", owner: "વેચનાર પક્ષે" },
+      COOWN:     { action: "જે મિલકતમાં સહ-માલિક બનાવવામાં આવી રહ્યા છે", owner: "પ્રથમ પક્ષે" },
+      MORTGAGE:  { action: "જે મિલકત ગીરો મૂકવામાં આવી રહી છે", owner: "દેવાદાર / ગીરોકર્તા પક્ષે" },
+      RELEASE:   { action: "જે મિલકતમાંથી હક્ક જતો કરવામાં આવી રહ્યો છે", owner: "હક્કત્યાગકર્તાએ" },
+      GIFT:      { action: "જે મિલકત દાનમાં આપવામાં આવી રહી છે", owner: "દાતાએ" },
+    },
+    ENGLISH: {
+      SALE:      { action: "which is being sold", owner: "Seller" },
+      AGREEMENT: { action: "which is the subject of this Agreement to Sell", owner: "Seller" },
+      COOWN:     { action: "in which co-ownership is being created", owner: "First Party" },
+      MORTGAGE:  { action: "which is being mortgaged", owner: "Mortgagor" },
+      RELEASE:   { action: "in respect of which the rights are being released", owner: "Releasor" },
+      GIFT:      { action: "which is being gifted", owner: "Donor" },
+    },
+  };
+
+  const buildParentDocHtml = (): string => {
+    if (!parentDocText) return "";
+    const p = parentDocPhrases[langKey][deedKind];
+    const doc = `<b>${parentDocText}</b>`;
+    let sentence = "";
+    if (langKey === "HINDI") {
+      sentence = `यह कि ${doc} के माध्यम से ${p.action}, वह संपत्ति ${p.owner} द्वारा क्रय की गई थी।`;
+    } else if (langKey === "MARATHI") {
+      sentence = `हे की ${doc} या दस्तऐवजाद्वारे ${p.action}, ती मिळकत ${p.owner} खरेदी केली होती.`;
+    } else if (langKey === "GUJARATI") {
+      sentence = `આથી કે ${doc} દસ્તાવેજ દ્વારા ${p.action}, તે મિલકત ${p.owner} ખરીદી હતી.`;
+    } else {
+      sentence = `That the property ${p.action} was purchased by the ${p.owner} through the document ${doc}.`;
+    }
+    return `<p>${sentence}</p>`;
+  };
+
+  const parentDocHtml = buildParentDocHtml();
 
   const considerationText = (formData.considerationAmount || "").toString().trim().toUpperCase();
   const considerationIntroHtml = considerationText
@@ -314,6 +411,7 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
         
         <p style="text-align: center; font-weight: bold; margin-top: 20px;">!! संपत्ति का वर्णन एवं विवरण !!</p>
         <p>${propertyDescription}</p>
+        ${parentDocHtml}
 
         <div class="boundaries-box">
           <p style="text-align: center; font-weight: bold; margin-bottom: 12px;">!! सदर संपत्ति की चतुःसीमा निम्नानुसार है !!</p>
@@ -357,6 +455,7 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
         
         <p style="text-align: center; font-weight: bold; margin-top: 20px;">!! संपत्ति का वर्णन एवं विवरण !!</p>
         <p>${propertyDescription}</p>
+        ${parentDocHtml}
 
         <div class="boundaries-box">
           <p style="text-align: center; font-weight: bold; margin-bottom: 12px;">!! सदर संपत्ति की चतुःसीमा निम्नानुसार है !!</p>
@@ -508,6 +607,8 @@ const getLocalizedFloorName = (fName: string, lang: string = "HINDI") => {
 
         <p><b>दान की जा रही संपत्ति का क्षेत्रफल:-</b><br>
         कुल क्षेत्रफल: <b>${formData.plotArea || "........"} ${formData.areaUnit || "वर्गफीट"} (${formData.metricArea || "........"} ${formData.metricUnit || "वर्गमीटर"})</b></p>
+
+        ${parentDocHtml}
 
         <!-- चतुःसीमा -->
         <p><b>चतुर्सीमा :-</b></p>

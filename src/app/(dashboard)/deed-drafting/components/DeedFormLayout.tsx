@@ -46,6 +46,16 @@ const generateReferenceNumber = (userFullName: string, sequenceNumber: number | 
   return `${financialYear}/${firstName}/${formattedSeq}`;
 };
 
+/**
+ * Resolves the numeric area stored in the DB (plot_area column).
+ * FLAT deeds have no plot area, so the first floor's area (built-up / super built-up / carpet) is used instead.
+ */
+const getEffectivePlotArea = (data: any): number | null => {
+  const isFlat = String(data?.propertyType || "").toUpperCase() === "FLAT";
+  const raw = isFlat ? data?.floorsList?.[0]?.builtUpArea : data?.plotArea;
+  return raw && !isNaN(Number(raw)) ? parseFloat(raw) : null;
+};
+
 export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   const router = useRouter();
 
@@ -313,6 +323,9 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
   const handleClearForm = () => {
     if (window.confirm("Are you sure you want to clear all form fields?")) {
       localStorage.removeItem("deedDraftFormBackup");
+      // Forget any reopened record so the next draft is treated as a fresh entry
+      setCurrentRefNo("");
+      setGeneratedDocHtml(null);
       
       setFormData({
         caseType: "Deed Draft",
@@ -637,6 +650,29 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
         const currentBuyerName = formData.buyers?.[0]?.name?.trim() || "";
         const currentAddress = formData.propertyAddress?.trim() || "";
 
+        // A draft reopened from the dashboard carries its ref_no. Update that record in place,
+        // even if the admin/user edited names or address, so no duplicate entry is created.
+        const reopenRefNo: string =
+          currentRefNo || (formData as any).refNo || (formData as any).ref_no || "";
+
+        let refNoRecord: any = null;
+        if (reopenRefNo) {
+          let refQuery = supabase
+            .from('service_records')
+            .select('*')
+            .eq('ref_no', reopenRefNo)
+            .eq('payment_status', 'paid');
+
+          if (userRole !== 'admin') {
+            refQuery = refQuery.eq('user_id', user.id);
+          }
+
+          const { data: refRows, error: refError } = await refQuery.limit(1);
+          if (!refError && refRows && refRows.length > 0) {
+            refNoRecord = refRows[0];
+          }
+        }
+
         let query = supabase
           .from('service_records')
           .select('*')
@@ -646,10 +682,13 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           query = query.eq('user_id', user.id);
         }
 
-        const { data: existingRecords, error: queryError } = await query;
+        // Skip the broad fallback scan when the record was already resolved by ref_no
+        const { data: existingRecords, error: queryError } = refNoRecord
+          ? { data: [refNoRecord], error: null }
+          : await query;
 
         if (!queryError && existingRecords && existingRecords.length > 0) {
-          const matchedRecord = existingRecords.find((record: any) => {
+          const matchedRecord = refNoRecord ? refNoRecord : existingRecords.find((record: any) => {
             if (userRole !== 'admin' && record.user_id !== user.id) return false;
 
             if (record.created_at) {
@@ -676,9 +715,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
 
           if (matchedRecord) {
             try {
-              const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
-                ? parseFloat(formData.plotArea) 
-                : null;
+              const parsedPlotArea = getEffectivePlotArea(formData);
 
               await supabase
                 .from('service_records')
@@ -748,9 +785,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
           setGeneratedDocHtml(adminPrintableHtml);
 
           if (user) {
-            const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
-              ? parseFloat(formData.plotArea) 
-              : null;
+            const parsedPlotArea = getEffectivePlotArea(formData);
 
             await supabase.from('service_records').insert([
               {
@@ -853,9 +888,7 @@ export default function DeedFormLayout({ initialData }: DeedFormLayoutProps) {
             const { data: { user: currentUser } } = await supabase.auth.getUser();
             
             if (currentUser) {
-              const parsedPlotArea = formData.plotArea && !isNaN(Number(formData.plotArea)) 
-                ? parseFloat(formData.plotArea) 
-                : null;
+              const parsedPlotArea = getEffectivePlotArea(formData);
 
               await supabase.from('service_records').insert([
                 {

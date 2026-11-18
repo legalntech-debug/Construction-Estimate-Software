@@ -358,7 +358,7 @@ export function validateConstructionPlan(
     // ============================================================
     const circulationLayout = layout.filter((r) =>
       roomType(r) !== "duct" &&
-      !isSubRoom(r) &&
+      (!isSubRoom(r) || roomType(r) === "passage") &&
       (r as any).parkingZone !== "EXTENSION" &&
       !String(r.name || "").toUpperCase().includes("OPEN TERRACE")
     );

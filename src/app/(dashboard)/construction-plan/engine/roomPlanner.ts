@@ -42,6 +42,10 @@ export interface ArchitecturalPlanRequest {
   floorName: string;
   width: number;
   length: number;
+  /** v30: L-shape - core ki jis wall se wing ka door nikalna hai (a..b = us wall par span, core frame me); stair wahan na rahe */
+  avoidStairWalls?: Array<{ wall: 'LEFT' | 'RIGHT' | 'TOP' | 'BOTTOM'; a: number; b: number }>;
+  /** v30: stair variant zabardasti (engine ka conflict-ladder) - selector bypass */
+  stairOverride?: { rotated?: boolean; type?: StaircaseType; faceFlip?: boolean; cornerX?: 'LEFT' | 'RIGHT' } | null;
   bhk?: string;
   selectedRooms?: any;
   planningMode?: PlanningMode | string;
@@ -112,7 +116,7 @@ function detectMasterWithAttached(selectedRooms: any): boolean {
 // ============================================================
 // ROOM FACTORY
 // ============================================================
-function makeRoom(key: string, index: number, x: number, y: number, w: number, h: number, extras: any = {}): FloorRoom {
+export function makeRoom(key: string, index: number, x: number, y: number, w: number, h: number, extras: any = {}): FloorRoom {
   const roomType = key === 'LIVING ROOM' ? 'living' : key === 'PARKING' ? 'parking' : key === 'STAIRCASE' ? 'stairs' : key === 'DUCT' ? 'duct' : key.includes('TOILET') || key === 'BATHROOM' || key.includes('ATTACHED BATH') ? 'toilet' : key === 'PASSAGE' ? 'passage' : key.toLowerCase().replace(/\s+/g, '-');
 
   const minDim = Math.min(w, h);
@@ -4760,10 +4764,14 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
   if (!isGround && !isTowerReq && !PROGRAM_DEGRADE && !STAIR_OVERRIDE) return generateUpperFloorAdaptive(request);
   // Sirf GROUND par selector chalta hai; upper / tower ground wali stair inherit karte hain.
   if (!isGround || STAIR_OVERRIDE) return generateArchitecturalFloorPlanCore(request);
+  if (request.stairOverride) {
+    STAIR_OVERRIDE = request.stairOverride as StairOverride;
+    try { return generateArchitecturalFloorPlanCore(request); } finally { STAIR_OVERRIDE = null; }
+  }
 
   const W = Math.max(1, n(request.width, 20)), H = Math.max(1, n(request.length, 40));
   const memoKey = JSON.stringify([W, H, request.bhk, request.selectedRooms, request.planningMode, request.hasParking,
-    request.parkingMode, request.floorToFloorHeightFeet, request.planningArea, request.groundFloorProgram, request.hasUpperFloor !== false]);
+    request.parkingMode, request.floorToFloorHeightFeet, request.planningArea, request.groundFloorProgram, request.hasUpperFloor !== false, request.avoidStairWalls]);
 
   const runWith = (ov: StairOverride) => {
     STAIR_OVERRIDE = ov;
@@ -4795,7 +4803,14 @@ export function generateArchitecturalFloorPlan(request: ArchitecturalPlanRequest
             groundStairSpec: pos.spec, groundStairRelativeOffset: pos.relativeOffset || undefined,
           }) : null;
           const ev = evaluateStairVariant(g, u, W, H);
-          const score = ev.score + (v.ov === null ? 20 : 0);   // tie => purana (auto) behaviour
+          let score = ev.score + (v.ov === null ? 20 : 0);   // tie => purana (auto) behaviour
+          // v30: wing ke door wali wall par stair ho to door stair ke neeche padega (headroom nahi) -> variant ko bhaari penalty
+          for (const aw of request.avoidStairWalls || []) {
+            const abut = aw.wall === 'LEFT' ? pos.x <= 0.8 : aw.wall === 'RIGHT' ? pos.x + pos.w >= W - 0.8 : aw.wall === 'TOP' ? pos.y <= 0.8 : pos.y + pos.h >= H - 0.8;
+            if (!abut) continue;
+            const s0 = aw.wall === 'LEFT' || aw.wall === 'RIGHT' ? pos.y : pos.x, s1 = s0 + (aw.wall === 'LEFT' || aw.wall === 'RIGHT' ? pos.h : pos.w);
+            if (Math.min(aw.b, s1) - Math.max(aw.a, s0) > 0.5) { score -= 80; ev.notes.push('stair wing-door wall par'); }
+          }
           table.push({ v: v.label, score: Math.round(score), notes: ev.notes.join('; ') });
           results.push({ v, score });
           if (score > bestScore) { bestScore = score; bestOv = v.ov; }
